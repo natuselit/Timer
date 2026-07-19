@@ -21,6 +21,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     env:
+      TZ: Europe/Kyiv
       VITE_BASE_PATH: /Timer/
     steps:
       - name: Checkout
