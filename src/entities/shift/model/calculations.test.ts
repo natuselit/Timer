@@ -1,0 +1,250 @@
+import { describe, expect, it } from 'vitest';
+import {
+  calculateSalaryBreakdown,
+  calculateShiftTimeBreakdown,
+  getPlannedShiftWindow
+} from './calculations';
+import type { Shift } from './types';
+
+const createShift = (override: Partial<Shift> = {}): Shift => ({
+  id: 'shift-1',
+  date: '2026-06-23',
+  type: 'first',
+  detectionMode: 'auto',
+  plannedStartTime: '06:30',
+  plannedEndTime: '14:30',
+  startTime: '2026-06-23T06:30:00.000+03:00',
+  endTime: '2026-06-23T14:30:00.000+03:00',
+  baseHourlyRateSnapshot: 120,
+  hourlyRateSnapshot: 120,
+  gradeSnapshot: null,
+  workTickets: [],
+  coefficientMode: 'auto',
+  isAutoClosed: false,
+  createdAt: '2026-06-23T06:30:00.000+03:00',
+  updatedAt: '2026-06-23T14:30:00.000+03:00',
+  ...override
+});
+
+describe('getPlannedShiftWindow', () => {
+  it('returns planned first shift start and end by type', () => {
+    expect(
+      getPlannedShiftWindow('2026-06-23', 'first', '2026-06-23T06:32:00.000+03:00')
+    ).toEqual({
+      type: 'first',
+      date: '2026-06-23',
+      startTime: '06:30',
+      endTime: '14:30',
+      plannedStart: '2026-06-23T06:30:00.000+03:00',
+      plannedEnd: '2026-06-23T14:30:00.000+03:00'
+    });
+  });
+
+  it('returns planned second shift start and end by type', () => {
+    expect(
+      getPlannedShiftWindow('2026-06-23', 'second', '2026-06-23T14:29:00.000+03:00')
+    ).toMatchObject({
+      type: 'second',
+      startTime: '14:30',
+      endTime: '22:30',
+      plannedStart: '2026-06-23T14:30:00.000+03:00',
+      plannedEnd: '2026-06-23T22:30:00.000+03:00'
+    });
+  });
+});
+
+describe('calculateShiftTimeBreakdown', () => {
+  it('calculates exact planned shift duration without deviations', () => {
+    expect(calculateShiftTimeBreakdown(createShift())).toMatchObject({
+      actualDurationMinutes: 480,
+      earlyArrivalMinutes: 0,
+      lateArrivalMinutes: 0,
+      earlyExitMinutes: 0,
+      lateExitMinutes: 0,
+      overtimeBeforeShiftMinutes: 0,
+      overtimeAfterShiftMinutes: 0,
+      regularWorkMinutes: 480,
+      totalOvertimeMinutes: 0
+    });
+  });
+
+  it('calculates early arrival and overtime before planned start', () => {
+    expect(
+      calculateShiftTimeBreakdown(
+        createShift({
+          startTime: '2026-06-23T06:15:00.000+03:00'
+        })
+      )
+    ).toMatchObject({
+      actualDurationMinutes: 495,
+      earlyArrivalMinutes: 15,
+      overtimeBeforeShiftMinutes: 15,
+      totalOvertimeMinutes: 15
+    });
+  });
+
+  it('calculates lateness and early exit', () => {
+    expect(
+      calculateShiftTimeBreakdown(
+        createShift({
+          startTime: '2026-06-23T06:45:00.000+03:00',
+          endTime: '2026-06-23T14:20:00.000+03:00'
+        })
+      )
+    ).toMatchObject({
+      actualDurationMinutes: 455,
+      lateArrivalMinutes: 15,
+      earlyExitMinutes: 10,
+      regularWorkMinutes: 455,
+      totalOvertimeMinutes: 0
+    });
+  });
+
+  it('counts one minute of late exit as overtime after planned end', () => {
+    expect(
+      calculateShiftTimeBreakdown(
+        createShift({
+          endTime: '2026-06-23T14:31:00.000+03:00'
+        })
+      )
+    ).toMatchObject({
+      actualDurationMinutes: 481,
+      lateExitMinutes: 1,
+      overtimeAfterShiftMinutes: 1,
+      totalOvertimeMinutes: 1
+    });
+  });
+});
+
+describe('calculateSalaryBreakdown', () => {
+  it('calculates auto salary with regular time x1 and overtime x1.5', () => {
+    const salary = calculateSalaryBreakdown(
+      createShift({
+        startTime: '2026-06-23T06:20:00.000+03:00',
+        endTime: '2026-06-23T14:40:00.000+03:00'
+      })
+    );
+
+    expect(salary).toMatchObject({
+      mode: 'auto',
+      hourlyRate: 120,
+      totalMinutes: 500,
+      totalAmount: 1_020
+    });
+    expect(salary.lines).toEqual([
+      {
+        key: 'regular',
+        label: 'Основний час x1',
+        minutes: 480,
+        coefficient: 1,
+        amount: 960
+      },
+      {
+        key: 'overtime-before',
+        label: 'Перепрацювання до початку x1.5',
+        minutes: 10,
+        coefficient: 1.5,
+        amount: 30
+      },
+      {
+        key: 'overtime-after',
+        label: 'Перепрацювання після кінця x1.5',
+        minutes: 10,
+        coefficient: 1.5,
+        amount: 30
+      }
+    ]);
+  });
+
+  it('applies grade only to regular auto time and keeps overtime on base rate', () => {
+    const salary = calculateSalaryBreakdown(
+      createShift({
+        baseHourlyRateSnapshot: 100,
+        hourlyRateSnapshot: 110,
+        startTime: '2026-06-23T06:20:00.000+03:00',
+        endTime: '2026-06-23T14:40:00.000+03:00'
+      })
+    );
+
+    expect(salary).toMatchObject({
+      mode: 'auto',
+      hourlyRate: 110,
+      totalMinutes: 500,
+      totalAmount: 930
+    });
+    expect(salary.lines).toEqual([
+      {
+        key: 'regular',
+        label: 'Основний час x1',
+        minutes: 480,
+        coefficient: 1,
+        amount: 880
+      },
+      {
+        key: 'overtime-before',
+        label: 'Перепрацювання до початку x1.5',
+        minutes: 10,
+        coefficient: 1.5,
+        amount: 25
+      },
+      {
+        key: 'overtime-after',
+        label: 'Перепрацювання після кінця x1.5',
+        minutes: 10,
+        coefficient: 1.5,
+        amount: 25
+      }
+    ]);
+  });
+
+  it('calculates x1 salary for the whole actual shift', () => {
+    expect(calculateSalaryBreakdown(createShift({ coefficientMode: 'x1' }))).toMatchObject({
+      mode: 'x1',
+      totalMinutes: 480,
+      totalAmount: 960,
+      lines: [
+        {
+          key: 'whole-shift',
+          label: 'Уся зміна x1',
+          minutes: 480,
+          coefficient: 1,
+          amount: 960
+        }
+      ]
+    });
+  });
+
+  it('calculates x1.5 salary for the whole actual shift', () => {
+    expect(calculateSalaryBreakdown(createShift({ coefficientMode: 'x1.5' }))).toMatchObject({
+      mode: 'x1.5',
+      totalMinutes: 480,
+      totalAmount: 1_440,
+      lines: [
+        {
+          key: 'whole-shift',
+          label: 'Уся зміна x1.5',
+          minutes: 480,
+          coefficient: 1.5,
+          amount: 1_440
+        }
+      ]
+    });
+  });
+
+  it('calculates x2 salary for the whole actual shift', () => {
+    expect(calculateSalaryBreakdown(createShift({ coefficientMode: 'x2' }))).toMatchObject({
+      mode: 'x2',
+      totalMinutes: 480,
+      totalAmount: 1_920,
+      lines: [
+        {
+          key: 'whole-shift',
+          label: 'Уся зміна x2',
+          minutes: 480,
+          coefficient: 2,
+          amount: 1_920
+        }
+      ]
+    });
+  });
+});

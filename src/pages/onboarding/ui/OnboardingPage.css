@@ -1,0 +1,114 @@
+.onboarding-page {
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  align-items: start;
+  padding: calc(18px + env(safe-area-inset-top)) 16px calc(18px + env(safe-area-inset-bottom));
+  background:
+    radial-gradient(circle at 50% 0%, var(--color-primary-surface), transparent 34%),
+    var(--color-background);
+}
+
+.onboarding-page__panel {
+  display: grid;
+  width: min(100%, 480px);
+  gap: 22px;
+  margin: 0 auto;
+}
+
+.onboarding-page__header {
+  display: grid;
+  gap: 8px;
+  padding-top: 6px;
+}
+
+.onboarding-page__eyebrow {
+  margin: 0;
+  color: var(--color-primary);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.onboarding-page__header h1 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: clamp(1.65rem, 7vw, 2.15rem);
+  line-height: 1.12;
+  letter-spacing: -0.04em;
+}
+
+.onboarding-page__form {
+  display: grid;
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid var(--color-border);
+  border-radius: 24px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.onboarding-page__field {
+  display: grid;
+  gap: 8px;
+}
+
+.onboarding-page__field span {
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.onboarding-page__field input {
+  width: 100%;
+  min-height: 54px;
+  padding: 14px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 1rem;
+}
+
+.onboarding-page__field input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
+  outline: none;
+}
+
+.onboarding-page__field input[aria-invalid='true'] {
+  border-color: var(--color-error);
+}
+
+.onboarding-page__field small,
+.onboarding-page__submit-error {
+  margin: 0;
+  color: var(--color-error);
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.onboarding-page__submit {
+  min-height: 58px;
+  width: 100%;
+  border: 0;
+  border-radius: 18px;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  cursor: pointer;
+  font-weight: 800;
+  box-shadow: 0 14px 34px var(--color-primary-shadow);
+}
+
+.onboarding-page__submit:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+@media (min-width: 560px) {
+  .onboarding-page {
+    align-items: center;
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+}

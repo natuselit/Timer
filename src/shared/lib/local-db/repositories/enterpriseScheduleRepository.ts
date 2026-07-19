@@ -1,0 +1,50 @@
+import type { EnterpriseScheduleItem } from '../../../../entities/enterprise-schedule';
+import type { LocalDateString } from '../../../../entities/shift';
+import type { ShifterDatabase } from '../database';
+
+const getMonthRange = (
+  year: number,
+  month: number
+): {
+  start: LocalDateString;
+  end: LocalDateString;
+} => {
+  const start = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+  return { start, end };
+};
+
+export class EnterpriseScheduleRepository {
+  constructor(private readonly db: ShifterDatabase) {}
+
+  async importItems(items: EnterpriseScheduleItem[]): Promise<void> {
+    await this.db.transaction('rw', this.db.enterpriseSchedule, async () => {
+      await this.db.enterpriseSchedule.bulkPut(items);
+    });
+  }
+
+  async getItemsByMonth(year: number, month: number): Promise<EnterpriseScheduleItem[]> {
+    const { start, end } = getMonthRange(year, month);
+
+    return this.db.enterpriseSchedule.where('date').between(start, end, true, true).sortBy('date');
+  }
+
+  async getItemsBetween(
+    start: LocalDateString,
+    end: LocalDateString
+  ): Promise<EnterpriseScheduleItem[]> {
+    return this.db.enterpriseSchedule.where('date').between(start, end, true, true).sortBy('date');
+  }
+
+  async getItemById(id: string): Promise<EnterpriseScheduleItem | null> {
+    return (await this.db.enterpriseSchedule.get(id)) ?? null;
+  }
+
+  async updateItem(item: EnterpriseScheduleItem): Promise<EnterpriseScheduleItem> {
+    await this.db.enterpriseSchedule.put(item);
+
+    return item;
+  }
+}

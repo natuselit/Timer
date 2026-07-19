@@ -1,0 +1,154 @@
+:root {
+  --color-primary: #315efb;
+  --color-primary-strong: #2447c8;
+  --color-primary-border: #b8c8ff;
+  --color-primary-border-muted: #d7dfff;
+  --color-primary-surface: #e8edff;
+  --color-primary-soft: #f2f5ff;
+  --color-primary-ring: rgba(49, 94, 251, 0.2);
+  --color-primary-shadow: rgba(49, 94, 251, 0.24);
+  --color-on-primary: #ffffff;
+  --color-success: #2e7d32;
+  --color-success-border: #b7dfba;
+  --color-success-surface: #e8f5e9;
+  --color-on-success: #ffffff;
+  --color-error: #d32f2f;
+  --color-error-strong: #b71c1c;
+  --color-error-border: #ffc7c7;
+  --color-error-surface: #ffebee;
+  --color-on-error: #ffffff;
+  --color-warning: #ed6c02;
+  --color-warning-border: #ffd7a8;
+  --color-warning-surface: #fff4e5;
+  --color-info: #315efb;
+  --color-info-border: #b8c8ff;
+  --color-info-surface: #e8edff;
+  --color-text-primary: #172033;
+  --color-text-secondary: #667085;
+  --color-text-muted: #98a2b3;
+  --color-border: #dbe2ea;
+  --color-background: #eef2f6;
+  --color-surface: #ffffff;
+  --color-disabled: #e8edf3;
+  --color-navigation: rgba(255, 255, 255, 0.9);
+  --color-overlay: rgba(15, 23, 42, 0.58);
+  --color-background-transparent: rgba(238, 242, 246, 0);
+  --shadow-card: 0 8px 24px rgba(23, 32, 51, 0.06);
+  --shadow-panel: 0 16px 44px rgba(23, 32, 51, 0.1);
+  --shadow-modal: 0 28px 90px rgba(15, 23, 42, 0.3);
+  --shadow-hairline: 0 1px 2px rgba(23, 32, 51, 0.05);
+  --shadow-subtle: 0 6px 18px rgba(23, 32, 51, 0.08);
+  --shadow-floating: 0 18px 44px rgba(23, 32, 51, 0.18);
+  --shadow-navigation: 0 12px 36px rgba(23, 32, 51, 0.18);
+  --radius-card: 20px;
+  --radius-panel: 16px;
+  --radius-control: 14px;
+  --radius-compact: 10px;
+
+  color: var(--color-text-primary);
+  background: var(--color-background);
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme='dark'] {
+  --color-primary: #7c9dff;
+  --color-primary-strong: #9ab2ff;
+  --color-primary-border: #3b5394;
+  --color-primary-border-muted: #2d3e68;
+  --color-primary-surface: #1b2850;
+  --color-primary-soft: #151e36;
+  --color-primary-ring: rgba(124, 157, 255, 0.3);
+  --color-primary-shadow: rgba(0, 0, 0, 0.32);
+  --color-on-primary: #07111f;
+  --color-success: #81c784;
+  --color-success-border: #315f37;
+  --color-success-surface: #182a1c;
+  --color-on-success: #102313;
+  --color-error: #ff8a80;
+  --color-error-strong: #e56a62;
+  --color-error-border: #7b3d3d;
+  --color-error-surface: #321b1d;
+  --color-on-error: #2b0806;
+  --color-warning: #ffb74d;
+  --color-warning-border: #765326;
+  --color-warning-surface: #332515;
+  --color-info: #7c9dff;
+  --color-info-border: #3b5394;
+  --color-info-surface: #1b2850;
+  --color-text-primary: #f3f6fb;
+  --color-text-secondary: #a8b3c2;
+  --color-text-muted: #6f7b8b;
+  --color-border: #29323e;
+  --color-background: #0b0f14;
+  --color-surface: #131920;
+  --color-disabled: #202832;
+  --color-navigation: rgba(19, 25, 32, 0.92);
+  --color-overlay: rgba(0, 0, 0, 0.64);
+  --color-background-transparent: rgba(11, 15, 20, 0);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.22);
+  --shadow-panel: 0 18px 46px rgba(0, 0, 0, 0.34);
+  --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.52);
+  --shadow-hairline: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-subtle: 0 5px 14px rgba(0, 0, 0, 0.28);
+  --shadow-floating: 0 16px 36px rgba(0, 0, 0, 0.42);
+  --shadow-navigation: 0 -8px 24px rgba(0, 0, 0, 0.32);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--color-background);
+  overflow-x: hidden;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  background: var(--color-background);
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  touch-action: manipulation;
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--color-primary-ring);
+  outline-offset: 2px;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-status {
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 24px;
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font-weight: 700;
+  text-align: center;
+}

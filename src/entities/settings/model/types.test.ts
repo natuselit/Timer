@@ -1,0 +1,82 @@
+import { describe, expect, it } from 'vitest';
+import {
+  calculateCumulativeGradePercent,
+  calculateEffectiveHourlyRate,
+  calculateGradeProductionTarget,
+  calculateHourlyRateFromMonthlySalary,
+  calculateMonthlySalaryFromHourlyRate,
+  getNextDesiredGrade,
+  countWeekdayWorkdaysInMonth,
+  WORK_HOURS_PER_DAY
+} from './salary';
+import type { Settings } from './types';
+
+describe('settings domain types', () => {
+  it('accepts salary, coefficient, detection and incognito settings', () => {
+    const settings = {
+      employeeFirstName: 'Тарас',
+      employeeLastName: 'Шевченко',
+      monthlySalary: 17_600,
+      monthlyBonus: 2000,
+      currentGrade: 1,
+      desiredGrade: 2,
+      gradeSalaryBonusPercents: [10, 10, 10, 10],
+      gradeNormPercents: [100, 120, 140, 160],
+      forecastDays: 30,
+      arriveHoldDelayMs: 1500,
+      leaveHoldDelayMs: 1500,
+      coefficientMode: 'auto',
+      shiftDetectionMode: 'auto',
+      themePreference: 'system',
+      incognitoEnabled: false,
+      onboardingCompleted: true,
+      updatedAt: '2026-06-23T08:00:00.000+03:00'
+    } satisfies Settings;
+
+    expect(settings.employeeFirstName).toBe('Тарас');
+    expect(settings.employeeLastName).toBe('Шевченко');
+    expect(settings.coefficientMode).toBe('auto');
+    expect(settings.shiftDetectionMode).toBe('auto');
+    expect(settings.themePreference).toBe('system');
+    expect(settings.incognitoEnabled).toBe(false);
+    expect(settings.onboardingCompleted).toBe(true);
+  });
+
+  it('calculates hourly rate from monthly salary for weekday 5/2 schedule', () => {
+    expect(WORK_HOURS_PER_DAY).toBe(8);
+    expect(countWeekdayWorkdaysInMonth(2026, 6)).toBe(22);
+    expect(calculateHourlyRateFromMonthlySalary(17_600, '2026-06-15')).toBe(100);
+  });
+
+  it('calculates monthly salary from old hourly rate for migration', () => {
+    expect(calculateMonthlySalaryFromHourlyRate(100, '2026-06-24')).toBe(17_600);
+  });
+
+  it('calculates cumulative grade salary bonus', () => {
+    expect(calculateCumulativeGradePercent(1, [10, 10, 10, 10])).toBe(10);
+    expect(calculateCumulativeGradePercent(2, [10, 10, 10, 10])).toBe(20);
+    expect(calculateCumulativeGradePercent(3, [10, 10, 10, 10])).toBe(30);
+    expect(calculateCumulativeGradePercent(4, [10, 10, 10, 10])).toBe(40);
+  });
+
+  it('selects the next desired grade for current grade changes', () => {
+    expect(getNextDesiredGrade(1)).toBe(2);
+    expect(getNextDesiredGrade(2)).toBe(3);
+    expect(getNextDesiredGrade(3)).toBe(4);
+    expect(getNextDesiredGrade(4)).toBe(4);
+  });
+
+  it('calculates effective hourly rate from base rate and grade bonus', () => {
+    expect(calculateEffectiveHourlyRate(100, 20)).toBe(120);
+  });
+
+  it('calculates grade production target for elapsed ticket time', () => {
+    expect(
+      calculateGradeProductionTarget({
+        normPerEightHours: 50,
+        gradeNormPercent: 120,
+        elapsedMinutes: 120
+      })
+    ).toBe(15);
+  });
+});

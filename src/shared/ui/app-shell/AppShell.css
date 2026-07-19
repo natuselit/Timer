@@ -1,0 +1,56 @@
+.app-shell {
+  --app-navigation-height: calc(92px + env(safe-area-inset-bottom));
+
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  grid-template-rows: auto 1fr;
+  background: var(--color-background);
+}
+
+.app-shell__header,
+.app-shell__content {
+  width: min(100%, 720px);
+  margin: 0 auto;
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-left: max(16px, env(safe-area-inset-left));
+}
+
+.app-shell__header {
+  padding-top: calc(20px + env(safe-area-inset-top));
+  padding-bottom: 16px;
+}
+
+.app-shell__content {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding-bottom: calc(18px + var(--app-navigation-height));
+}
+
+.app-shell__content--without-header {
+  padding-top: calc(16px + env(safe-area-inset-top));
+}
+
+.app-shell__navigation {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  background: linear-gradient(
+    180deg,
+    var(--color-background-transparent),
+    var(--color-background) 30%
+  );
+  pointer-events: none;
+}
+
+@media (min-width: 768px) {
+  .app-shell__header,
+  .app-shell__content {
+    padding-right: 28px;
+    padding-left: 28px;
+  }
+}
