@@ -14,13 +14,18 @@ import { AnalyticsPage } from '../../analytics';
 import { HistoryPage } from '../../history';
 import { SchedulePage } from '../../schedule';
 import { SettingsPage } from '../../settings';
-import { calculateSalaryBreakdown, type ISODateTimeString, type Shift, type WorkTicket } from '../../../entities/shift';
 import {
-  closeOverdueActiveShift,
+  calculateSalaryBreakdown,
+  type ISODateTimeString,
+  type Shift,
+  type WorkTicket
+} from '../../../entities/shift';
+import {
   addWorkTicketToActiveShift,
   closeShiftWorkTickets,
   createShift,
   deleteWorkTicketFromActiveShift,
+  getActiveShift,
   getLatestCompletedShift,
   localDb,
   ShiftConstraintError,
@@ -29,12 +34,16 @@ import {
   updateShift
 } from '../../../shared/lib/local-db';
 import {
+  combineLocalDateAndTime,
+  formatTimeInputDraft,
   formatDate,
   formatDurationMinutes,
   formatTime,
   getCurrentMonth,
   getDateFromDateTime,
   getDurationMinutes,
+  getTimeInputValue,
+  normalizeTimeInput,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
@@ -62,6 +71,18 @@ type CalendarMonth = {
   month: number;
 };
 
+type TicketEditDraft = {
+  normPerEightHours: string;
+  startedAt: string;
+  endedAt: string;
+};
+
+const createEmptyTicketEditDraft = (): TicketEditDraft => ({
+  normPerEightHours: '',
+  startedAt: '',
+  endedAt: ''
+});
+
 const shiftRepository = new ShiftRepository(localDb);
 
 const getShiftTitle = (shift: Shift): string => (shift.type === 'first' ? '1 зміна' : '2 зміна');
@@ -78,10 +99,6 @@ const getTimerErrorMessage = (error: unknown): string => {
   }
 
   return 'Не вдалося виконати дію. Спробуйте ще раз.';
-};
-
-const prepareAutoCloseNotification = (_shift: Shift): void => {
-  // Місце для майбутнього локального сповіщення після запиту permissions у користувача.
 };
 
 const pageEyebrowById: Record<NavigationItem['id'], string> = {
@@ -106,6 +123,9 @@ const normalizeTicketNormDraft = (value: string): string => {
 
   return digits === '' ? '' : String(Math.min(Number(digits), 999));
 };
+
+const getTicketErrorMessage = (error: unknown): string =>
+  error instanceof Error && error.message ? error.message : 'Не вдалося оновити тікет.';
 
 const getTicketTargets = (
   shift: Shift,
@@ -216,7 +236,9 @@ export function MainPage({
   const [timerError, setTimerError] = useState<string | null>(null);
   const [ticketNormDraft, setTicketNormDraft] = useState('');
   const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
-  const [ticketEditDraft, setTicketEditDraft] = useState('');
+  const [ticketEditDraft, setTicketEditDraft] = useState<TicketEditDraft>(
+    createEmptyTicketEditDraft
+  );
   const [ticketError, setTicketError] = useState<string | null>(null);
   const [isAddingTicket, setIsAddingTicket] = useState(false);
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
@@ -233,22 +255,15 @@ export function MainPage({
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [activePage]);
 
-  const checkActiveShift = useCallback(async (): Promise<Shift | null> => {
-    const shift = await closeOverdueActiveShift(shiftRepository, {
-      now: toLocalIsoString(new Date()),
-      onAutoCloseDue: prepareAutoCloseNotification
-    });
-
-    return shift?.endTime === null ? shift : null;
-  }, []);
-
   useEffect(() => {
     let isMounted = true;
 
     const loadTimerData = async () => {
       try {
-        const shift = await checkActiveShift();
-        const latestShift = await getLatestCompletedShift(shiftRepository);
+        const [shift, latestShift] = await Promise.all([
+          getActiveShift(shiftRepository),
+          getLatestCompletedShift(shiftRepository)
+        ]);
 
         if (isMounted) {
           setActiveShift(shift);
@@ -270,7 +285,7 @@ export function MainPage({
     return () => {
       isMounted = false;
     };
-  }, [checkActiveShift, dataVersion, localDataRefreshKey]);
+  }, [dataVersion, localDataRefreshKey]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -279,22 +294,6 @@ export function MainPage({
 
     return () => window.clearInterval(intervalId);
   }, [activeShift]);
-
-  useEffect(() => {
-    if (!activeShift) {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      checkActiveShift()
-        .then(setActiveShift)
-        .catch(() => {
-          setTimerError('Не вдалося перевірити активну зміну.');
-        });
-    }, 15_000);
-
-    return () => window.clearInterval(intervalId);
-  }, [activeShift, checkActiveShift]);
 
   const activeSalaryBreakdown = useMemo(() => {
     if (!activeShift) {
@@ -463,14 +462,30 @@ export function MainPage({
 
   const startTicketEdit = (ticket: WorkTicket) => {
     setEditingTicketId(ticket.id);
-    setTicketEditDraft(String(ticket.normPerEightHours));
+    setTicketEditDraft({
+      normPerEightHours: String(ticket.normPerEightHours),
+      startedAt: getTimeInputValue(ticket.startedAt),
+      endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : ''
+    });
     setTicketError(null);
   };
 
   const cancelTicketEdit = () => {
     setEditingTicketId(null);
-    setTicketEditDraft('');
+    setTicketEditDraft(createEmptyTicketEditDraft());
     setTicketError(null);
+  };
+
+  const changeTicketEditDraft = (key: keyof TicketEditDraft, value: string) => {
+    setTicketEditDraft((current) => ({ ...current, [key]: value }));
+    setTicketError(null);
+  };
+
+  const completeTicketTimeDraft = (key: 'startedAt' | 'endedAt') => {
+    setTicketEditDraft((current) => ({
+      ...current,
+      [key]: current[key].trim() ? normalizeTimeInput(current[key]) : ''
+    }));
   };
 
   const saveTicketEdit = async (ticketId: string) => {
@@ -478,13 +493,25 @@ export function MainPage({
       return;
     }
 
-    const normPerEightHours = parseTicketNormDraft(ticketEditDraft);
+    const normPerEightHours = parseTicketNormDraft(ticketEditDraft.normPerEightHours);
 
     if (normPerEightHours === null) {
       return;
     }
 
+    if (!ticketEditDraft.startedAt.trim()) {
+      setTicketError('Вкажіть час взяття тікета.');
+      return;
+    }
+
     const updatedAt = toLocalIsoString(new Date());
+    const startedAt = combineLocalDateAndTime(
+      activeShift.date,
+      normalizeTimeInput(ticketEditDraft.startedAt)
+    );
+    const endedAt = ticketEditDraft.endedAt.trim()
+      ? combineLocalDateAndTime(activeShift.date, normalizeTimeInput(ticketEditDraft.endedAt))
+      : null;
     setPendingTicketId(ticketId);
     setTicketError(null);
 
@@ -493,16 +520,18 @@ export function MainPage({
         shiftId: activeShift.id,
         ticketId,
         normPerEightHours,
+        startedAt,
+        endedAt,
         updatedAt
       });
 
       setNow(updatedAt);
       setActiveShift(updatedShift);
       setEditingTicketId(null);
-      setTicketEditDraft('');
+      setTicketEditDraft(createEmptyTicketEditDraft());
       notifyLocalDataChange();
-    } catch {
-      setTicketError('Не вдалося оновити тікет.');
+    } catch (error) {
+      setTicketError(getTicketErrorMessage(error));
     } finally {
       setPendingTicketId(null);
     }
@@ -533,7 +562,7 @@ export function MainPage({
 
       if (editingTicketId === ticket.id) {
         setEditingTicketId(null);
-        setTicketEditDraft('');
+        setTicketEditDraft(createEmptyTicketEditDraft());
       }
 
       notifyLocalDataChange();
@@ -737,11 +766,45 @@ export function MainPage({
                               inputMode="numeric"
                               maxLength={3}
                               pattern="[0-9]*"
-                              value={ticketEditDraft}
+                              value={ticketEditDraft.normPerEightHours}
                               onChange={(event) => {
-                                setTicketEditDraft(normalizeTicketNormDraft(event.target.value));
-                                setTicketError(null);
+                                changeTicketEditDraft(
+                                  'normPerEightHours',
+                                  normalizeTicketNormDraft(event.target.value)
+                                );
                               }}
+                            />
+                          </label>
+                          <label>
+                            <span>Взято</span>
+                            <input
+                              inputMode="numeric"
+                              maxLength={5}
+                              placeholder="06:30"
+                              value={ticketEditDraft.startedAt}
+                              onBlur={() => completeTicketTimeDraft('startedAt')}
+                              onChange={(event) =>
+                                changeTicketEditDraft(
+                                  'startedAt',
+                                  formatTimeInputDraft(event.target.value)
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>Завершено</span>
+                            <input
+                              inputMode="numeric"
+                              maxLength={5}
+                              placeholder="Триває"
+                              value={ticketEditDraft.endedAt}
+                              onBlur={() => completeTicketTimeDraft('endedAt')}
+                              onChange={(event) =>
+                                changeTicketEditDraft(
+                                  'endedAt',
+                                  formatTimeInputDraft(event.target.value)
+                                )
+                              }
                             />
                           </label>
                           <button
@@ -797,9 +860,6 @@ export function MainPage({
                           >
                             {isEditingTicket ? (
                               <>
-                                <span className="main-page__ticket-history-time">
-                                  {formatTime(ticket.startedAt)}-{formatTime(ticket.endedAt)}
-                                </span>
                                 <div className="main-page__ticket-edit-form">
                                   <label>
                                     <span>Норма</span>
@@ -807,11 +867,43 @@ export function MainPage({
                                       inputMode="numeric"
                                       maxLength={3}
                                       pattern="[0-9]*"
-                                      value={ticketEditDraft}
+                                      value={ticketEditDraft.normPerEightHours}
                                       onChange={(event) => {
-                                        setTicketEditDraft(normalizeTicketNormDraft(event.target.value));
-                                        setTicketError(null);
+                                        changeTicketEditDraft(
+                                          'normPerEightHours',
+                                          normalizeTicketNormDraft(event.target.value)
+                                        );
                                       }}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>Взято</span>
+                                    <input
+                                      inputMode="numeric"
+                                      maxLength={5}
+                                      value={ticketEditDraft.startedAt}
+                                      onBlur={() => completeTicketTimeDraft('startedAt')}
+                                      onChange={(event) =>
+                                        changeTicketEditDraft(
+                                          'startedAt',
+                                          formatTimeInputDraft(event.target.value)
+                                        )
+                                      }
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>Завершено</span>
+                                    <input
+                                      inputMode="numeric"
+                                      maxLength={5}
+                                      value={ticketEditDraft.endedAt}
+                                      onBlur={() => completeTicketTimeDraft('endedAt')}
+                                      onChange={(event) =>
+                                        changeTicketEditDraft(
+                                          'endedAt',
+                                          formatTimeInputDraft(event.target.value)
+                                        )
+                                      }
                                     />
                                   </label>
                                   <button

@@ -541,7 +541,7 @@
 .history-page__ticket-meta {
   display: flex;
   min-width: 0;
-  align-items: center;
+  align-items: end;
   gap: 9px;
 }
 
@@ -559,26 +559,25 @@
   line-height: 1;
 }
 
-.history-page__ticket-time {
-  display: flex;
+.history-page__ticket-time-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   min-width: 0;
-  align-items: center;
-  gap: 5px;
-  color: var(--color-text-primary);
+  flex: 1 1 auto;
+  gap: 6px;
+}
+
+.history-page__ticket-time-fields label {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.history-page__editor .history-page__ticket-time-fields input {
+  min-width: 0;
+  min-height: 40px;
+  padding-inline: 6px;
   font-size: 0.9rem;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.history-page__ticket-time strong {
-  font-weight: 850;
-}
-
-.history-page__ticket-time > span {
-  color: var(--color-text-muted);
-  font-size: 0.78rem;
-  font-weight: 800;
 }
 
 .history-page__ticket-norm {

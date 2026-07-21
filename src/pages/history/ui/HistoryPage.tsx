@@ -2,13 +2,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Edit3, Plus, Tickets, Trash2, X } from 'lucide-react';
 import type {
   CoefficientMode,
+  ISODateTimeString,
   LocalDateString,
   LocalTimeString,
   Shift,
   ShiftType,
   WorkTicket
 } from '../../../entities/shift';
-import { COEFFICIENT_MODES, getPlannedShiftWindow } from '../../../entities/shift';
+import {
+  COEFFICIENT_MODES,
+  getPlannedShiftWindow,
+  validateAndSortWorkTickets
+} from '../../../entities/shift';
 import {
   calculateHourlyRateFromMonthlySalary,
   calculateEffectiveHourlyRate,
@@ -33,14 +38,16 @@ import {
   formatDate,
   formatDurationClock,
   formatDurationMinutes,
+  formatTimeInputDraft,
   formatTime,
   getDurationMinutes,
+  getTimeInputValue,
+  normalizeTimeInput,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { INCOGNITO_FINANCIAL_MASK, formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import { calculateSalaryBreakdown } from '../../../entities/shift';
 import { calculateMonthShiftSummary } from '../../../shared/lib/shifts/monthSummary';
-import { formatTimeInputDraft, normalizeTimeInput } from '../model/timeMask';
 import './HistoryPage.css';
 
 type HistoryPageProps = {
@@ -69,9 +76,16 @@ type ShiftFormValues = {
   workTickets: TicketFormValue[];
 };
 
-type TicketFormValue = Omit<WorkTicket, 'normPerEightHours'> & {
+type TicketFormValue = Omit<
+  WorkTicket,
+  'normPerEightHours' | 'startedAt' | 'endedAt'
+> & {
   normPerEightHours: string;
+  startedAt: string;
+  endedAt: string;
   originalNormPerEightHours: number;
+  originalStartedAt: ISODateTimeString;
+  originalEndedAt: ISODateTimeString | null;
 };
 
 type EditorState =
@@ -100,8 +114,6 @@ const coefficientLabels: Record<CoefficientMode, string> = {
   x2: 'x2'
 };
 
-const getTimeInputValue = (dateTime: string): LocalTimeString => dateTime.slice(11, 16);
-
 const getMonthlySalaryInputValue = (value: number): string => String(Math.floor(value));
 
 const formatCoefficientLabel = (coefficient: number): string => `x${coefficient}`;
@@ -114,9 +126,15 @@ const normalizeTicketNormDraft = (value: string): string => {
 
 const toTicketFormValues = (workTickets: WorkTicket[]): TicketFormValue[] =>
   workTickets.map((ticket) => ({
-    ...ticket,
+    id: ticket.id,
     normPerEightHours: String(ticket.normPerEightHours),
-    originalNormPerEightHours: ticket.normPerEightHours
+    startedAt: getTimeInputValue(ticket.startedAt),
+    endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : '',
+    createdAt: ticket.createdAt,
+    updatedAt: ticket.updatedAt,
+    originalNormPerEightHours: ticket.normPerEightHours,
+    originalStartedAt: ticket.startedAt,
+    originalEndedAt: ticket.endedAt
   }));
 
 const parseTicketNormValue = (value: string): number => {
@@ -135,21 +153,48 @@ const parseTicketNormValue = (value: string): number => {
 
 const createWorkTicketsFromFormValues = (
   tickets: TicketFormValue[],
-  updatedAt: string
-): WorkTicket[] =>
-  tickets.map((ticket) => {
+  date: LocalDateString,
+  shiftStartTime: ISODateTimeString,
+  shiftEndTime: ISODateTimeString | null,
+  updatedAt: ISODateTimeString
+): WorkTicket[] => {
+  const workTickets = tickets.map((ticket) => {
     const normPerEightHours = parseTicketNormValue(ticket.normPerEightHours);
-    const didChangeNorm = normPerEightHours !== ticket.originalNormPerEightHours;
+
+    if (!ticket.startedAt.trim()) {
+      throw new Error('Вкажіть час взяття тікета.');
+    }
+
+    const startedAt = combineLocalDateAndTime(date, normalizeTimeInput(ticket.startedAt));
+    const endedAt = ticket.endedAt.trim()
+      ? combineLocalDateAndTime(date, normalizeTimeInput(ticket.endedAt))
+      : null;
+
+    if (ticket.originalEndedAt !== null && endedAt === null) {
+      throw new Error('Завершений тікет не можна знову зробити активним.');
+    }
+
+    const didChange =
+      normPerEightHours !== ticket.originalNormPerEightHours ||
+      startedAt !== ticket.originalStartedAt ||
+      endedAt !== ticket.originalEndedAt;
 
     return {
       id: ticket.id,
       normPerEightHours,
-      startedAt: ticket.startedAt,
-      endedAt: ticket.endedAt,
+      startedAt,
+      endedAt,
       createdAt: ticket.createdAt,
-      updatedAt: didChangeNorm ? updatedAt : ticket.updatedAt
+      updatedAt: didChange ? updatedAt : ticket.updatedAt
     };
   });
+
+  return validateAndSortWorkTickets(workTickets, {
+    shiftStartTime,
+    effectiveShiftEndTime: shiftEndTime ?? updatedAt,
+    allowOpenTicket: shiftEndTime === null
+  });
+};
 
 const getCoefficientEarnings = (
   lines: ReturnType<typeof calculateSalaryBreakdown>['lines']
@@ -523,6 +568,52 @@ export function HistoryPage({
     );
   };
 
+  const changeEditorTicketTime = (
+    ticketId: string,
+    key: 'startedAt' | 'endedAt',
+    value: string
+  ) => {
+    setEditor((current) =>
+      current?.mode === 'edit'
+        ? {
+            ...current,
+            values: {
+              ...current.values,
+              workTickets: current.values.workTickets.map((ticket) =>
+                ticket.id === ticketId
+                  ? {
+                      ...ticket,
+                      [key]: formatTimeInputDraft(value)
+                    }
+                  : ticket
+              )
+            }
+          }
+        : current
+    );
+  };
+
+  const completeEditorTicketTime = (ticketId: string, key: 'startedAt' | 'endedAt') => {
+    setEditor((current) =>
+      current?.mode === 'edit'
+        ? {
+            ...current,
+            values: {
+              ...current.values,
+              workTickets: current.values.workTickets.map((ticket) =>
+                ticket.id === ticketId
+                  ? {
+                      ...ticket,
+                      [key]: ticket[key].trim() ? normalizeTimeInput(ticket[key]) : ''
+                    }
+                  : ticket
+              )
+            }
+          }
+        : current
+    );
+  };
+
   const removeEditorTicket = (ticketId: string) => {
     if (!window.confirm('Прибрати цей тікет зі зміни? Зміни застосуються після збереження.')) {
       return;
@@ -557,7 +648,9 @@ export function HistoryPage({
         endTime: isEditingActiveShift ? editor.values.endTime : normalizeTimeInput(editor.values.endTime),
         workTickets: editor.values.workTickets.map((ticket) => ({
           ...ticket,
-          normPerEightHours: normalizeTicketNormDraft(ticket.normPerEightHours)
+          normPerEightHours: normalizeTicketNormDraft(ticket.normPerEightHours),
+          startedAt: ticket.startedAt.trim() ? normalizeTimeInput(ticket.startedAt) : '',
+          endedAt: ticket.endedAt.trim() ? normalizeTimeInput(ticket.endedAt) : ''
         }))
       };
       const startTime = combineLocalDateAndTime(normalizedValues.date, normalizedValues.startTime);
@@ -601,7 +694,13 @@ export function HistoryPage({
         editedBaseHourlyRateSnapshot,
         editedGradeSnapshot.cumulativeSalaryBonusPercent
       );
-      const workTickets = createWorkTicketsFromFormValues(normalizedValues.workTickets, savedAt);
+      const workTickets = createWorkTicketsFromFormValues(
+        normalizedValues.workTickets,
+        normalizedValues.date,
+        startTime,
+        endTime,
+        savedAt
+      );
 
       if (editor.mode === 'create') {
         await createManualShift(shiftRepository, {
@@ -979,18 +1078,50 @@ export function HistoryPage({
                             <span className="history-page__ticket-index" aria-hidden="true">
                               {String(index + 1).padStart(2, '0')}
                             </span>
-                            <span
-                              className="history-page__ticket-time"
-                              aria-label={`Час тікета: ${formatTime(ticket.startedAt)} — ${
-                                ticket.endedAt ? formatTime(ticket.endedAt) : 'триває'
-                              }`}
-                            >
-                              <strong>{formatTime(ticket.startedAt)}</strong>
-                              <span aria-hidden="true">→</span>
-                              <strong>
-                                {ticket.endedAt ? formatTime(ticket.endedAt) : 'триває'}
-                              </strong>
-                            </span>
+                            <div className="history-page__ticket-time-fields">
+                              <label>
+                                <span>Взято</span>
+                                <input
+                                  className="history-page__time-input"
+                                  type="text"
+                                  inputMode="numeric"
+                                  autoComplete="off"
+                                  maxLength={5}
+                                  placeholder="00:00"
+                                  value={ticket.startedAt}
+                                  onBlur={() =>
+                                    completeEditorTicketTime(ticket.id, 'startedAt')
+                                  }
+                                  onChange={(event) =>
+                                    changeEditorTicketTime(
+                                      ticket.id,
+                                      'startedAt',
+                                      event.target.value
+                                    )
+                                  }
+                                />
+                              </label>
+                              <label>
+                                <span>Завершено</span>
+                                <input
+                                  className="history-page__time-input"
+                                  type="text"
+                                  inputMode="numeric"
+                                  autoComplete="off"
+                                  maxLength={5}
+                                  placeholder="Триває"
+                                  value={ticket.endedAt}
+                                  onBlur={() => completeEditorTicketTime(ticket.id, 'endedAt')}
+                                  onChange={(event) =>
+                                    changeEditorTicketTime(
+                                      ticket.id,
+                                      'endedAt',
+                                      event.target.value
+                                    )
+                                  }
+                                />
+                              </label>
+                            </div>
                           </div>
                           <label className="history-page__ticket-norm">
                             <span>Норма</span>
@@ -1011,7 +1142,7 @@ export function HistoryPage({
                           <button
                             className="history-page__action-button history-page__action-button--danger history-page__ticket-delete-button"
                             type="button"
-                            aria-label={`Видалити тікет ${formatTime(ticket.startedAt)}`}
+                            aria-label={`Видалити тікет ${ticket.startedAt}`}
                             title="Видалити тікет"
                             disabled={isSaving}
                             onClick={() => removeEditorTicket(ticket.id)}
@@ -1027,6 +1158,12 @@ export function HistoryPage({
                 </section>
               ) : null}
             </div>
+
+            {error ? (
+              <p className="history-page__error" role="alert">
+                {error}
+              </p>
+            ) : null}
 
             <div className="history-page__editor-actions">
               <button type="button" disabled={isSaving} onClick={() => setEditor(null)}>

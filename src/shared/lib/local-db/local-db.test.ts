@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import {
   calculateEnterpriseScheduleComparison,
@@ -15,7 +15,6 @@ import {
   BACKUP_SCHEMA_VERSION,
   addWorkTicketToActiveShift,
   createBackup,
-  closeOverdueActiveShift,
   createManualShift,
   createShift,
   deleteWorkTicketFromActiveShift,
@@ -251,7 +250,7 @@ describe('demo data use-cases', () => {
     ).toBe(true);
     expect(shifts.some((shift) => shift.coefficientMode === 'x1.5')).toBe(true);
     expect(shifts.some((shift) => shift.coefficientMode === 'x2')).toBe(true);
-    expect(shifts.some((shift) => shift.isAutoClosed)).toBe(true);
+    expect(shifts.every((shift) => !shift.isAutoClosed)).toBe(true);
     expect(calculateEnterpriseScheduleComparison(schedule, shifts).discrepancies.length).toBeGreaterThan(0);
     await expect(shiftRepository.getShiftById('old-shift')).resolves.toBeNull();
     await expect(enterpriseScheduleRepository.getItemById('old-schedule')).resolves.toBeNull();
@@ -362,6 +361,8 @@ describe('shift repository use-cases', () => {
       shiftId: shift.id,
       ticketId: 'editable-ticket',
       normPerEightHours: 75,
+      startedAt: '2026-06-10T06:45:00.000Z',
+      endedAt: null,
       updatedAt: '2026-06-10T07:30:00.000Z'
     });
 
@@ -369,11 +370,91 @@ describe('shift repository use-cases', () => {
       expect.objectContaining({
         id: 'editable-ticket',
         normPerEightHours: 75,
-        startedAt: '2026-06-10T07:00:00.000Z',
+        startedAt: '2026-06-10T06:45:00.000Z',
         endedAt: null,
         updatedAt: '2026-06-10T07:30:00.000Z'
       })
     ]);
+  });
+
+  it('manually finishes an active ticket and keeps the shift active', async () => {
+    const shift = await createShift(shiftRepository, {
+      id: 'finish-ticket-shift',
+      startTime: '2026-06-10T06:30:00.000Z',
+      hourlyRateSnapshot: 120,
+      now: '2026-06-10T06:30:00.000Z'
+    });
+    await addWorkTicketToActiveShift(shiftRepository, {
+      shiftId: shift.id,
+      id: 'finished-ticket',
+      normPerEightHours: 50,
+      startedAt: '2026-06-10T07:00:00.000Z'
+    });
+
+    const updatedShift = await updateWorkTicketInActiveShift(shiftRepository, {
+      shiftId: shift.id,
+      ticketId: 'finished-ticket',
+      normPerEightHours: 50,
+      startedAt: '2026-06-10T07:05:00.000Z',
+      endedAt: '2026-06-10T08:15:00.000Z',
+      updatedAt: '2026-06-10T09:00:00.000Z'
+    });
+
+    expect(updatedShift).toMatchObject({
+      id: shift.id,
+      endTime: null,
+      workTickets: [
+        expect.objectContaining({
+          id: 'finished-ticket',
+          startedAt: '2026-06-10T07:05:00.000Z',
+          endedAt: '2026-06-10T08:15:00.000Z'
+        })
+      ]
+    });
+    await expect(getActiveShift(shiftRepository)).resolves.toEqual(updatedShift);
+  });
+
+  it('rejects overlapping ticket edits and reopening a completed ticket', async () => {
+    const shift = await createShift(shiftRepository, {
+      id: 'invalid-ticket-edit-shift',
+      startTime: '2026-06-10T06:30:00.000Z',
+      hourlyRateSnapshot: 120,
+      now: '2026-06-10T06:30:00.000Z'
+    });
+    await addWorkTicketToActiveShift(shiftRepository, {
+      shiftId: shift.id,
+      id: 'ticket-1',
+      normPerEightHours: 50,
+      startedAt: '2026-06-10T07:00:00.000Z'
+    });
+    await addWorkTicketToActiveShift(shiftRepository, {
+      shiftId: shift.id,
+      id: 'ticket-2',
+      normPerEightHours: 40,
+      startedAt: '2026-06-10T09:00:00.000Z'
+    });
+
+    await expect(
+      updateWorkTicketInActiveShift(shiftRepository, {
+        shiftId: shift.id,
+        ticketId: 'ticket-1',
+        normPerEightHours: 50,
+        startedAt: '2026-06-10T07:00:00.000Z',
+        endedAt: '2026-06-10T09:30:00.000Z',
+        updatedAt: '2026-06-10T10:00:00.000Z'
+      })
+    ).rejects.toThrow('Час тікетів не може накладатися.');
+
+    await expect(
+      updateWorkTicketInActiveShift(shiftRepository, {
+        shiftId: shift.id,
+        ticketId: 'ticket-1',
+        normPerEightHours: 50,
+        startedAt: '2026-06-10T07:00:00.000Z',
+        endedAt: null,
+        updatedAt: '2026-06-10T10:00:00.000Z'
+      })
+    ).rejects.toThrow('Завершений тікет не можна знову зробити активним.');
   });
 
   it('deletes a work ticket from an active shift', async () => {
@@ -561,45 +642,17 @@ describe('shift repository use-cases', () => {
     ).rejects.toBeInstanceOf(ShiftConstraintError);
   });
 
-  it('keeps an active shift open before the auto-close deadline', async () => {
+  it('keeps an overdue active shift open after repeated reads', async () => {
     const activeShift = makeShift({
-      id: 'active-before-deadline',
-      startTime: '2026-06-10T06:30:00.000Z'
+      id: 'active-overdue',
+      startTime: '2026-06-10T06:35:00.000Z',
+      updatedAt: '2026-06-10T06:35:00.000Z'
     });
 
     await shiftRepository.createShift(activeShift);
 
-    await expect(
-      closeOverdueActiveShift(shiftRepository, {
-        now: '2026-06-10T15:29:00.000Z'
-      })
-    ).resolves.toEqual(activeShift);
     await expect(getActiveShift(shiftRepository)).resolves.toEqual(activeShift);
-  });
-
-  it('auto-closes an overdue active shift with the planned end time', async () => {
-    await shiftRepository.createShift(
-      makeShift({
-        id: 'active-overdue',
-        startTime: '2026-06-10T06:35:00.000Z',
-        updatedAt: '2026-06-10T06:35:00.000Z'
-      })
-    );
-
-    const onAutoCloseDue = vi.fn();
-    const closedShift = await closeOverdueActiveShift(shiftRepository, {
-      now: '2026-06-10T15:30:00.000Z',
-      onAutoCloseDue
-    });
-
-    expect(closedShift).toMatchObject({
-      id: 'active-overdue',
-      endTime: '2026-06-10T14:30:00.000Z',
-      isAutoClosed: true,
-      updatedAt: '2026-06-10T15:30:00.000Z'
-    });
-    expect(onAutoCloseDue).toHaveBeenCalledWith(expect.objectContaining({ id: 'active-overdue' }));
-    await expect(getActiveShift(shiftRepository)).resolves.toBeNull();
+    await expect(getActiveShift(shiftRepository)).resolves.toEqual(activeShift);
   });
 
   it('returns shifts for the requested month sorted by date', async () => {

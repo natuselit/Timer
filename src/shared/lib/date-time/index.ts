@@ -1,5 +1,7 @@
 import type { ISODateTimeString, LocalDateString, LocalTimeString } from '../../../entities/shift';
 
+export * from './timeInput';
+
 export const padTimePart = (value: number): string => String(value).padStart(2, '0');
 
 export const getTimeZoneSuffix = (date: Date): string => {

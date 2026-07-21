@@ -468,7 +468,7 @@
 .main-page__ticket-edit-form {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(86px, 1fr) 30px 30px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) 30px 30px;
   width: 100%;
   min-width: 0;
   gap: 6px;
@@ -498,6 +498,7 @@
   color: var(--color-text-primary);
   font: inherit;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .main-page__ticket-history {
@@ -694,5 +695,15 @@
 
   .main-page__ticket-form {
     grid-template-columns: 76px minmax(0, 1fr);
+  }
+
+  .main-page__ticket-edit-form {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 28px 28px;
+    gap: 4px;
+  }
+
+  .main-page__ticket-edit-form input {
+    padding-inline: 3px;
+    font-size: 0.78rem;
   }
 }

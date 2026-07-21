@@ -191,10 +191,7 @@ export const createDemoDataSet = (
       date,
       settings
     );
-    const isAutoClosed = index > 0 && index % 19 === 0;
-    const endTime = isAutoClosed
-      ? addMinutesToLocalTime(date, planned.end, 0)
-      : actualEnd;
+    const endTime = actualEnd;
 
     shifts.push({
       id: `demo-shift-${date}`,
@@ -210,7 +207,7 @@ export const createDemoDataSet = (
       gradeSnapshot: createGradeSnapshot(settings),
       workTickets: createTickets(date, index, type, updatedAt),
       coefficientMode: getCoefficientMode(index),
-      isAutoClosed,
+      isAutoClosed: false,
       createdAt: updatedAt,
       updatedAt: endTime
     });

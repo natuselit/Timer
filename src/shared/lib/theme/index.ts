@@ -52,10 +52,15 @@ export const applyTheme = (
   const theme = resolveTheme(preference, systemPrefersDark);
   const root = document.documentElement;
   const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  const statusBarStyle = document.querySelector<HTMLMetaElement>(
+    'meta[name="apple-mobile-web-app-status-bar-style"]'
+  );
 
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
+  root.style.backgroundColor = THEME_COLORS[theme];
   themeColor?.setAttribute('content', THEME_COLORS[theme]);
+  statusBarStyle?.setAttribute('content', theme === 'dark' ? 'black' : 'default');
 
   return theme;
 };

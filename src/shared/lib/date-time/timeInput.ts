@@ -1,4 +1,4 @@
-import type { LocalTimeString } from '../../../entities/shift';
+import type { ISODateTimeString, LocalTimeString } from '../../../entities/shift';
 
 const MAX_HOURS = 23;
 const MAX_MINUTES = 59;
@@ -12,40 +12,17 @@ const toNumber = (value: string): number => (value ? Number(value) : 0);
 
 const padTimePart = (value: number): string => String(value).padStart(2, '0');
 
-const parseDigits = (
-  digits: string
-): {
-  hours: number;
-  minutes: number;
-} => {
-  if (digits.length <= 1) {
-    return {
-      hours: toNumber(digits),
-      minutes: 0
-    };
-  }
-
-  if (digits.length === 2) {
-    return {
-      hours: toNumber(digits),
-      minutes: 0
-    };
+const parseDigits = (digits: string): { hours: number; minutes: number } => {
+  if (digits.length <= 2) {
+    return { hours: toNumber(digits), minutes: 0 };
   }
 
   if (digits.length === 3) {
     const firstTwoDigits = toNumber(digits.slice(0, 2));
 
-    if (firstTwoDigits <= MAX_HOURS) {
-      return {
-        hours: firstTwoDigits,
-        minutes: toNumber(digits.slice(2)) * 10
-      };
-    }
-
-    return {
-      hours: toNumber(digits.slice(0, 1)),
-      minutes: toNumber(digits.slice(1))
-    };
+    return firstTwoDigits <= MAX_HOURS
+      ? { hours: firstTwoDigits, minutes: toNumber(digits.slice(2)) * 10 }
+      : { hours: toNumber(digits.slice(0, 1)), minutes: toNumber(digits.slice(1)) };
   }
 
   return {
@@ -54,12 +31,7 @@ const parseDigits = (
   };
 };
 
-const parseColonValue = (
-  value: string
-): {
-  hours: number;
-  minutes: number;
-} => {
+const parseColonValue = (value: string): { hours: number; minutes: number } => {
   const [rawHours = '', rawMinutes = ''] = value.split(':');
   const hours = toDigits(rawHours, 2);
   const minutes = toDigits(rawMinutes, 2);
@@ -103,3 +75,6 @@ export const formatTimeInputDraft = (value: string): string => {
 
   return `${digits.slice(0, 2)}:${digits.slice(2)}`;
 };
+
+export const getTimeInputValue = (dateTime: ISODateTimeString): LocalTimeString =>
+  dateTime.slice(11, 16);

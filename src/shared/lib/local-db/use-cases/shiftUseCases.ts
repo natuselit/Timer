@@ -1,6 +1,7 @@
 import {
   detectShiftType,
   getPlannedShiftWindow,
+  validateAndSortWorkTickets,
   type CoefficientMode,
   type GradeSnapshot,
   type ISODateTimeString,
@@ -37,17 +38,10 @@ export type CreateManualShiftInput = {
   now?: ISODateTimeString;
 };
 
-export type AutoCloseActiveShiftInput = {
-  now: ISODateTimeString;
-  onAutoCloseDue?: (shift: Shift) => void;
-};
-
 type GradeSettings = Pick<
   Settings,
   'currentGrade' | 'desiredGrade' | 'gradeSalaryBonusPercents' | 'gradeNormPercents'
 >;
-
-const AUTO_CLOSE_DELAY_MS = 60 * 60 * 1000;
 
 const getDateFromDateTime = (dateTime: ISODateTimeString): LocalDateString => {
   const [date] = dateTime.split('T');
@@ -219,9 +213,18 @@ export const addWorkTicketToActiveShift = async (
     updatedAt: input.startedAt
   };
 
+  const workTickets = validateAndSortWorkTickets(
+    [...closeActiveWorkTickets(shift.workTickets, input.startedAt), ticket],
+    {
+      shiftStartTime: shift.startTime,
+      effectiveShiftEndTime: input.startedAt,
+      allowOpenTicket: true
+    }
+  );
+
   return repository.updateShift({
     ...shift,
-    workTickets: [...closeActiveWorkTickets(shift.workTickets, input.startedAt), ticket],
+    workTickets,
     updatedAt: input.startedAt
   });
 };
@@ -232,6 +235,8 @@ export const updateWorkTicketInActiveShift = async (
     shiftId: string;
     ticketId: string;
     normPerEightHours: number;
+    startedAt: ISODateTimeString;
+    endedAt: ISODateTimeString | null;
     updatedAt: ISODateTimeString;
   }
 ): Promise<Shift> => {
@@ -255,9 +260,15 @@ export const updateWorkTicketInActiveShift = async (
 
     didUpdateTicket = true;
 
+    if (ticket.endedAt !== null && input.endedAt === null) {
+      throw new Error('Завершений тікет не можна знову зробити активним.');
+    }
+
     return {
       ...ticket,
       normPerEightHours: input.normPerEightHours,
+      startedAt: input.startedAt,
+      endedAt: input.endedAt,
       updatedAt: input.updatedAt
     };
   });
@@ -266,9 +277,15 @@ export const updateWorkTicketInActiveShift = async (
     throw new Error(`Work ticket not found: ${input.ticketId}`);
   }
 
+  const sortedWorkTickets = validateAndSortWorkTickets(workTickets, {
+    shiftStartTime: shift.startTime,
+    effectiveShiftEndTime: input.updatedAt,
+    allowOpenTicket: true
+  });
+
   return repository.updateShift({
     ...shift,
-    workTickets,
+    workTickets: sortedWorkTickets,
     updatedAt: input.updatedAt
   });
 };
@@ -302,38 +319,4 @@ export const deleteWorkTicketFromActiveShift = async (
     workTickets,
     updatedAt: input.updatedAt
   });
-};
-
-export const closeOverdueActiveShift = async (
-  repository: ShiftRepository,
-  input: AutoCloseActiveShiftInput
-): Promise<Shift | null> => {
-  const activeShift = await repository.getActiveShift();
-
-  if (!activeShift) {
-    return null;
-  }
-
-  const plannedWindow = getPlannedShiftWindow(
-    activeShift.date,
-    activeShift.type,
-    activeShift.startTime
-  );
-  const autoCloseAt = new Date(plannedWindow.plannedEnd).getTime() + AUTO_CLOSE_DELAY_MS;
-  const now = new Date(input.now).getTime();
-
-  if (Number.isNaN(now) || now < autoCloseAt) {
-    return activeShift;
-  }
-
-  const closedShift: Shift = {
-    ...closeShiftWorkTickets(activeShift, plannedWindow.plannedEnd),
-    endTime: plannedWindow.plannedEnd,
-    isAutoClosed: true,
-    updatedAt: input.now
-  };
-
-  input.onAutoCloseDue?.(closedShift);
-
-  return repository.updateShift(closedShift);
 };
