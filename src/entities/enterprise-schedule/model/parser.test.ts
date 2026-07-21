@@ -86,6 +86,55 @@ Total: :`);
     expect(result.items.map((item) => item.date)).toEqual(['2026-06-01', '2026-06-02']);
   });
 
+  it('parses inline dated rows and skips rows with dash placeholders', () => {
+    const result = parseEnterpriseScheduleText(`01.07.2026 In time 06:01
+01.07.2026 Out time 14:30
+01.07.2026 Total 08:29
+02.07.2026 In time -
+02.07.2026 Out time -
+02.07.2026 Total :
+03.07.2026 In time 14:30
+03.07.2026 Out time 22:32
+03.07.2026 Total 08:02`);
+
+    expect(result.errors).toEqual([]);
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0]).toEqual({
+      date: '2026-07-01',
+      shiftType: 'first',
+      plannedStartTime: '06:30',
+      plannedEndTime: '14:30',
+      inTime: '06:01',
+      outTime: '14:30',
+      total: '08:29',
+      sourceText:
+        '01.07.2026 In time 06:01\n01.07.2026 Out time 14:30\n01.07.2026 Total 08:29'
+    });
+    expect(result.items[1]).toMatchObject({
+      date: '2026-07-03',
+      shiftType: 'second',
+      inTime: '14:30',
+      outTime: '22:32',
+      total: '08:02'
+    });
+  });
+
+  it('validates Total in the inline dated format', () => {
+    const result = parseEnterpriseScheduleText(`01.07.2026 In time 06:01
+01.07.2026 Out time 14:30
+01.07.2026 Total 08:28`);
+
+    expect(result.items).toEqual([]);
+    expect(result.errors).toEqual([
+      {
+        line: 1,
+        message: 'У блоці 2026-07-01 Total не збігається з In time та Out time.',
+        sourceText:
+          '01.07.2026 In time 06:01\n01.07.2026 Out time 14:30\n01.07.2026 Total 08:28'
+      }
+    ]);
+  });
+
   it('skips days off with empty times and 00:00 total', () => {
     const result = parseEnterpriseScheduleText(`--01.05.2026--
 In time:

@@ -592,7 +592,7 @@ export function SchedulePage({
           data-has-errors={parseResult.errors.length > 0 ? 'true' : 'false'}
           value={importText}
           rows={5}
-          placeholder="--01.06.2026--&#10;In time: 05:57&#10;Out time: 16:52&#10;Total: 10:55"
+          placeholder="01.07.2026 In time 06:01&#10;01.07.2026 Out time 14:30&#10;01.07.2026 Total 08:29"
           onChange={(event) => {
             setImportText(event.target.value);
             setMessage(null);

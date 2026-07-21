@@ -98,8 +98,8 @@
 
 .history-page__shift {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-panel);
   background: color-mix(in srgb, var(--color-background) 50%, var(--color-surface));
@@ -112,7 +112,7 @@
 
 .history-page__shift-meta {
   display: grid;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -173,7 +173,7 @@
 .history-page__details {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   margin: 0;
   padding: 0;
 }
@@ -181,20 +181,20 @@
 .history-page__detail {
   display: grid;
   min-width: 0;
-  min-height: 52px;
-  gap: 5px;
+  min-height: 46px;
+  gap: 3px;
   align-content: space-between;
-  padding: 8px 9px;
+  padding: 7px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-compact);
   background: var(--color-background);
 }
 
 .history-page__detail--money {
-  min-height: 52px;
+  min-height: 46px;
   grid-template-columns: 1fr;
   align-items: initial;
-  padding: 8px 9px;
+  padding: 7px 8px;
   border-color: var(--color-primary-border-muted);
   background: color-mix(in srgb, var(--color-primary-soft) 58%, var(--color-background));
   box-shadow: inset 3px 0 0 var(--color-primary);
@@ -230,11 +230,11 @@
 
 .history-page__detail--tickets {
   grid-column: 1 / -1;
-  min-height: 44px;
+  min-height: 40px;
   grid-template-columns: auto minmax(0, 1fr);
   align-content: center;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .history-page__detail--tickets dd {
@@ -297,7 +297,7 @@
   gap: 2px;
   align-items: center;
   justify-content: flex-end;
-  padding: 2px;
+  padding: 1px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-background);
@@ -310,9 +310,9 @@
 }
 
 .history-page__action-button {
-  width: 44px;
-  min-height: 44px;
-  flex: 0 0 44px;
+  width: 38px;
+  min-height: 38px;
+  flex: 0 0 38px;
   padding: 0;
   border-color: transparent;
   border-radius: var(--radius-compact);
@@ -328,9 +328,9 @@
 .history-page__coefficients {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
   margin: 0;
-  padding: 8px 0 0;
+  padding: 6px 0 0;
   border-top: 1px solid var(--color-border);
   list-style: none;
 }
@@ -338,10 +338,10 @@
 .history-page__coefficients li {
   display: inline-flex;
   min-width: 0;
-  min-height: 27px;
+  min-height: 25px;
   align-items: center;
   gap: 5px;
-  padding: 4px 7px;
+  padding: 3px 6px;
   border-radius: var(--radius-compact);
   background: var(--color-primary-soft);
   color: var(--color-primary-strong);
@@ -522,49 +522,60 @@
 
 .history-page__ticket-list {
   display: grid;
-  gap: 7px;
+  gap: 8px;
 }
 
 .history-page__ticket-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(112px, 0.52fr) 44px;
-  min-height: 68px;
-  gap: 10px;
-  align-items: center;
-  padding: 9px 10px 9px 12px;
+  min-width: 0;
+  gap: 9px;
+  padding: 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
-  background: var(--color-surface);
+  background: color-mix(in srgb, var(--color-background) 46%, var(--color-surface));
   box-shadow: var(--shadow-hairline);
 }
 
-.history-page__ticket-meta {
+.history-page__ticket-row-header {
   display: flex;
   min-width: 0;
-  align-items: end;
-  gap: 9px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .history-page__ticket-index {
-  display: inline-grid;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  place-items: center;
-  border-radius: 9px;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border-radius: 999px;
   background: var(--color-primary-soft);
   color: var(--color-primary);
   font-size: 0.7rem;
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1;
+}
+
+.history-page__ticket-index strong {
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.history-page__ticket-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(92px, 0.8fr);
+  min-width: 0;
+  gap: 8px;
+  align-items: end;
 }
 
 .history-page__ticket-time-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   min-width: 0;
-  flex: 1 1 auto;
-  gap: 6px;
+  gap: 8px;
 }
 
 .history-page__ticket-time-fields label {
@@ -575,9 +586,10 @@
 
 .history-page__editor .history-page__ticket-time-fields input {
   min-width: 0;
-  min-height: 40px;
-  padding-inline: 6px;
-  font-size: 0.9rem;
+  min-height: 42px;
+  padding-inline: 8px;
+  font-size: 0.96rem;
+  text-align: center;
 }
 
 .history-page__ticket-norm {
@@ -599,7 +611,7 @@
 
 .history-page__editor .history-page__ticket-norm-control input {
   min-width: 0;
-  min-height: 40px;
+  min-height: 42px;
   padding: 0 4px 0 10px;
   border: 0;
   border-radius: 0;
@@ -623,6 +635,10 @@
 }
 
 .history-page__ticket-delete-button {
+  width: 38px;
+  min-height: 38px;
+  flex: 0 0 38px;
+  border-radius: 11px;
   border: 1px solid var(--color-error-border);
   background: var(--color-error-surface);
 }
@@ -711,8 +727,18 @@
 
 .history-page__editor-time-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
+  gap: 6px;
+  align-items: end;
+}
+
+.history-page__time-separator {
+  display: grid;
+  min-height: 44px;
+  place-items: center;
+  color: var(--color-primary);
+  font-size: 1rem;
+  font-weight: 900;
 }
 
 .history-page__editor .history-page__form input {
@@ -766,6 +792,11 @@
   background: var(--color-background);
 }
 
+.history-page__editor .history-page__shift-type-field .history-page__segmented {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
 .history-page__editor .history-page__segmented button {
   min-height: 44px;
   border-color: transparent;
@@ -815,18 +846,12 @@
   }
 
   .history-page__ticket-row {
-    grid-template-columns: minmax(0, 1fr) 44px;
+    gap: 8px;
+    padding: 9px;
   }
 
-  .history-page__ticket-norm {
-    grid-column: 1 / -1;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-  }
-
-  .history-page__ticket-delete-button {
-    grid-column: 2;
-    grid-row: 1;
+  .history-page__ticket-fields {
+    grid-template-columns: 1fr;
   }
 }
 

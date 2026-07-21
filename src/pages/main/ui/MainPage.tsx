@@ -760,71 +760,78 @@ export function MainPage({
                       </div>
                       {editingTicketId === activeWorkTicket.id ? (
                         <div className="main-page__ticket-edit-form">
-                          <label>
-                            <span>Норма</span>
-                            <input
-                              inputMode="numeric"
-                              maxLength={3}
-                              pattern="[0-9]*"
-                              value={ticketEditDraft.normPerEightHours}
-                              onChange={(event) => {
-                                changeTicketEditDraft(
-                                  'normPerEightHours',
-                                  normalizeTicketNormDraft(event.target.value)
-                                );
-                              }}
-                            />
-                          </label>
-                          <label>
-                            <span>Взято</span>
-                            <input
-                              inputMode="numeric"
-                              maxLength={5}
-                              placeholder="06:30"
-                              value={ticketEditDraft.startedAt}
-                              onBlur={() => completeTicketTimeDraft('startedAt')}
-                              onChange={(event) =>
-                                changeTicketEditDraft(
-                                  'startedAt',
-                                  formatTimeInputDraft(event.target.value)
-                                )
-                              }
-                            />
-                          </label>
-                          <label>
-                            <span>Завершено</span>
-                            <input
-                              inputMode="numeric"
-                              maxLength={5}
-                              placeholder="Триває"
-                              value={ticketEditDraft.endedAt}
-                              onBlur={() => completeTicketTimeDraft('endedAt')}
-                              onChange={(event) =>
-                                changeTicketEditDraft(
-                                  'endedAt',
-                                  formatTimeInputDraft(event.target.value)
-                                )
-                              }
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            title="Зберегти"
-                            aria-label="Зберегти тікет"
-                            disabled={pendingTicketId !== null}
-                            onClick={() => void saveTicketEdit(activeWorkTicket.id)}
-                          >
-                            <Check size={15} />
-                          </button>
-                          <button
-                            type="button"
-                            title="Скасувати"
-                            aria-label="Скасувати редагування тікета"
-                            disabled={pendingTicketId !== null}
-                            onClick={cancelTicketEdit}
-                          >
-                            <X size={15} />
-                          </button>
+                          <div className="main-page__ticket-edit-header">
+                            <strong>Редагування тікета</strong>
+                            <small>Час у форматі HH:mm</small>
+                          </div>
+                          <div className="main-page__ticket-edit-fields">
+                            <label>
+                              <span>Норма, шт</span>
+                              <input
+                                inputMode="numeric"
+                                maxLength={3}
+                                pattern="[0-9]*"
+                                value={ticketEditDraft.normPerEightHours}
+                                onChange={(event) => {
+                                  changeTicketEditDraft(
+                                    'normPerEightHours',
+                                    normalizeTicketNormDraft(event.target.value)
+                                  );
+                                }}
+                              />
+                            </label>
+                            <label>
+                              <span>Взято</span>
+                              <input
+                                inputMode="numeric"
+                                maxLength={5}
+                                placeholder="06:30"
+                                value={ticketEditDraft.startedAt}
+                                onBlur={() => completeTicketTimeDraft('startedAt')}
+                                onChange={(event) =>
+                                  changeTicketEditDraft(
+                                    'startedAt',
+                                    formatTimeInputDraft(event.target.value)
+                                  )
+                                }
+                              />
+                            </label>
+                            <label>
+                              <span>Завершено</span>
+                              <input
+                                inputMode="numeric"
+                                maxLength={5}
+                                placeholder="Триває"
+                                value={ticketEditDraft.endedAt}
+                                onBlur={() => completeTicketTimeDraft('endedAt')}
+                                onChange={(event) =>
+                                  changeTicketEditDraft(
+                                    'endedAt',
+                                    formatTimeInputDraft(event.target.value)
+                                  )
+                                }
+                              />
+                            </label>
+                          </div>
+                          <div className="main-page__ticket-edit-actions">
+                            <button
+                              className="main-page__ticket-edit-save"
+                              type="button"
+                              disabled={pendingTicketId !== null}
+                              onClick={() => void saveTicketEdit(activeWorkTicket.id)}
+                            >
+                              <Check size={15} aria-hidden="true" />
+                              <span>Зберегти</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pendingTicketId !== null}
+                              onClick={cancelTicketEdit}
+                            >
+                              <X size={15} aria-hidden="true" />
+                              <span>Скасувати</span>
+                            </button>
+                          </div>
                         </div>
                       ) : null}
                       <div className="main-page__ticket-current-card">
@@ -861,69 +868,76 @@ export function MainPage({
                             {isEditingTicket ? (
                               <>
                                 <div className="main-page__ticket-edit-form">
-                                  <label>
-                                    <span>Норма</span>
-                                    <input
-                                      inputMode="numeric"
-                                      maxLength={3}
-                                      pattern="[0-9]*"
-                                      value={ticketEditDraft.normPerEightHours}
-                                      onChange={(event) => {
-                                        changeTicketEditDraft(
-                                          'normPerEightHours',
-                                          normalizeTicketNormDraft(event.target.value)
-                                        );
-                                      }}
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>Взято</span>
-                                    <input
-                                      inputMode="numeric"
-                                      maxLength={5}
-                                      value={ticketEditDraft.startedAt}
-                                      onBlur={() => completeTicketTimeDraft('startedAt')}
-                                      onChange={(event) =>
-                                        changeTicketEditDraft(
-                                          'startedAt',
-                                          formatTimeInputDraft(event.target.value)
-                                        )
-                                      }
-                                    />
-                                  </label>
-                                  <label>
-                                    <span>Завершено</span>
-                                    <input
-                                      inputMode="numeric"
-                                      maxLength={5}
-                                      value={ticketEditDraft.endedAt}
-                                      onBlur={() => completeTicketTimeDraft('endedAt')}
-                                      onChange={(event) =>
-                                        changeTicketEditDraft(
-                                          'endedAt',
-                                          formatTimeInputDraft(event.target.value)
-                                        )
-                                      }
-                                    />
-                                  </label>
-                                  <button
-                                    type="button"
-                                    title="Зберегти"
-                                    aria-label="Зберегти тікет"
-                                    disabled={pendingTicketId !== null}
-                                    onClick={() => void saveTicketEdit(ticket.id)}
-                                  >
-                                    <Check size={15} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    title="Скасувати"
-                                    aria-label="Скасувати редагування тікета"
-                                    disabled={pendingTicketId !== null}
-                                    onClick={cancelTicketEdit}
-                                  >
-                                    <X size={15} />
-                                  </button>
+                                  <div className="main-page__ticket-edit-header">
+                                    <strong>Редагування тікета</strong>
+                                    <small>Час у форматі HH:mm</small>
+                                  </div>
+                                  <div className="main-page__ticket-edit-fields">
+                                    <label>
+                                      <span>Норма, шт</span>
+                                      <input
+                                        inputMode="numeric"
+                                        maxLength={3}
+                                        pattern="[0-9]*"
+                                        value={ticketEditDraft.normPerEightHours}
+                                        onChange={(event) => {
+                                          changeTicketEditDraft(
+                                            'normPerEightHours',
+                                            normalizeTicketNormDraft(event.target.value)
+                                          );
+                                        }}
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>Взято</span>
+                                      <input
+                                        inputMode="numeric"
+                                        maxLength={5}
+                                        value={ticketEditDraft.startedAt}
+                                        onBlur={() => completeTicketTimeDraft('startedAt')}
+                                        onChange={(event) =>
+                                          changeTicketEditDraft(
+                                            'startedAt',
+                                            formatTimeInputDraft(event.target.value)
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>Завершено</span>
+                                      <input
+                                        inputMode="numeric"
+                                        maxLength={5}
+                                        value={ticketEditDraft.endedAt}
+                                        onBlur={() => completeTicketTimeDraft('endedAt')}
+                                        onChange={(event) =>
+                                          changeTicketEditDraft(
+                                            'endedAt',
+                                            formatTimeInputDraft(event.target.value)
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                  </div>
+                                  <div className="main-page__ticket-edit-actions">
+                                    <button
+                                      className="main-page__ticket-edit-save"
+                                      type="button"
+                                      disabled={pendingTicketId !== null}
+                                      onClick={() => void saveTicketEdit(ticket.id)}
+                                    >
+                                      <Check size={15} aria-hidden="true" />
+                                      <span>Зберегти</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={pendingTicketId !== null}
+                                      onClick={cancelTicketEdit}
+                                    >
+                                      <X size={15} aria-hidden="true" />
+                                      <span>Скасувати</span>
+                                    </button>
+                                  </div>
                                 </div>
                               </>
                             ) : (

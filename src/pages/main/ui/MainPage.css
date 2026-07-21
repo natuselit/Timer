@@ -296,8 +296,8 @@
 
 .main-page__tasker {
   display: grid;
-  gap: 6px;
-  padding: 8px;
+  gap: 8px;
+  padding: 10px;
   border: 1px solid var(--color-primary-border);
   border-radius: var(--radius-panel);
   background: var(--color-surface);
@@ -324,9 +324,13 @@
 
 .main-page__tasker-header > span {
   flex: 0 0 auto;
-  color: var(--color-text-secondary);
-  font-size: 0.8rem;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 0.72rem;
   font-weight: 800;
+  line-height: 1;
 }
 
 .main-page__ticket-form {
@@ -354,7 +358,7 @@
 .main-page__ticket-form input {
   grid-area: input;
   width: 100%;
-  min-height: 36px;
+  min-height: 40px;
   padding: 7px 9px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-compact);
@@ -376,7 +380,7 @@
 
 .main-page__ticket-form button {
   grid-area: action;
-  min-height: 36px;
+  min-height: 40px;
   padding: 0 10px;
   border: 0;
   border-radius: var(--radius-compact);
@@ -414,7 +418,8 @@
 .main-page__ticket-current-card--wide {
   grid-column: 1 / -1;
   display: flex;
-  min-height: 34px;
+  min-height: 42px;
+  padding: 6px 7px;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -442,11 +447,10 @@
   align-items: center;
 }
 
-.main-page__ticket-actions button,
-.main-page__ticket-edit-form button {
+.main-page__ticket-actions button {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   place-items: center;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-compact);
@@ -468,8 +472,37 @@
 .main-page__ticket-edit-form {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) 30px 30px;
   width: 100%;
+  min-width: 0;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--color-primary-border-muted);
+  border-radius: var(--radius-compact);
+  background: color-mix(in srgb, var(--color-primary-soft) 42%, var(--color-background));
+}
+
+.main-page__ticket-edit-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.main-page__ticket-edit-header strong {
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+}
+
+.main-page__ticket-edit-header small {
+  color: var(--color-text-secondary);
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.main-page__ticket-edit-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
   gap: 6px;
   align-items: end;
@@ -490,7 +523,7 @@
 .main-page__ticket-edit-form input {
   width: 100%;
   box-sizing: border-box;
-  min-height: 32px;
+  min-height: 36px;
   padding: 5px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-compact);
@@ -499,6 +532,38 @@
   font: inherit;
   text-align: center;
   font-variant-numeric: tabular-nums;
+}
+
+.main-page__ticket-edit-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.main-page__ticket-edit-actions button {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-compact);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.main-page__ticket-edit-actions .main-page__ticket-edit-save {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.main-page__ticket-edit-actions button span {
+  color: currentColor;
+  font-size: 0.7rem;
+  font-weight: 850;
 }
 
 .main-page__ticket-history {
@@ -698,8 +763,7 @@
   }
 
   .main-page__ticket-edit-form {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) 28px 28px;
-    gap: 4px;
+    gap: 7px;
   }
 
   .main-page__ticket-edit-form input {

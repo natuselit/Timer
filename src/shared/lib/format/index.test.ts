@@ -7,7 +7,7 @@ describe('formatHourlyRate', () => {
   });
 
   it('не розкриває ставку в інкогніто', () => {
-    expect(formatHourlyRate(95.652_173_913, true)).toBe('🇺🇦');
+    expect(formatHourlyRate(95.652_173_913, true)).toBe('••••');
   });
 });
 
@@ -17,6 +17,6 @@ describe('formatMoney', () => {
   });
 
   it('маскує гроші знаком інкогніто', () => {
-    expect(formatMoney(95.652_173_913, true)).toBe('🇺🇦');
+    expect(formatMoney(95.652_173_913, true)).toBe('••••');
   });
 });

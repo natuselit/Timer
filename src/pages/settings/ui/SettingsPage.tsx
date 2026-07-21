@@ -669,7 +669,7 @@ export function SettingsPage({
 
       <section className="settings-page__section" aria-labelledby="grade-settings-title">
         <h2 id="grade-settings-title">Грейди</h2>
-        <div className="settings-page__grid">
+        <div className="settings-page__grade-selects">
           <label className="settings-page__field">
             <span>Поточний грейд</span>
             <select
@@ -711,17 +711,23 @@ export function SettingsPage({
         </div>
 
         <div className="settings-page__grade-block">
-          <h3>Надбавка до ЗП, %</h3>
+          <div className="settings-page__grade-block-header">
+            <h3>Надбавка до зарплати</h3>
+            <span aria-hidden="true">%</span>
+          </div>
           <div className="settings-page__grade-grid">
             {values.gradeSalaryBonusPercents.map((value, index) => (
-              <label className="settings-page__field" key={`salary-grade-${index}`}>
+              <label className="settings-page__field settings-page__grade-field" key={`salary-grade-${index}`}>
                 <span>Грейд {index + 1}</span>
-                <input
-                  inputMode="decimal"
-                  disabled={settings.incognitoEnabled}
-                  value={settings.incognitoEnabled ? INCOGNITO_FINANCIAL_MASK : value}
-                  onChange={updateGradePercent('gradeSalaryBonusPercents', index)}
-                />
+                <span className="settings-page__grade-input">
+                  <input
+                    inputMode="decimal"
+                    disabled={settings.incognitoEnabled}
+                    value={settings.incognitoEnabled ? INCOGNITO_FINANCIAL_MASK : value}
+                    onChange={updateGradePercent('gradeSalaryBonusPercents', index)}
+                  />
+                  <span aria-hidden="true">%</span>
+                </span>
               </label>
             ))}
           </div>
@@ -731,16 +737,22 @@ export function SettingsPage({
         </div>
 
         <div className="settings-page__grade-block">
-          <h3>Норма виробітку, % від тікета</h3>
+          <div className="settings-page__grade-block-header">
+            <h3>Норма від тікета</h3>
+            <span aria-hidden="true">%</span>
+          </div>
           <div className="settings-page__grade-grid">
             {values.gradeNormPercents.map((value, index) => (
-              <label className="settings-page__field" key={`norm-grade-${index}`}>
+              <label className="settings-page__field settings-page__grade-field" key={`norm-grade-${index}`}>
                 <span>Грейд {index + 1}</span>
-                <input
-                  inputMode="decimal"
-                  value={value}
-                  onChange={updateGradePercent('gradeNormPercents', index)}
-                />
+                <span className="settings-page__grade-input">
+                  <input
+                    inputMode="decimal"
+                    value={value}
+                    onChange={updateGradePercent('gradeNormPercents', index)}
+                  />
+                  <span aria-hidden="true">%</span>
+                </span>
               </label>
             ))}
           </div>
@@ -827,7 +839,7 @@ export function SettingsPage({
           </button>
           <button
             type="button"
-            className="settings-page__danger"
+            className="settings-page__warning"
             aria-label="Імпорт даних"
             title="Імпорт даних"
             disabled={isBackupBusy}
@@ -852,18 +864,18 @@ export function SettingsPage({
             onClick={clearShifts}
           >
             <Eraser size={18} aria-hidden="true" />
-            Зміни
+            Очистити зміни
           </button>
           <button
             type="button"
-            className="settings-page__danger"
+            className="settings-page__danger settings-page__danger--strong"
             aria-label="Очистити"
             title="Очистити"
             disabled={isClearing}
             onClick={clearAll}
           >
             <RotateCcw size={18} aria-hidden="true" />
-            Очистити
+            Очистити все
           </button>
           {import.meta.env.DEV ? (
             <button

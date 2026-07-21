@@ -120,8 +120,8 @@
 .analytics-page__money-card--primary {
   grid-column: 1 / -1;
   border-color: var(--color-primary-border);
-  min-height: 96px;
-  padding: 16px;
+  min-height: 76px;
+  padding: 12px;
   background: linear-gradient(135deg, var(--color-primary-surface), var(--color-primary-soft));
 }
 
@@ -135,7 +135,7 @@
 
 .analytics-page__money-card--primary strong {
   color: var(--color-primary);
-  font-size: clamp(1.7rem, 7vw, 2.2rem);
+  font-size: clamp(1.45rem, 6vw, 1.8rem);
   letter-spacing: -0.04em;
 }
 
@@ -149,18 +149,43 @@
 .analytics-page__detail-list div {
   display: grid;
   min-width: 0;
-  min-height: 62px;
+  min-height: 58px;
   gap: 4px;
   align-content: space-between;
-  padding: 10px;
+  padding: 10px 11px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-background);
 }
 
 .analytics-page__detail-list div:first-child {
+  grid-column: 1 / -1;
+  min-height: 68px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  align-content: center;
   border-color: var(--color-primary-border);
-  background: var(--color-primary-soft);
+  background: linear-gradient(135deg, var(--color-primary-surface), var(--color-primary-soft));
+}
+
+.analytics-page__detail-list div:first-child dd {
+  color: var(--color-primary);
+  font-size: clamp(1.16rem, 5.5vw, 1.34rem);
+  letter-spacing: -0.025em;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.analytics-page__detail-list div:nth-child(2) {
+  grid-column: 1 / -1;
+  min-height: 50px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  align-content: center;
+}
+
+.analytics-page__detail-list div:nth-child(2) dd {
+  text-align: right;
 }
 
 .analytics-page__detail-list div:last-child:nth-child(odd) {
@@ -188,25 +213,49 @@
 
 .analytics-page__coefficient-section dl {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 8px;
+  grid-template-columns: 1fr;
+  gap: 6px;
   margin: 0;
 }
 
 .analytics-page__coefficient-section dl div {
   display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   min-width: 0;
-  gap: 5px;
-  padding: 9px 10px;
+  min-height: 52px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 10px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-compact);
   background: var(--color-background);
 }
 
+.analytics-page__coefficient-section dt {
+  display: inline-grid;
+  min-height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 850;
+}
+
 .analytics-page__coefficient-section dd {
-  display: grid;
-  gap: 3px;
+  display: contents;
   margin: 0;
+}
+
+.analytics-page__coefficient-section dd span {
+  min-width: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.analytics-page__coefficient-section dd strong {
+  font-size: 0.92rem;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .analytics-page__shift-types {
@@ -517,8 +566,7 @@
 }
 
 @media (max-width: 430px) {
-  .analytics-page__shift-types,
-  .analytics-page__coefficient-section dl {
+  .analytics-page__shift-types {
     grid-template-columns: 1fr;
   }
 }

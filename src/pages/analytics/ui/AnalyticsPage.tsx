@@ -358,7 +358,7 @@ export function AnalyticsPage({
 
             <dl className="analytics-page__detail-list" aria-label="Показники часу">
               <div>
-                <dt>Години</dt>
+                <dt>Загалом</dt>
                 <dd>{formatDurationMinutes(summary.totalMinutes)}</dd>
               </div>
               <div>

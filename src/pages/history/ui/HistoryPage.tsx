@@ -1011,20 +1011,23 @@ export function HistoryPage({
                     />
                   </label>
                   {editor.mode === 'create' || editor.shift.endTime !== null ? (
-                    <label className="history-page__time-field">
-                      <span>Вихід</span>
-                      <input
-                        className="history-page__time-input"
-                        type="text"
-                        inputMode="numeric"
-                        autoComplete="off"
-                        maxLength={5}
-                        placeholder="00:00"
-                        value={editor.values.endTime}
-                        onBlur={(event) => completeEditorTimeValue('endTime', event.currentTarget.value)}
-                        onChange={(event) => changeEditorTimeValue('endTime', event.target.value)}
-                      />
-                    </label>
+                    <>
+                      <span className="history-page__time-separator" aria-hidden="true">→</span>
+                      <label className="history-page__time-field">
+                        <span>Вихід</span>
+                        <input
+                          className="history-page__time-input"
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          maxLength={5}
+                          placeholder="00:00"
+                          value={editor.values.endTime}
+                          onBlur={(event) => completeEditorTimeValue('endTime', event.currentTarget.value)}
+                          onChange={(event) => changeEditorTimeValue('endTime', event.target.value)}
+                        />
+                      </label>
+                    </>
                   ) : null}
                 </div>
               </section>
@@ -1074,10 +1077,23 @@ export function HistoryPage({
                     <div className="history-page__ticket-list">
                       {editor.values.workTickets.map((ticket, index) => (
                         <div className="history-page__ticket-row" key={ticket.id}>
-                          <div className="history-page__ticket-meta">
-                            <span className="history-page__ticket-index" aria-hidden="true">
-                              {String(index + 1).padStart(2, '0')}
+                          <div className="history-page__ticket-row-header">
+                            <span className="history-page__ticket-index">
+                              <span>Тікет</span>
+                              <strong>{String(index + 1).padStart(2, '0')}</strong>
                             </span>
+                            <button
+                              className="history-page__action-button history-page__action-button--danger history-page__ticket-delete-button"
+                              type="button"
+                              aria-label={`Видалити тікет ${ticket.startedAt}`}
+                              title="Видалити тікет"
+                              disabled={isSaving}
+                              onClick={() => removeEditorTicket(ticket.id)}
+                            >
+                              <Trash2 size={17} />
+                            </button>
+                          </div>
+                          <div className="history-page__ticket-fields">
                             <div className="history-page__ticket-time-fields">
                               <label>
                                 <span>Взято</span>
@@ -1122,33 +1138,23 @@ export function HistoryPage({
                                 />
                               </label>
                             </div>
+                            <label className="history-page__ticket-norm">
+                              <span>Норма</span>
+                              <span className="history-page__ticket-norm-control">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  maxLength={3}
+                                  pattern="[0-9]*"
+                                  value={ticket.normPerEightHours}
+                                  onChange={(event) =>
+                                    changeEditorTicketNorm(ticket.id, event.target.value)
+                                  }
+                                />
+                                <span aria-hidden="true">шт</span>
+                              </span>
+                            </label>
                           </div>
-                          <label className="history-page__ticket-norm">
-                            <span>Норма</span>
-                            <span className="history-page__ticket-norm-control">
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                maxLength={3}
-                                pattern="[0-9]*"
-                                value={ticket.normPerEightHours}
-                                onChange={(event) =>
-                                  changeEditorTicketNorm(ticket.id, event.target.value)
-                                }
-                              />
-                              <span aria-hidden="true">шт</span>
-                            </span>
-                          </label>
-                          <button
-                            className="history-page__action-button history-page__action-button--danger history-page__ticket-delete-button"
-                            type="button"
-                            aria-label={`Видалити тікет ${ticket.startedAt}`}
-                            title="Видалити тікет"
-                            disabled={isSaving}
-                            onClick={() => removeEditorTicket(ticket.id)}
-                          >
-                            <Trash2 size={18} />
-                          </button>
                         </div>
                       ))}
                     </div>

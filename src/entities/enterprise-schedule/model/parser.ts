@@ -8,6 +8,7 @@ import {
 
 const DATE_HEADER_PATTERN = /^--(\d{2})\.(\d{2})\.(\d{4})--$/;
 const FIELD_PATTERN = /^(In time|Out time|Total):\s*(?:(\d{2}:\d{2})|:)?$/;
+const INLINE_FIELD_PATTERN = /^(\d{2})\.(\d{2})\.(\d{4})\s+(In time|Out time|Total)\s+(?:(\d{2}:\d{2})|-|:)$/;
 const COLUMN_HEADER_PATTERN = /^Колонка\s+\d+:$/i;
 const MINUTES_IN_DAY = 24 * 60;
 
@@ -17,6 +18,8 @@ type RawScheduleBlock = {
   line: number;
   date: LocalDateString;
   lines: string[];
+  sourceLines: string[];
+  format: 'block' | 'inline';
 };
 
 export type ParsedEnterpriseScheduleItem = {
@@ -128,6 +131,38 @@ const splitBlocks = (source: string): {
       return;
     }
 
+    const inlineFieldMatch = line.match(INLINE_FIELD_PATTERN);
+
+    if (inlineFieldMatch) {
+      const [, day, month, year, fieldName, value] = inlineFieldMatch;
+      const date = toDate(day, month, year);
+
+      if (!isExistingDate(date)) {
+        errors.push({
+          line: lineNumber,
+          message: 'Некоректна дата в рядку графіка.',
+          sourceText: line
+        });
+        currentBlock = null;
+        return;
+      }
+
+      if (!currentBlock || currentBlock.date !== date || currentBlock.format !== 'inline') {
+        currentBlock = {
+          line: lineNumber,
+          date,
+          lines: [`--${day}.${month}.${year}--`],
+          sourceLines: [],
+          format: 'inline'
+        };
+        blocks.push(currentBlock);
+      }
+
+      currentBlock.lines.push(`${fieldName}: ${value ?? ''}`);
+      currentBlock.sourceLines.push(line);
+      return;
+    }
+
     const dateMatch = line.match(DATE_HEADER_PATTERN);
 
     if (dateMatch) {
@@ -146,7 +181,9 @@ const splitBlocks = (source: string): {
       currentBlock = {
         line: lineNumber,
         date,
-        lines: [line]
+        lines: [line],
+        sourceLines: [line],
+        format: 'block'
       };
       blocks.push(currentBlock);
       return;
@@ -162,6 +199,7 @@ const splitBlocks = (source: string): {
     }
 
     currentBlock.lines.push(line);
+    currentBlock.sourceLines.push(line);
   });
 
   return { blocks, errors };
@@ -172,6 +210,7 @@ const parseBlock = (
 ): ParsedEnterpriseScheduleItem | EnterpriseScheduleParseError | null => {
   const fields: Partial<Record<ScheduleField, LocalTimeString | undefined>> = {};
   const presentFields = new Set<ScheduleField>();
+  const sourceText = block.sourceLines.join('\n');
 
   for (const line of block.lines.slice(1)) {
     const match = line.match(FIELD_PATTERN);
@@ -180,7 +219,7 @@ const parseBlock = (
       return {
         line: block.line,
         message: `Некоректний рядок у блоці ${block.date}: "${line}".`,
-        sourceText: block.lines.join('\n')
+        sourceText
       };
     }
 
@@ -192,7 +231,7 @@ const parseBlock = (
       return {
         line: block.line,
         message: `Поле "${fieldName}" повторюється у блоці ${block.date}.`,
-        sourceText: block.lines.join('\n')
+        sourceText
       };
     }
 
@@ -217,7 +256,7 @@ const parseBlock = (
     return {
       line: block.line,
       message: `У блоці ${block.date} мають бути In time, Out time і Total.`,
-      sourceText: block.lines.join('\n')
+      sourceText
     };
   }
 
@@ -228,7 +267,7 @@ const parseBlock = (
     return {
       line: block.line,
       message: `У блоці ${block.date} некоректний час.`,
-      sourceText: block.lines.join('\n')
+      sourceText
     };
   }
 
@@ -236,7 +275,7 @@ const parseBlock = (
     return {
       line: block.line,
       message: `У блоці ${block.date} Total не збігається з In time та Out time.`,
-      sourceText: block.lines.join('\n')
+      sourceText
     };
   }
 
@@ -244,7 +283,7 @@ const parseBlock = (
     return {
       line: block.line,
       message: `У блоці ${block.date} тривалість зміни має бути більшою за 0 і меншою за 24 години.`,
-      sourceText: block.lines.join('\n')
+      sourceText
     };
   }
 
@@ -260,7 +299,7 @@ const parseBlock = (
     inTime: fields.inTime,
     outTime: fields.outTime,
     total: fields.total,
-    sourceText: block.lines.join('\n')
+    sourceText
   };
 };
 
@@ -274,7 +313,7 @@ export const parseEnterpriseScheduleText = (source: string): EnterpriseScheduleP
       errors.push({
         line: block.line,
         message: `Дата ${block.date} повторюється. Один день може мати лише один запис графіка.`,
-        sourceText: block.lines.join('\n')
+        sourceText: block.sourceLines.join('\n')
       });
       continue;
     }
