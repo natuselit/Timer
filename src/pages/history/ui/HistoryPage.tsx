@@ -1038,6 +1038,123 @@ export function HistoryPage({
                       </li>
                     ))}
                   </ul>
+
+                  {shift.workTickets.length > 0 ? (
+                    <section
+                      className="history-page__ticket-details"
+                      aria-label={`Деталі тікетів за ${shiftDateLabel}`}
+                    >
+                      <header className="history-page__ticket-details-header">
+                        <div>
+                          <span>Виробіток</span>
+                          <strong>Деталі тікетів</strong>
+                        </div>
+                        <span>{shift.workTickets.length}</span>
+                      </header>
+
+                      <div className="history-page__ticket-details-list">
+                        {shift.workTickets.map((ticket, ticketIndex) => {
+                          const ticketEndTime = ticket.endedAt ?? effectiveEndTime;
+                          const currentGrade =
+                            shift.gradeSnapshot?.currentGrade ?? settings.currentGrade;
+                          const gradeNormPercents =
+                            shift.gradeSnapshot?.gradeNormPercents ?? settings.gradeNormPercents;
+                          const production = calculateTicketProductionSummary({
+                            ticket,
+                            effectiveEndTime: ticketEndTime,
+                            currentGrade,
+                            gradeNormPercents
+                          });
+                          const resultLabel =
+                            ticket.endedAt === null
+                              ? 'Тікет триває'
+                              : ticket.actualQuantity === null
+                                ? 'Факт не внесено'
+                                : production.productiveMinutes === 0
+                                  ? 'Грейд не визначено'
+                                  : production.achievedGrade
+                                    ? `Досягнуто Г${production.achievedGrade}`
+                                    : 'Результат нижче Г1';
+
+                          return (
+                            <article className="history-page__ticket-detail" key={ticket.id}>
+                              <header className="history-page__ticket-detail-header">
+                                <div>
+                                  <strong>Тікет {ticketIndex + 1}</strong>
+                                  <span>
+                                    {formatTime(ticket.startedAt)}-{ticket.endedAt
+                                      ? formatTime(ticket.endedAt)
+                                      : 'зараз'}
+                                  </span>
+                                </div>
+                                <span data-active={ticket.endedAt === null ? 'true' : 'false'}>
+                                  {ticket.endedAt === null ? 'Активний' : 'Завершений'}
+                                </span>
+                              </header>
+
+                              <dl className="history-page__ticket-detail-metrics">
+                                <div>
+                                  <dt>Норма / 8 год</dt>
+                                  <dd>{ticket.normPerEightHours} шт</dd>
+                                </div>
+                                <div>
+                                  <dt>Факт</dt>
+                                  <dd>
+                                    {ticket.actualQuantity === null
+                                      ? 'Не внесено'
+                                      : `${ticket.actualQuantity} шт`}
+                                  </dd>
+                                </div>
+                                <div>
+                                  <dt>Тривалість</dt>
+                                  <dd>{formatDurationMinutes(production.elapsedMinutes)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Продуктивно</dt>
+                                  <dd>{formatDurationMinutes(production.productiveMinutes)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Простій</dt>
+                                  <dd>{formatDurationMinutes(production.downtimeMinutes)}</dd>
+                                </div>
+                                <div>
+                                  <dt>Виконання Г{production.currentGrade}</dt>
+                                  <dd>
+                                    {production.completionPercent === null
+                                      ? '—'
+                                      : `${Math.round(production.completionPercent)}%`}
+                                  </dd>
+                                </div>
+                              </dl>
+
+                              <div
+                                className="history-page__ticket-detail-targets"
+                                aria-label={`Плани грейдів тікета ${ticketIndex + 1}`}
+                              >
+                                {production.targets.map((target) => (
+                                  <div
+                                    data-current={target.grade === production.currentGrade ? 'true' : 'false'}
+                                    key={target.grade}
+                                  >
+                                    <span>Г{target.grade}</span>
+                                    <strong>{target.quantity} шт</strong>
+                                  </div>
+                                ))}
+                              </div>
+
+                              <footer
+                                className="history-page__ticket-detail-result"
+                                data-empty={ticket.actualQuantity === null ? 'true' : 'false'}
+                              >
+                                <span>Результат</span>
+                                <strong>{resultLabel}</strong>
+                              </footer>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ) : null}
                 </article>
               );
             })}

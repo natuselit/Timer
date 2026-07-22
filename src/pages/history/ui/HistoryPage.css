@@ -401,6 +401,182 @@
   opacity: 0.34;
 }
 
+.history-page__ticket-details {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.history-page__ticket-details-header,
+.history-page__ticket-detail-header,
+.history-page__ticket-detail-result {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-page__ticket-details-header > div,
+.history-page__ticket-detail-header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.history-page__ticket-details-header > div > span,
+.history-page__ticket-detail-header > div > span,
+.history-page__ticket-detail-result > span {
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.history-page__ticket-details-header > div > strong,
+.history-page__ticket-detail-header > div > strong {
+  color: var(--color-text-primary);
+  font-size: 0.86rem;
+}
+
+.history-page__ticket-details-header > span {
+  display: inline-grid;
+  min-width: 24px;
+  height: 24px;
+  place-items: center;
+  padding-inline: 6px;
+  border-radius: 999px;
+  background: var(--color-primary-surface);
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  font-weight: 850;
+}
+
+.history-page__ticket-details-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-page__ticket-detail {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-background);
+}
+
+.history-page__ticket-detail-header > div > span {
+  font-variant-numeric: tabular-nums;
+}
+
+.history-page__ticket-detail-header > span {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--color-success-surface);
+  color: var(--color-success);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.history-page__ticket-detail-header > span[data-active='true'] {
+  background: var(--color-primary-surface);
+  color: var(--color-primary);
+}
+
+.history-page__ticket-detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin: 0;
+}
+
+.history-page__ticket-detail-metrics > div {
+  display: grid;
+  min-width: 0;
+  min-height: 49px;
+  align-content: space-between;
+  gap: 3px;
+  padding: 6px;
+  border-radius: var(--radius-compact);
+  background: var(--color-surface);
+}
+
+.history-page__ticket-detail-metrics dt {
+  color: var(--color-text-secondary);
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.history-page__ticket-detail-metrics dd {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 0.75rem;
+  font-weight: 850;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.history-page__ticket-detail-targets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.history-page__ticket-detail-targets > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 6px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-compact);
+  background: var(--color-surface);
+  text-align: center;
+}
+
+.history-page__ticket-detail-targets > div[data-current='true'] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-surface);
+  box-shadow: inset 0 0 0 1px var(--color-primary-border);
+}
+
+.history-page__ticket-detail-targets span {
+  color: var(--color-text-secondary);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.history-page__ticket-detail-targets strong {
+  color: var(--color-text-primary);
+  font-size: 0.73rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.history-page__ticket-detail-result {
+  padding: 7px 8px;
+  border-radius: var(--radius-compact);
+  background: var(--color-primary-soft);
+}
+
+.history-page__ticket-detail-result strong {
+  color: var(--color-primary);
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+.history-page__ticket-detail-result[data-empty='true'] {
+  background: var(--color-surface);
+}
+
+.history-page__ticket-detail-result[data-empty='true'] strong {
+  color: var(--color-text-secondary);
+}
+
 .history-page__form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -884,6 +1060,10 @@
 
   .history-page__detail {
     padding-inline: 8px;
+  }
+
+  .history-page__ticket-detail-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
 }
