@@ -3,11 +3,10 @@ import { Check, Edit3, Eye, EyeOff, Trash2, X } from 'lucide-react';
 import { BottomNavigation } from '../../../widgets/bottom-navigation';
 import { AppShell } from '../../../shared/ui/app-shell';
 import {
-  calculateGradeHourlyRateFromMonthlySalary,
-  calculateGradeProductionTarget,
+  calculateGradeMonthlyBonus,
+  calculateCumulativeGradePercent,
+  calculateHourlyRateFromMonthlySalary,
   createGradeSnapshot,
-  formatProductionTarget,
-  getGradeIndex,
   type Settings
 } from '../../../entities/settings';
 import { AnalyticsPage } from '../../analytics';
@@ -16,13 +15,14 @@ import { SchedulePage } from '../../schedule';
 import { SettingsPage } from '../../settings';
 import {
   calculateSalaryBreakdown,
+  calculateTicketProductionSummary,
   type ISODateTimeString,
   type Shift,
   type WorkTicket
 } from '../../../entities/shift';
 import {
   addWorkTicketToActiveShift,
-  closeShiftWorkTickets,
+  completeWorkTicket,
   createShift,
   deleteWorkTicketFromActiveShift,
   getActiveShift,
@@ -30,6 +30,8 @@ import {
   localDb,
   ShiftConstraintError,
   ShiftRepository,
+  startWorkTicketDowntime,
+  stopWorkTicketDowntime,
   updateWorkTicketInActiveShift,
   updateShift
 } from '../../../shared/lib/local-db';
@@ -75,12 +77,16 @@ type TicketEditDraft = {
   normPerEightHours: string;
   startedAt: string;
   endedAt: string;
+  actualQuantity: string;
+  downtimeMinutes: string;
 };
 
 const createEmptyTicketEditDraft = (): TicketEditDraft => ({
   normPerEightHours: '',
   startedAt: '',
-  endedAt: ''
+  endedAt: '',
+  actualQuantity: '',
+  downtimeMinutes: '0'
 });
 
 const shiftRepository = new ShiftRepository(localDb);
@@ -115,9 +121,6 @@ const getGreetingName = (settings: Settings): string =>
 const getActiveWorkTicket = (shift: Shift) =>
   shift.workTickets.find((ticket) => ticket.endedAt === null) ?? null;
 
-const getTicketElapsedMinutes = (startedAt: ISODateTimeString, endedAt: ISODateTimeString): number =>
-  Math.max(0, Math.floor((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60_000));
-
 const normalizeTicketNormDraft = (value: string): string => {
   const digits = value.replace(/\D/g, '');
 
@@ -135,31 +138,14 @@ const getTicketTargets = (
 ) => {
   const gradeSnapshot = shift.gradeSnapshot;
   const currentGrade = gradeSnapshot?.currentGrade ?? settings.currentGrade;
-  const desiredGrade = gradeSnapshot?.desiredGrade ?? settings.desiredGrade;
   const gradeNormPercents = gradeSnapshot?.gradeNormPercents ?? settings.gradeNormPercents;
-  const elapsedMinutes = getTicketElapsedMinutes(ticket.startedAt, endedAt);
-  const currentGradeNormPercent = gradeNormPercents[getGradeIndex(currentGrade)];
-  const desiredGradeNormPercent = gradeNormPercents[getGradeIndex(desiredGrade)];
 
-  return {
-    elapsedMinutes,
+  return calculateTicketProductionSummary({
+    ticket,
+    effectiveEndTime: endedAt,
     currentGrade,
-    desiredGrade,
-    currentTarget: formatProductionTarget(
-      calculateGradeProductionTarget({
-        normPerEightHours: ticket.normPerEightHours,
-        gradeNormPercent: currentGradeNormPercent,
-        elapsedMinutes
-      })
-    ),
-    desiredTarget: formatProductionTarget(
-      calculateGradeProductionTarget({
-        normPerEightHours: ticket.normPerEightHours,
-        gradeNormPercent: desiredGradeNormPercent,
-        elapsedMinutes
-      })
-    )
-  };
+    gradeNormPercents
+  });
 };
 
 function HoldButton({ label, delayMs, disabled = false, tone = 'default', onConfirm }: HoldButtonProps) {
@@ -242,6 +228,10 @@ export function MainPage({
   const [ticketError, setTicketError] = useState<string | null>(null);
   const [isAddingTicket, setIsAddingTicket] = useState(false);
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
+  const [ticketActualDraft, setTicketActualDraft] = useState('');
+  const [ticketDowntimeDraft, setTicketDowntimeDraft] = useState('');
+  const [isDowntimeDraftEdited, setIsDowntimeDraftEdited] = useState(false);
+  const [isCompletingTicket, setIsCompletingTicket] = useState(false);
   const [isTogglingIncognito, setIsTogglingIncognito] = useState(false);
   const [localDataRefreshKey, setLocalDataRefreshKey] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
@@ -317,6 +307,8 @@ export function MainPage({
   }, [latestCompletedShift]);
   const currentEarning = activeSalaryBreakdown?.totalAmount ?? 0;
   const activeWorkTicket = activeShift ? getActiveWorkTicket(activeShift) : null;
+  const activeDowntimeInterval =
+    activeWorkTicket?.downtimeIntervals.find((interval) => interval.endedAt === null) ?? null;
   const activeTicketTargets = useMemo(() => {
     if (!activeShift || !activeWorkTicket) {
       return null;
@@ -337,6 +329,12 @@ export function MainPage({
       }))
       .reverse();
   }, [activeShift, settings.currentGrade, settings.desiredGrade, settings.gradeNormPercents]);
+
+  useEffect(() => {
+    setTicketActualDraft('');
+    setTicketDowntimeDraft('');
+    setIsDowntimeDraftEdited(false);
+  }, [activeWorkTicket?.id]);
 
   const toggleIncognito = async () => {
     setTimerError(null);
@@ -359,17 +357,16 @@ export function MainPage({
     setTimerError(null);
     const startedAt = toLocalIsoString(new Date());
     const startedDate = getDateFromDateTime(startedAt);
-    const hourlyRates = calculateGradeHourlyRateFromMonthlySalary(
+    const baseHourlyRate = calculateHourlyRateFromMonthlySalary(
       settings.monthlySalary,
-      startedDate,
-      settings
+      startedDate
     );
 
     try {
       const createdShift = await createShift(shiftRepository, {
         startTime: startedAt,
-        baseHourlyRateSnapshot: hourlyRates.baseHourlyRate,
-        hourlyRateSnapshot: hourlyRates.effectiveHourlyRate,
+        baseHourlyRateSnapshot: baseHourlyRate,
+        hourlyRateSnapshot: baseHourlyRate,
         gradeSnapshot: createGradeSnapshot(settings),
         coefficientMode: settings.coefficientMode,
         now: startedAt
@@ -389,12 +386,17 @@ export function MainPage({
       return;
     }
 
+    if (activeWorkTicket) {
+      setTimerError('Спершу завершіть активний тікет і внесіть фактичну кількість.');
+      return;
+    }
+
     setTimerError(null);
     const finishedAt = toLocalIsoString(new Date());
 
     try {
       const completedShift = await updateShift(shiftRepository, {
-        ...closeShiftWorkTickets(activeShift, finishedAt),
+        ...activeShift,
         endTime: finishedAt,
         updatedAt: finishedAt
       });
@@ -453,10 +455,92 @@ export function MainPage({
       setActiveShift(updatedShift);
       setTicketNormDraft('');
       notifyLocalDataChange();
-    } catch {
-      setTicketError('Не вдалося додати тікет.');
+    } catch (error) {
+      setTicketError(getTicketErrorMessage(error));
     } finally {
       setIsAddingTicket(false);
+    }
+  };
+
+  const toggleTicketDowntime = async () => {
+    if (!activeShift || !activeWorkTicket) {
+      return;
+    }
+
+    const changedAt = toLocalIsoString(new Date());
+    setPendingTicketId(activeWorkTicket.id);
+    setTicketError(null);
+
+    try {
+      const updatedShift = activeDowntimeInterval
+        ? await stopWorkTicketDowntime(shiftRepository, {
+            shiftId: activeShift.id,
+            endedAt: changedAt
+          })
+        : await startWorkTicketDowntime(shiftRepository, {
+            shiftId: activeShift.id,
+            startedAt: changedAt
+          });
+
+      setNow(changedAt);
+      setActiveShift(updatedShift);
+      notifyLocalDataChange();
+    } catch (error) {
+      setTicketError(getTicketErrorMessage(error));
+    } finally {
+      setPendingTicketId(null);
+    }
+  };
+
+  const finishActiveTicket = async () => {
+    if (!activeShift || !activeWorkTicket || !activeTicketTargets) {
+      return;
+    }
+
+    if (ticketActualDraft.trim() === '') {
+      setTicketError('Вкажіть цілу фактичну кількість від 0.');
+      return;
+    }
+
+    const actualQuantity = Number(ticketActualDraft);
+
+    if (!Number.isSafeInteger(actualQuantity) || actualQuantity < 0) {
+      setTicketError('Вкажіть цілу фактичну кількість від 0.');
+      return;
+    }
+
+    const downtimeMinutes = isDowntimeDraftEdited
+      ? Number(ticketDowntimeDraft)
+      : activeTicketTargets.downtimeMinutes;
+
+    if (
+      !Number.isSafeInteger(downtimeMinutes) ||
+      downtimeMinutes < 0 ||
+      downtimeMinutes > activeTicketTargets.elapsedMinutes
+    ) {
+      setTicketError('Простій має бути цілою кількістю хвилин у межах тікета.');
+      return;
+    }
+
+    const endedAt = toLocalIsoString(new Date());
+    setIsCompletingTicket(true);
+    setTicketError(null);
+
+    try {
+      const updatedShift = await completeWorkTicket(shiftRepository, {
+        shiftId: activeShift.id,
+        endedAt,
+        actualQuantity,
+        downtimeMinutes
+      });
+
+      setNow(endedAt);
+      setActiveShift(updatedShift);
+      notifyLocalDataChange();
+    } catch (error) {
+      setTicketError(getTicketErrorMessage(error));
+    } finally {
+      setIsCompletingTicket(false);
     }
   };
 
@@ -465,7 +549,9 @@ export function MainPage({
     setTicketEditDraft({
       normPerEightHours: String(ticket.normPerEightHours),
       startedAt: getTimeInputValue(ticket.startedAt),
-      endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : ''
+      endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : '',
+      actualQuantity: ticket.actualQuantity === null ? '' : String(ticket.actualQuantity),
+      downtimeMinutes: String(ticket.downtimeMinutes)
     });
     setTicketError(null);
   };
@@ -512,6 +598,21 @@ export function MainPage({
     const endedAt = ticketEditDraft.endedAt.trim()
       ? combineLocalDateAndTime(activeShift.date, normalizeTimeInput(ticketEditDraft.endedAt))
       : null;
+    const editedTicket = activeShift.workTickets.find((ticket) => ticket.id === ticketId);
+    const actualQuantity = ticketEditDraft.actualQuantity.trim() === ''
+      ? null
+      : Number(ticketEditDraft.actualQuantity);
+    const downtimeMinutes = Number(ticketEditDraft.downtimeMinutes);
+
+    if (
+      !editedTicket ||
+      (actualQuantity !== null && (!Number.isSafeInteger(actualQuantity) || actualQuantity < 0)) ||
+      !Number.isSafeInteger(downtimeMinutes) ||
+      downtimeMinutes < 0
+    ) {
+      setTicketError('Факт і простій мають бути цілими невідʼємними числами.');
+      return;
+    }
     setPendingTicketId(ticketId);
     setTicketError(null);
 
@@ -522,6 +623,8 @@ export function MainPage({
         normPerEightHours,
         startedAt,
         endedAt,
+        actualQuantity: endedAt === null ? null : actualQuantity,
+        downtimeMinutes,
         updatedAt
       });
 
@@ -573,10 +676,13 @@ export function MainPage({
     }
   };
   const currentDate = getDateFromDateTime(now);
-  const currentHourlyRates = calculateGradeHourlyRateFromMonthlySalary(
+  const currentHourlyRate = calculateHourlyRateFromMonthlySalary(
     settings.monthlySalary,
-    currentDate,
-    settings
+    currentDate
+  );
+  const currentGradeBonus = calculateGradeMonthlyBonus(
+    settings.monthlySalary,
+    calculateCumulativeGradePercent(settings.currentGrade, settings.gradeSalaryBonusPercents)
   );
 
   return (
@@ -710,7 +816,7 @@ export function MainPage({
                     <span>{activeShift.workTickets.length} тік.</span>
                   </div>
 
-                  <div className="main-page__ticket-form">
+                  {!activeWorkTicket ? <div className="main-page__ticket-form">
                     <label>
                       <span>Норма, шт</span>
                       <input
@@ -728,13 +834,13 @@ export function MainPage({
                     <button type="button" disabled={isAddingTicket} onClick={() => void addTicket()}>
                       {isAddingTicket ? 'Додавання...' : 'Додати тікет'}
                     </button>
-                  </div>
+                  </div> : null}
 
                   {activeWorkTicket && activeTicketTargets ? (
                     <div className="main-page__ticket-current">
                       <div className="main-page__ticket-current-card main-page__ticket-current-card--wide">
                         <div className="main-page__ticket-current-main">
-                          <span>Зараз треба</span>
+                          <span>План поточного грейду</span>
                           <strong>{activeTicketTargets.currentTarget} шт</strong>
                         </div>
                         <div className="main-page__ticket-actions" aria-label="Дії з активним тікетом">
@@ -802,6 +908,7 @@ export function MainPage({
                                 inputMode="numeric"
                                 maxLength={5}
                                 placeholder="Триває"
+                                disabled
                                 value={ticketEditDraft.endedAt}
                                 onBlur={() => completeTicketTimeDraft('endedAt')}
                                 onChange={(event) =>
@@ -834,17 +941,69 @@ export function MainPage({
                           </div>
                         </div>
                       ) : null}
-                      <div className="main-page__ticket-current-card">
-                        <span>Зберегти Г{activeTicketTargets.currentGrade}</span>
-                        <strong>{activeTicketTargets.currentTarget} шт зараз</strong>
+                      <div className="main-page__ticket-targets" aria-label="План для всіх грейдів">
+                        {activeTicketTargets.targets.map((target) => (
+                          <article
+                            data-current={target.grade === activeTicketTargets.currentGrade ? 'true' : 'false'}
+                            key={target.grade}
+                          >
+                            <span>Г{target.grade}</span>
+                            <strong>{target.quantity} шт</strong>
+                          </article>
+                        ))}
                       </div>
-                      <div className="main-page__ticket-current-card">
-                        <span>
-                          {activeTicketTargets.desiredGrade === activeTicketTargets.currentGrade
-                            ? `Бажаний Г${activeTicketTargets.desiredGrade}`
-                            : `До Г${activeTicketTargets.desiredGrade}`}
-                        </span>
-                        <strong>{activeTicketTargets.desiredTarget} шт зараз</strong>
+                      <div className="main-page__ticket-downtime">
+                        <div>
+                          <span>Простій</span>
+                          <strong>{formatDurationMinutes(activeTicketTargets.downtimeMinutes)}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          data-active={activeDowntimeInterval ? 'true' : 'false'}
+                          disabled={pendingTicketId !== null || isCompletingTicket}
+                          onClick={() => void toggleTicketDowntime()}
+                        >
+                          {activeDowntimeInterval ? 'Завершити простій' : 'Почати простій'}
+                        </button>
+                      </div>
+                      <div className="main-page__ticket-complete-form">
+                        <label>
+                          <span>Фактично зроблено, шт</span>
+                          <input
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={ticketActualDraft}
+                            placeholder="0"
+                            onChange={(event) => {
+                              setTicketActualDraft(event.target.value.replace(/\D/g, ''));
+                              setTicketError(null);
+                            }}
+                          />
+                        </label>
+                        <label>
+                          <span>Простій, хв</span>
+                          <input
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={
+                              isDowntimeDraftEdited
+                                ? ticketDowntimeDraft
+                                : String(activeTicketTargets.downtimeMinutes)
+                            }
+                            onChange={(event) => {
+                              setIsDowntimeDraftEdited(true);
+                              setTicketDowntimeDraft(event.target.value.replace(/\D/g, ''));
+                              setTicketError(null);
+                            }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={isCompletingTicket || pendingTicketId !== null}
+                          onClick={() => void finishActiveTicket()}
+                        >
+                          {isCompletingTicket ? 'Збереження...' : 'Завершити тікет'}
+                        </button>
                       </div>
                     </div>
                   ) : (
@@ -918,6 +1077,35 @@ export function MainPage({
                                         }
                                       />
                                     </label>
+                                    <label>
+                                      <span>Факт, шт</span>
+                                      <input
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        value={ticketEditDraft.actualQuantity}
+                                        placeholder="Не внесено"
+                                        onChange={(event) =>
+                                          changeTicketEditDraft(
+                                            'actualQuantity',
+                                            event.target.value.replace(/\D/g, '')
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label>
+                                      <span>Простій, хв</span>
+                                      <input
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
+                                        value={ticketEditDraft.downtimeMinutes}
+                                        onChange={(event) =>
+                                          changeTicketEditDraft(
+                                            'downtimeMinutes',
+                                            event.target.value.replace(/\D/g, '')
+                                          )
+                                        }
+                                      />
+                                    </label>
                                   </div>
                                   <div className="main-page__ticket-edit-actions">
                                     <button
@@ -945,13 +1133,28 @@ export function MainPage({
                                 <span className="main-page__ticket-history-time">
                                   {formatTime(ticket.startedAt)}-{formatTime(ticket.endedAt)}
                                 </span>
-                                <strong>{ticket.normPerEightHours} шт</strong>
-                                <small>Г{targets.currentGrade}: {targets.currentTarget}</small>
+                                <strong>{ticket.actualQuantity === null ? 'Факт не внесено' : `Факт ${ticket.actualQuantity} шт`}</strong>
                                 <small>
-                                  {targets.desiredGrade === targets.currentGrade
-                                    ? `Г${targets.desiredGrade}`
-                                    : `До Г${targets.desiredGrade}`}
-                                  : {targets.desiredTarget}
+                                  Продуктивно {formatDurationMinutes(targets.productiveMinutes)} · простій{' '}
+                                  {formatDurationMinutes(targets.downtimeMinutes)}
+                                </small>
+                                <small>
+                                  {targets.targets.map((target) => `Г${target.grade}: ${target.quantity}`).join(' · ')}
+                                </small>
+                                <small>
+                                  Виконання Г{targets.currentGrade}:{' '}
+                                  {targets.completionPercent === null
+                                    ? '—'
+                                    : `${Math.round(targets.completionPercent)}%`}
+                                </small>
+                                <small>
+                                  Результат: {ticket.actualQuantity === null
+                                    ? '—'
+                                    : targets.productiveMinutes === 0
+                                      ? 'грейд не визначено'
+                                    : targets.achievedGrade
+                                      ? `Г${targets.achievedGrade}`
+                                      : 'нижче Г1'}
                                 </small>
                                 <div className="main-page__ticket-actions" aria-label="Дії з завершеним тікетом">
                                   <button
@@ -989,11 +1192,15 @@ export function MainPage({
           </section>
 
           <div className="main-page__action-bar">
+            {activeWorkTicket ? (
+              <p className="main-page__hold-hint">Спершу завершіть активний тікет</p>
+            ) : null}
             <HoldButton
               label="Пішов"
               delayMs={settings.leaveHoldDelayMs}
               onConfirm={leave}
               tone="danger"
+              disabled={Boolean(activeWorkTicket)}
             />
           </div>
         </>
@@ -1048,10 +1255,10 @@ export function MainPage({
                         <strong>{getShiftTitle(latestCompletedShift)}</strong>
                       </article>
                       <article className="main-page__metric">
-                        <span>Ставка з грейдом</span>
+                        <span>Базова ставка</span>
                         <strong>
                           {formatHourlyRate(
-                            latestCompletedShift.hourlyRateSnapshot,
+                            latestCompletedShift.baseHourlyRateSnapshot,
                             settings.incognitoEnabled
                           )}
                         </strong>
@@ -1069,10 +1276,14 @@ export function MainPage({
                     </div>
                     <div className="main-page__metrics" aria-label="Поточний стан таймера">
                       <article className="main-page__metric main-page__metric--money">
-                        <span>Ставка з грейдом</span>
+                        <span>Базова ставка</span>
                         <strong>
-                          {formatHourlyRate(currentHourlyRates.effectiveHourlyRate, settings.incognitoEnabled)}
+                          {formatHourlyRate(currentHourlyRate, settings.incognitoEnabled)}
                         </strong>
+                      </article>
+                      <article className="main-page__metric main-page__metric--money">
+                        <span>Грейдова премія/міс</span>
+                        <strong>{formatMoney(currentGradeBonus, settings.incognitoEnabled)}</strong>
                       </article>
                       <article className="main-page__metric main-page__metric--boosted">
                         <span>Остання зміна</span>

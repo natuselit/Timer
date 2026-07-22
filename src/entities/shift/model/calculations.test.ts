@@ -156,7 +156,7 @@ describe('calculateSalaryBreakdown', () => {
     ]);
   });
 
-  it('applies grade only to regular auto time and keeps overtime on base rate', () => {
+  it('ignores the legacy grade-inflated rate and pays all time from the base rate', () => {
     const salary = calculateSalaryBreakdown(
       createShift({
         baseHourlyRateSnapshot: 100,
@@ -168,9 +168,9 @@ describe('calculateSalaryBreakdown', () => {
 
     expect(salary).toMatchObject({
       mode: 'auto',
-      hourlyRate: 110,
+      hourlyRate: 100,
       totalMinutes: 500,
-      totalAmount: 930
+      totalAmount: 850
     });
     expect(salary.lines).toEqual([
       {
@@ -178,7 +178,7 @@ describe('calculateSalaryBreakdown', () => {
         label: 'Основний час x1',
         minutes: 480,
         coefficient: 1,
-        amount: 880
+        amount: 800
       },
       {
         key: 'overtime-before',
@@ -198,51 +198,63 @@ describe('calculateSalaryBreakdown', () => {
   });
 
   it('calculates x1 salary for the whole actual shift', () => {
-    expect(calculateSalaryBreakdown(createShift({ coefficientMode: 'x1' }))).toMatchObject({
+    expect(calculateSalaryBreakdown(createShift({
+      coefficientMode: 'x1',
+      baseHourlyRateSnapshot: 100,
+      hourlyRateSnapshot: 140
+    }))).toMatchObject({
       mode: 'x1',
       totalMinutes: 480,
-      totalAmount: 960,
+      totalAmount: 800,
       lines: [
         {
           key: 'whole-shift',
           label: 'Уся зміна x1',
           minutes: 480,
           coefficient: 1,
-          amount: 960
+          amount: 800
         }
       ]
     });
   });
 
   it('calculates x1.5 salary for the whole actual shift', () => {
-    expect(calculateSalaryBreakdown(createShift({ coefficientMode: 'x1.5' }))).toMatchObject({
+    expect(calculateSalaryBreakdown(createShift({
+      coefficientMode: 'x1.5',
+      baseHourlyRateSnapshot: 100,
+      hourlyRateSnapshot: 140
+    }))).toMatchObject({
       mode: 'x1.5',
       totalMinutes: 480,
-      totalAmount: 1_440,
+      totalAmount: 1_200,
       lines: [
         {
           key: 'whole-shift',
           label: 'Уся зміна x1.5',
           minutes: 480,
           coefficient: 1.5,
-          amount: 1_440
+          amount: 1_200
         }
       ]
     });
   });
 
   it('calculates x2 salary for the whole actual shift', () => {
-    expect(calculateSalaryBreakdown(createShift({ coefficientMode: 'x2' }))).toMatchObject({
+    expect(calculateSalaryBreakdown(createShift({
+      coefficientMode: 'x2',
+      baseHourlyRateSnapshot: 100,
+      hourlyRateSnapshot: 140
+    }))).toMatchObject({
       mode: 'x2',
       totalMinutes: 480,
-      totalAmount: 1_920,
+      totalAmount: 1_600,
       lines: [
         {
           key: 'whole-shift',
           label: 'Уся зміна x2',
           minutes: 480,
           coefficient: 2,
-          amount: 1_920
+          amount: 1_600
         }
       ]
     });

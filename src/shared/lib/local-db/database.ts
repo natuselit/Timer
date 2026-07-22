@@ -18,8 +18,41 @@ export class ShifterDatabase extends Dexie {
       enterpriseSchedule: '&id,&date,createdAt',
       appMeta: '&key'
     });
+
+    this.version(2)
+      .stores({
+        settings: '&id',
+        shifts: '&id,&date,updatedAt,createdAt',
+        enterpriseSchedule: '&id,&date,createdAt',
+        appMeta: '&key'
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table<Shift, string>('shifts')
+          .toCollection()
+          .modify((shift) => {
+            shift.hourlyRateSnapshot = Number.isFinite(shift.baseHourlyRateSnapshot)
+              ? shift.baseHourlyRateSnapshot
+              : shift.hourlyRateSnapshot;
+            shift.workTickets = Array.isArray(shift.workTickets)
+              ? shift.workTickets.map((ticket) => ({
+                  ...ticket,
+                  actualQuantity:
+                    Number.isSafeInteger(ticket.actualQuantity) && ticket.actualQuantity! >= 0
+                      ? ticket.actualQuantity!
+                      : null,
+                  downtimeMinutes:
+                    Number.isSafeInteger(ticket.downtimeMinutes) && ticket.downtimeMinutes! >= 0
+                      ? ticket.downtimeMinutes!
+                      : 0,
+                  downtimeIntervals: Array.isArray(ticket.downtimeIntervals)
+                    ? ticket.downtimeIntervals
+                    : []
+                }))
+              : [];
+          });
+      });
   }
 }
 
 export const localDb = new ShifterDatabase();
-

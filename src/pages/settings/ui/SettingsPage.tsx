@@ -6,7 +6,9 @@ import {
   GRADE_VALUES,
   HOLD_DELAY_MAX_MS,
   HOLD_DELAY_MIN_MS,
-  calculateGradeHourlyRateFromMonthlySalary,
+  calculateCumulativeGradePercent,
+  calculateGradeMonthlyBonus,
+  calculateHourlyRateFromMonthlySalary,
   getNextDesiredGrade,
   type Grade,
   type GradePercentSet,
@@ -578,13 +580,16 @@ export function SettingsPage({
     : parsePercentFormValues(values.gradeSalaryBonusPercents).some((percent) => !Number.isFinite(percent))
       ? settings.gradeSalaryBonusPercents
       : parsePercentFormValues(values.gradeSalaryBonusPercents);
-  const currentHourlyRate = calculateGradeHourlyRateFromMonthlySalary(
+  const currentHourlyRate = calculateHourlyRateFromMonthlySalary(
     previewMonthlySalary,
-    currentMonthDate,
-    {
-      currentGrade: previewCurrentGrade,
-      gradeSalaryBonusPercents: previewGradeSalaryBonusPercents
-    }
+    currentMonthDate
+  );
+  const currentGradeBonus = calculateGradeMonthlyBonus(
+    previewMonthlySalary,
+    calculateCumulativeGradePercent(
+      previewCurrentGrade,
+      previewGradeSalaryBonusPercents
+    )
   );
 
   return (
@@ -633,8 +638,8 @@ export function SettingsPage({
             onChange={updateField('monthlySalary')}
           />
           <small>
-            База: {formatHourlyRate(currentHourlyRate.baseHourlyRate, settings.incognitoEnabled)} · з грейдом:{' '}
-            {formatHourlyRate(currentHourlyRate.effectiveHourlyRate, settings.incognitoEnabled)}
+            Базова погодинна: {formatHourlyRate(currentHourlyRate, settings.incognitoEnabled)} · грейдова премія:{' '}
+            {formatMoney(currentGradeBonus, settings.incognitoEnabled)}/міс
           </small>
           {errors.monthlySalary ? (
             <small id="monthlySalary-error">{errors.monthlySalary}</small>
@@ -712,7 +717,7 @@ export function SettingsPage({
 
         <div className="settings-page__grade-block">
           <div className="settings-page__grade-block-header">
-            <h3>Надбавка до зарплати</h3>
+            <h3>Грейдова премія від ставки</h3>
             <span aria-hidden="true">%</span>
           </div>
           <div className="settings-page__grade-grid">

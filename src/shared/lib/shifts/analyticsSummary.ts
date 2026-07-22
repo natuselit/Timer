@@ -1,12 +1,17 @@
 import {
   calculateSalaryBreakdown,
   calculateShiftTimeBreakdown,
+  calculateTicketProductionSummary,
   COEFFICIENT_VALUES,
   type ISODateTimeString,
   type LocalDateString,
   type Shift,
   type ShiftType
 } from '../../../entities/shift';
+import {
+  calculateGradeMonthlyBonus,
+  calculateMonthlySalaryFromHourlyRate
+} from '../../../entities/settings';
 
 export type ShiftTypeAnalytics = {
   shiftCount: number;
@@ -20,6 +25,7 @@ export type AnalyticsSummary = {
   workSalary: number;
   plannedSalary: number;
   monthlyBonus: number;
+  gradeBonus: number;
   totalMinutes: number;
   shiftCount: number;
   overtimeMinutes: number;
@@ -40,6 +46,17 @@ export type AnalyticsSummary = {
   }>;
   firstShift: ShiftTypeAnalytics;
   secondShift: ShiftTypeAnalytics;
+  production: {
+    ticketCount: number;
+    filledTicketCount: number;
+    unfilledTicketCount: number;
+    actualQuantity: number;
+    productiveMinutes: number;
+    downtimeMinutes: number;
+    currentGradeTarget: number;
+    completionPercent: number | null;
+    averageActualPerTicket: number;
+  };
 };
 
 export type CalculateAnalyticsSummaryInput = {
@@ -74,7 +91,7 @@ const calculateOvertimeIncome = (shift: Shift, overtimeMinutes: number): number 
 
   const coefficient = COEFFICIENT_VALUES[shift.coefficientMode] ?? 1;
 
-  return (shift.hourlyRateSnapshot / 60) * overtimeMinutes * coefficient;
+  return (shift.baseHourlyRateSnapshot / 60) * overtimeMinutes * coefficient;
 };
 
 export const calculateAnalyticsSummary = ({
@@ -114,6 +131,17 @@ export const calculateAnalyticsSummary = ({
   let earlyExitMinutes = 0;
   const coefficientBreakdown = new Map<number, { coefficient: number; minutes: number; amount: number }>();
   const deviations: AnalyticsSummary['deviations'] = [];
+  const production: AnalyticsSummary['production'] = {
+    ticketCount: 0,
+    filledTicketCount: 0,
+    unfilledTicketCount: 0,
+    actualQuantity: 0,
+    productiveMinutes: 0,
+    downtimeMinutes: 0,
+    currentGradeTarget: 0,
+    completionPercent: null,
+    averageActualPerTicket: 0
+  };
 
   completedShifts.forEach((shift) => {
     const salary = calculateSalaryBreakdown(shift);
@@ -156,16 +184,63 @@ export const calculateAnalyticsSummary = ({
     typeSummary.salaryAmount += salary.totalAmount;
     typeSummary.totalMinutes += time.actualDurationMinutes;
     typeSummary.overtimeMinutes += time.totalOvertimeMinutes;
+
+    shift.workTickets
+      .filter((ticket) => ticket.endedAt !== null)
+      .forEach((ticket) => {
+        production.ticketCount += 1;
+
+        if (ticket.actualQuantity === null || !shift.gradeSnapshot) {
+          production.unfilledTicketCount += 1;
+          return;
+        }
+
+        const ticketSummary = calculateTicketProductionSummary({
+          ticket,
+          effectiveEndTime: ticket.endedAt!,
+          currentGrade: shift.gradeSnapshot.currentGrade,
+          gradeNormPercents: shift.gradeSnapshot.gradeNormPercents
+        });
+
+        production.filledTicketCount += 1;
+        production.actualQuantity += ticket.actualQuantity;
+        production.productiveMinutes += ticketSummary.productiveMinutes;
+        production.downtimeMinutes += ticketSummary.downtimeMinutes;
+        production.currentGradeTarget += ticketSummary.currentTarget;
+      });
   });
 
   const effectiveMonthlyBonus = includeMonthlyBonus ? monthlyBonus : 0;
-  const plannedSalary = workSalary + effectiveMonthlyBonus;
+  const latestGradeShift = [...completedShifts]
+    .filter((shift) => shift.gradeSnapshot !== null)
+    .sort((left, right) => right.date.localeCompare(left.date))[0];
+  const gradeBonus =
+    includeMonthlyBonus && latestGradeShift?.gradeSnapshot
+      ? calculateGradeMonthlyBonus(
+          calculateMonthlySalaryFromHourlyRate(
+            latestGradeShift.baseHourlyRateSnapshot,
+            latestGradeShift.date
+          ),
+          latestGradeShift.gradeSnapshot.cumulativeSalaryBonusPercent
+        )
+      : 0;
+  const plannedSalary = workSalary + effectiveMonthlyBonus + gradeBonus;
+
+  production.completionPercent =
+    production.currentGradeTarget > 0
+      ? (production.actualQuantity / production.currentGradeTarget) * 100
+      : null;
+  production.averageActualPerTicket =
+    production.filledTicketCount > 0
+      ? production.actualQuantity / production.filledTicketCount
+      : 0;
 
   return {
     currentSalary: workSalary,
     workSalary,
     plannedSalary,
     monthlyBonus: effectiveMonthlyBonus,
+    gradeBonus,
     totalMinutes,
     shiftCount: completedShifts.length,
     overtimeMinutes,
@@ -180,6 +255,7 @@ export const calculateAnalyticsSummary = ({
     ),
     deviations,
     firstShift,
-    secondShift
+    secondShift,
+    production
   };
 };

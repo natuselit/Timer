@@ -1,6 +1,6 @@
 import type { EnterpriseScheduleItem } from '../../../../entities/enterprise-schedule';
 import {
-  calculateGradeHourlyRateFromMonthlySalary,
+  calculateHourlyRateFromMonthlySalary,
   createGradeSnapshot,
   type Settings
 } from '../../../../entities/settings';
@@ -111,6 +111,9 @@ const createTickets = (
       normPerEightHours: 48 + (index % 5) * 6,
       startedAt: firstStartedAt,
       endedAt: firstEndedAt,
+      actualQuantity: 18 + (index % 5),
+      downtimeMinutes: index % 3 === 0 ? 10 : 0,
+      downtimeIntervals: [],
       createdAt,
       updatedAt: firstEndedAt
     },
@@ -119,6 +122,9 @@ const createTickets = (
       normPerEightHours: 56 + (index % 4) * 8,
       startedAt: secondStartedAt,
       endedAt: secondEndedAt,
+      actualQuantity: 24 + (index % 7),
+      downtimeMinutes: index % 4 === 0 ? 15 : 0,
+      downtimeIntervals: [],
       createdAt,
       updatedAt: secondEndedAt
     }
@@ -186,10 +192,9 @@ export const createDemoDataSet = (
       return;
     }
 
-    const hourlyRates = calculateGradeHourlyRateFromMonthlySalary(
+    const baseHourlyRate = calculateHourlyRateFromMonthlySalary(
       settings.monthlySalary,
-      date,
-      settings
+      date
     );
     const endTime = actualEnd;
 
@@ -202,8 +207,8 @@ export const createDemoDataSet = (
       plannedEndTime: planned.end,
       startTime: actualStart,
       endTime,
-      baseHourlyRateSnapshot: hourlyRates.baseHourlyRate,
-      hourlyRateSnapshot: hourlyRates.effectiveHourlyRate,
+      baseHourlyRateSnapshot: baseHourlyRate,
+      hourlyRateSnapshot: baseHourlyRate,
       gradeSnapshot: createGradeSnapshot(settings),
       workTickets: createTickets(date, index, type, updatedAt),
       coefficientMode: getCoefficientMode(index),

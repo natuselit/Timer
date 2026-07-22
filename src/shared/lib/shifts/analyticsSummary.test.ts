@@ -160,13 +160,21 @@ describe('calculateAnalyticsSummary', () => {
           id: 'selected-day',
           date: '2026-06-10',
           startTime: '2026-06-10T06:30:00.000+03:00',
-          endTime: '2026-06-10T14:30:00.000+03:00'
+          endTime: '2026-06-10T14:30:00.000+03:00',
+          gradeSnapshot: {
+            currentGrade: 2,
+            desiredGrade: 3,
+            gradeSalaryBonusPercents: [10, 10, 10, 10],
+            gradeNormPercents: [100, 120, 140, 160],
+            cumulativeSalaryBonusPercent: 20
+          }
         })
       ]
     });
 
     expect(summary.workSalary).toBe(960);
     expect(summary.monthlyBonus).toBe(0);
+    expect(summary.gradeBonus).toBe(0);
     expect(summary.plannedSalary).toBe(960);
   });
 
@@ -249,5 +257,102 @@ describe('calculateAnalyticsSummary', () => {
         amount: 1_920
       }
     ]);
+  });
+
+  it('uses the latest historical monthly grade snapshot and weights mixed ticket targets', () => {
+    const summary = calculateAnalyticsSummary({
+      now: '2026-07-15T20:00:00.000+03:00',
+      periodStart: '2026-06-01',
+      periodEnd: '2026-06-30',
+      monthlyBonus: 2_000,
+      includeMonthlyBonus: true,
+      shifts: [
+        makeShift({
+          id: 'earlier-grade-shift',
+          date: '2026-06-10',
+          startTime: '2026-06-10T06:30:00.000+03:00',
+          endTime: '2026-06-10T14:30:00.000+03:00',
+          baseHourlyRateSnapshot: 100,
+          hourlyRateSnapshot: 110,
+          gradeSnapshot: {
+            currentGrade: 1,
+            desiredGrade: 2,
+            gradeSalaryBonusPercents: [10, 10, 10, 10],
+            gradeNormPercents: [100, 120, 140, 160],
+            cumulativeSalaryBonusPercent: 10
+          },
+          workTickets: [
+            {
+              id: 'different-norm-ticket',
+              normPerEightHours: 80,
+              startedAt: '2026-06-10T07:00:00.000+03:00',
+              endedAt: '2026-06-10T08:00:00.000+03:00',
+              actualQuantity: 10,
+              downtimeMinutes: 0,
+              downtimeIntervals: [],
+              createdAt: '2026-06-10T07:00:00.000+03:00',
+              updatedAt: '2026-06-10T08:00:00.000+03:00'
+            }
+          ]
+        }),
+        makeShift({
+          id: 'latest-grade-shift',
+          date: '2026-06-20',
+          startTime: '2026-06-20T06:30:00.000+03:00',
+          endTime: '2026-06-20T14:30:00.000+03:00',
+          baseHourlyRateSnapshot: 100,
+          hourlyRateSnapshot: 120,
+          gradeSnapshot: {
+            currentGrade: 2,
+            desiredGrade: 3,
+            gradeSalaryBonusPercents: [10, 10, 10, 10],
+            gradeNormPercents: [100, 120, 140, 160],
+            cumulativeSalaryBonusPercent: 20
+          },
+          workTickets: [
+            {
+              id: 'filled-ticket',
+              normPerEightHours: 48,
+              startedAt: '2026-06-20T07:00:00.000+03:00',
+              endedAt: '2026-06-20T09:00:00.000+03:00',
+              actualQuantity: 15,
+              downtimeMinutes: 20,
+              downtimeIntervals: [],
+              createdAt: '2026-06-20T07:00:00.000+03:00',
+              updatedAt: '2026-06-20T09:00:00.000+03:00'
+            },
+            {
+              id: 'legacy-ticket',
+              normPerEightHours: 48,
+              startedAt: '2026-06-20T09:00:00.000+03:00',
+              endedAt: '2026-06-20T10:00:00.000+03:00',
+              actualQuantity: null,
+              downtimeMinutes: 0,
+              downtimeIntervals: [],
+              createdAt: '2026-06-20T09:00:00.000+03:00',
+              updatedAt: '2026-06-20T10:00:00.000+03:00'
+            }
+          ]
+        })
+      ]
+    });
+
+    expect(summary).toMatchObject({
+      workSalary: 1_600,
+      monthlyBonus: 2_000,
+      gradeBonus: 3_520,
+      plannedSalary: 7_120,
+      production: {
+        ticketCount: 3,
+        filledTicketCount: 2,
+        unfilledTicketCount: 1,
+        actualQuantity: 25,
+        productiveMinutes: 160,
+        downtimeMinutes: 20,
+        currentGradeTarget: 22,
+        completionPercent: 25 / 22 * 100,
+        averageActualPerTicket: 12.5
+      }
+    });
   });
 });

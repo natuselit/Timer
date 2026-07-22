@@ -63,35 +63,11 @@ export const calculateCumulativeGradePercent = (
     .slice(0, grade)
     .reduce((total, percent) => total + percent, 0);
 
-export const calculateEffectiveHourlyRate = (
-  baseHourlyRate: number,
+export const calculateGradeMonthlyBonus = (
+  monthlySalarySnapshot: number,
   cumulativeGradePercent: number
-): number => baseHourlyRate * (1 + cumulativeGradePercent / 100);
-
-export const calculateGradeHourlyRateFromMonthlySalary = (
-  monthlySalary: number,
-  date: LocalDateString,
-  settings: Pick<Settings, 'currentGrade' | 'gradeSalaryBonusPercents'>
-): {
-  baseHourlyRate: number;
-  effectiveHourlyRate: number;
-  cumulativeSalaryBonusPercent: number;
-} => {
-  const baseHourlyRate = calculateHourlyRateFromMonthlySalary(monthlySalary, date);
-  const cumulativeSalaryBonusPercent = calculateCumulativeGradePercent(
-    settings.currentGrade,
-    settings.gradeSalaryBonusPercents
-  );
-
-  return {
-    baseHourlyRate,
-    effectiveHourlyRate: calculateEffectiveHourlyRate(
-      baseHourlyRate,
-      cumulativeSalaryBonusPercent
-    ),
-    cumulativeSalaryBonusPercent
-  };
-};
+): number =>
+  Math.max(0, monthlySalarySnapshot) * (Math.max(0, cumulativeGradePercent) / 100);
 
 export const createGradeSnapshot = (
   settings: Pick<
@@ -118,8 +94,10 @@ export const calculateGradeProductionTarget = ({
   gradeNormPercent: number;
   elapsedMinutes: number;
 }): number =>
-  Math.max(0, normPerEightHours) *
-  (Math.max(0, gradeNormPercent) / 100) *
-  (Math.max(0, elapsedMinutes) / WORK_MINUTES_PER_DAY);
+  Math.ceil(
+    Math.max(0, normPerEightHours) *
+      (Math.max(0, gradeNormPercent) / 100) *
+      (Math.max(0, elapsedMinutes) / WORK_MINUTES_PER_DAY)
+  );
 
 export const formatProductionTarget = (value: number): number => Math.ceil(Math.max(0, value));

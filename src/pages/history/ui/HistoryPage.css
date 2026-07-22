@@ -634,6 +634,22 @@
   font-weight: 800;
 }
 
+.history-page__ticket-production {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border-radius: var(--radius-compact);
+  background: var(--color-primary-soft);
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.history-page__ticket-production strong {
+  color: var(--color-primary);
+  font-size: 0.76rem;
+}
+
 .history-page__ticket-delete-button {
   width: 38px;
   min-height: 38px;

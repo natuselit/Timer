@@ -11,13 +11,12 @@ import type {
 } from '../../../entities/shift';
 import {
   COEFFICIENT_MODES,
+  calculateTicketProductionSummary,
   getPlannedShiftWindow,
   validateAndSortWorkTickets
 } from '../../../entities/shift';
 import {
   calculateHourlyRateFromMonthlySalary,
-  calculateEffectiveHourlyRate,
-  calculateGradeHourlyRateFromMonthlySalary,
   calculateMonthlySalaryFromHourlyRate,
   createGradeSnapshot,
   type GradePercentSet,
@@ -78,14 +77,18 @@ type ShiftFormValues = {
 
 type TicketFormValue = Omit<
   WorkTicket,
-  'normPerEightHours' | 'startedAt' | 'endedAt'
+  'normPerEightHours' | 'startedAt' | 'endedAt' | 'actualQuantity' | 'downtimeMinutes'
 > & {
   normPerEightHours: string;
   startedAt: string;
   endedAt: string;
+  actualQuantity: string;
+  downtimeMinutes: string;
   originalNormPerEightHours: number;
   originalStartedAt: ISODateTimeString;
   originalEndedAt: ISODateTimeString | null;
+  originalActualQuantity: number | null;
+  originalDowntimeMinutes: number;
 };
 
 type EditorState =
@@ -130,11 +133,16 @@ const toTicketFormValues = (workTickets: WorkTicket[]): TicketFormValue[] =>
     normPerEightHours: String(ticket.normPerEightHours),
     startedAt: getTimeInputValue(ticket.startedAt),
     endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : '',
+    actualQuantity: ticket.actualQuantity === null ? '' : String(ticket.actualQuantity),
+    downtimeMinutes: String(ticket.downtimeMinutes),
+    downtimeIntervals: ticket.downtimeIntervals.map((interval) => ({ ...interval })),
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
     originalNormPerEightHours: ticket.normPerEightHours,
     originalStartedAt: ticket.startedAt,
-    originalEndedAt: ticket.endedAt
+    originalEndedAt: ticket.endedAt,
+    originalActualQuantity: ticket.actualQuantity,
+    originalDowntimeMinutes: ticket.downtimeMinutes
   }));
 
 const parseTicketNormValue = (value: string): number => {
@@ -169,21 +177,42 @@ const createWorkTicketsFromFormValues = (
     const endedAt = ticket.endedAt.trim()
       ? combineLocalDateAndTime(date, normalizeTimeInput(ticket.endedAt))
       : null;
+    const actualQuantity = ticket.actualQuantity.trim() === ''
+      ? null
+      : Number(ticket.actualQuantity);
+    const downtimeMinutes = Number(ticket.downtimeMinutes);
+
+    if (
+      (actualQuantity !== null && (!Number.isSafeInteger(actualQuantity) || actualQuantity < 0)) ||
+      !Number.isSafeInteger(downtimeMinutes) ||
+      downtimeMinutes < 0
+    ) {
+      throw new Error('Факт і простій мають бути цілими невідʼємними числами.');
+    }
 
     if (ticket.originalEndedAt !== null && endedAt === null) {
       throw new Error('Завершений тікет не можна знову зробити активним.');
     }
 
+    if (ticket.originalEndedAt === null && endedAt !== null && actualQuantity === null) {
+      throw new Error('Для завершення тікета обовʼязково вкажіть фактичну кількість.');
+    }
+
     const didChange =
       normPerEightHours !== ticket.originalNormPerEightHours ||
       startedAt !== ticket.originalStartedAt ||
-      endedAt !== ticket.originalEndedAt;
+      endedAt !== ticket.originalEndedAt ||
+      actualQuantity !== ticket.originalActualQuantity ||
+      downtimeMinutes !== ticket.originalDowntimeMinutes;
 
     return {
       id: ticket.id,
       normPerEightHours,
       startedAt,
       endedAt,
+      actualQuantity: endedAt === null ? null : actualQuantity,
+      downtimeMinutes,
+      downtimeIntervals: ticket.downtimeIntervals,
       createdAt: ticket.createdAt,
       updatedAt: didChange ? updatedAt : ticket.updatedAt
     };
@@ -194,6 +223,57 @@ const createWorkTicketsFromFormValues = (
     effectiveShiftEndTime: shiftEndTime ?? updatedAt,
     allowOpenTicket: shiftEndTime === null
   });
+};
+
+const getTicketProductionPreview = (
+  ticket: TicketFormValue,
+  date: LocalDateString,
+  gradeSnapshot: Shift['gradeSnapshot']
+): {
+  summary: ReturnType<typeof calculateTicketProductionSummary>;
+  actualQuantity: number | null;
+} | null => {
+  if (!gradeSnapshot || !ticket.startedAt.trim() || !ticket.endedAt.trim()) {
+    return null;
+  }
+
+  try {
+    const actualQuantity = ticket.actualQuantity.trim() === ''
+      ? null
+      : Number(ticket.actualQuantity);
+    const endedAt = combineLocalDateAndTime(date, normalizeTimeInput(ticket.endedAt));
+    const previewTicket: WorkTicket = {
+      id: ticket.id,
+      normPerEightHours: parseTicketNormValue(ticket.normPerEightHours),
+      startedAt: combineLocalDateAndTime(date, normalizeTimeInput(ticket.startedAt)),
+      endedAt,
+      actualQuantity,
+      downtimeMinutes: Number(ticket.downtimeMinutes),
+      downtimeIntervals: ticket.downtimeIntervals,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt
+    };
+
+    if (
+      !Number.isSafeInteger(previewTicket.downtimeMinutes) ||
+      previewTicket.downtimeMinutes < 0 ||
+      (actualQuantity !== null && (!Number.isSafeInteger(actualQuantity) || actualQuantity < 0))
+    ) {
+      return null;
+    }
+
+    return {
+      actualQuantity,
+      summary: calculateTicketProductionSummary({
+        ticket: previewTicket,
+        effectiveEndTime: endedAt,
+        currentGrade: gradeSnapshot.currentGrade,
+        gradeNormPercents: gradeSnapshot.gradeNormPercents
+      })
+    };
+  } catch {
+    return null;
+  }
 };
 
 const getCoefficientEarnings = (
@@ -357,6 +437,7 @@ export function HistoryPage({
   onDataChange
 }: HistoryPageProps) {
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [calendarShifts, setCalendarShifts] = useState<Shift[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -371,19 +452,33 @@ export function HistoryPage({
         : getMonthRange(calendarMonth.year, calendarMonth.month),
     [selectedRange, calendarMonth]
   );
+  const calendarMonthRange = useMemo(
+    () => getMonthRange(calendarMonth.year, calendarMonth.month),
+    [calendarMonth]
+  );
 
   const loadShifts = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      setShifts(await getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end));
+      const [nextShifts, nextCalendarShifts] = await Promise.all([
+        getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
+        getShiftsBetween(
+          shiftRepository,
+          calendarMonthRange.start,
+          calendarMonthRange.end
+        )
+      ]);
+
+      setShifts(nextShifts);
+      setCalendarShifts(nextCalendarShifts);
     } catch {
       setError('Не вдалося завантажити історію.');
     } finally {
       setIsLoading(false);
     }
-  }, [loadedDateRange]);
+  }, [calendarMonthRange, loadedDateRange]);
 
   useEffect(() => {
     void loadShifts();
@@ -568,6 +663,28 @@ export function HistoryPage({
     );
   };
 
+  const changeEditorTicketNumber = (
+    ticketId: string,
+    key: 'actualQuantity' | 'downtimeMinutes',
+    value: string
+  ) => {
+    const normalizedValue = value.replace(/\D/g, '');
+
+    setEditor((current) =>
+      current?.mode === 'edit'
+        ? {
+            ...current,
+            values: {
+              ...current.values,
+              workTickets: current.values.workTickets.map((ticket) =>
+                ticket.id === ticketId ? { ...ticket, [key]: normalizedValue } : ticket
+              )
+            }
+          }
+        : current
+    );
+  };
+
   const changeEditorTicketTime = (
     ticketId: string,
     key: 'startedAt' | 'endedAt',
@@ -681,19 +798,14 @@ export function HistoryPage({
         throw new Error('Ставка за місяць не може бути відʼємною.');
       }
 
-      const newShiftHourlyRates = calculateGradeHourlyRateFromMonthlySalary(
+      const newShiftHourlyRate = calculateHourlyRateFromMonthlySalary(
         settings.monthlySalary,
-        normalizedValues.date,
-        settings
+        normalizedValues.date
       );
       const editedBaseHourlyRateSnapshot = normalizedValues.hourlyRateSnapshotEdited
         ? calculateHourlyRateFromMonthlySalary(monthlySalary, normalizedValues.date)
         : normalizedValues.hourlyRateSnapshotValue;
       const editedGradeSnapshot = createGradeSnapshot(settings);
-      const editedHourlyRateSnapshot = calculateEffectiveHourlyRate(
-        editedBaseHourlyRateSnapshot,
-        editedGradeSnapshot.cumulativeSalaryBonusPercent
-      );
       const workTickets = createWorkTicketsFromFormValues(
         normalizedValues.workTickets,
         normalizedValues.date,
@@ -709,15 +821,15 @@ export function HistoryPage({
           startTime,
           endTime: endTime ?? startTime,
           baseHourlyRateSnapshot: settings.incognitoEnabled
-            ? newShiftHourlyRates.baseHourlyRate
+            ? newShiftHourlyRate
             : normalizedValues.hourlyRateSnapshotEdited
               ? editedBaseHourlyRateSnapshot
-              : newShiftHourlyRates.baseHourlyRate,
+              : newShiftHourlyRate,
           hourlyRateSnapshot: settings.incognitoEnabled
-            ? newShiftHourlyRates.effectiveHourlyRate
+            ? newShiftHourlyRate
             : normalizedValues.hourlyRateSnapshotEdited
-              ? editedHourlyRateSnapshot
-              : newShiftHourlyRates.effectiveHourlyRate,
+              ? editedBaseHourlyRateSnapshot
+              : newShiftHourlyRate,
           gradeSnapshot: createGradeSnapshot(settings),
           coefficientMode: normalizedValues.coefficientMode,
           now: savedAt
@@ -744,8 +856,8 @@ export function HistoryPage({
               : editedBaseHourlyRateSnapshot,
           hourlyRateSnapshot:
             settings.incognitoEnabled || !normalizedValues.hourlyRateSnapshotEdited
-              ? editor.shift.hourlyRateSnapshot
-              : editedHourlyRateSnapshot,
+              ? editor.shift.baseHourlyRateSnapshot
+              : editedBaseHourlyRateSnapshot,
           gradeSnapshot:
             settings.incognitoEnabled || !normalizedValues.hourlyRateSnapshotEdited
               ? editor.shift.gradeSnapshot
@@ -791,7 +903,7 @@ export function HistoryPage({
         salaryLabel={formatMoney(monthSummary.totalAmount, settings.incognitoEnabled)}
         shiftCount={monthSummary.shiftCount}
         hoursLabel={formatDurationClock(monthSummary.totalMinutes)}
-        shifts={shifts}
+        shifts={calendarShifts}
         selectedRange={selectedRange}
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}
@@ -895,7 +1007,7 @@ export function HistoryPage({
                     </div>
                     <div className="history-page__detail history-page__detail--muted">
                       <dt>Ставка</dt>
-                      <dd>{formatHourlyRate(shift.hourlyRateSnapshot, settings.incognitoEnabled)}</dd>
+                      <dd>{formatHourlyRate(shift.baseHourlyRateSnapshot, settings.incognitoEnabled)}</dd>
                     </div>
                     <div className="history-page__detail history-page__detail--muted history-page__detail--tickets">
                       <dt>
@@ -1075,8 +1187,16 @@ export function HistoryPage({
                   </div>
                   {editor.values.workTickets.length > 0 ? (
                     <div className="history-page__ticket-list">
-                      {editor.values.workTickets.map((ticket, index) => (
-                        <div className="history-page__ticket-row" key={ticket.id}>
+                      {editor.values.workTickets.map((ticket, index) => {
+                        const productionPreview = getTicketProductionPreview(
+                          ticket,
+                          editor.values.date,
+                          editor.shift.gradeSnapshot
+                        );
+                        const production = productionPreview?.summary ?? null;
+                        const previewActualQuantity = productionPreview?.actualQuantity ?? null;
+
+                        return <div className="history-page__ticket-row" key={ticket.id}>
                           <div className="history-page__ticket-row-header">
                             <span className="history-page__ticket-index">
                               <span>Тікет</span>
@@ -1154,9 +1274,78 @@ export function HistoryPage({
                                 <span aria-hidden="true">шт</span>
                               </span>
                             </label>
+                            <label className="history-page__ticket-norm">
+                              <span>Факт</span>
+                              <span className="history-page__ticket-norm-control">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  value={ticket.actualQuantity}
+                                  placeholder="Не внесено"
+                                  onChange={(event) =>
+                                    changeEditorTicketNumber(
+                                      ticket.id,
+                                      'actualQuantity',
+                                      event.target.value
+                                    )
+                                  }
+                                />
+                                <span aria-hidden="true">шт</span>
+                              </span>
+                            </label>
+                            <label className="history-page__ticket-norm">
+                              <span>Простій</span>
+                              <span className="history-page__ticket-norm-control">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  value={ticket.downtimeMinutes}
+                                  onChange={(event) =>
+                                    changeEditorTicketNumber(
+                                      ticket.id,
+                                      'downtimeMinutes',
+                                      event.target.value
+                                    )
+                                  }
+                                />
+                                <span aria-hidden="true">хв</span>
+                              </span>
+                            </label>
                           </div>
+                          {production ? (
+                            <div className="history-page__ticket-production">
+                              <span>
+                                Продуктивно {formatDurationMinutes(production.productiveMinutes)} · простій{' '}
+                                {formatDurationMinutes(production.downtimeMinutes)}
+                              </span>
+                              <span>
+                                {production.targets.map((target) => `Г${target.grade}: ${target.quantity}`).join(' · ')}
+                              </span>
+                              <span>
+                                Виконання Г{production.currentGrade}:{' '}
+                                {production.completionPercent === null
+                                  ? '—'
+                                  : `${Math.round(production.completionPercent)}%`}
+                              </span>
+                              <strong>
+                                {previewActualQuantity === null
+                                  ? 'Факт не внесено'
+                                  : production.productiveMinutes === 0
+                                    ? 'Грейд не визначено'
+                                  : production.achievedGrade
+                                    ? `Досягнуто Г${production.achievedGrade}`
+                                    : 'Результат нижче Г1'}
+                              </strong>
+                            </div>
+                          ) : ticket.actualQuantity.trim() === '' ? (
+                            <div className="history-page__ticket-production">
+                              <strong>Факт не внесено</strong>
+                            </div>
+                          ) : null}
                         </div>
-                      ))}
+                      })}
                     </div>
                   ) : (
                     <p className="history-page__ticket-empty">У цій зміні тікетів немає.</p>

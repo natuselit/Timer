@@ -124,6 +124,9 @@ const formatDeviationDuration = (minutes: number): string => {
   return `${hours} год ${padTimePart(remainingMinutes)} хв`;
 };
 
+const formatPercent = (value: number | null): string =>
+  value === null ? '—' : `${Math.round(value)}%`;
+
 const getDeviationFacts = ({
   lateArrivalMinutes,
   earlyExitMinutes
@@ -333,12 +336,20 @@ export function AnalyticsPage({
 
             <div className="analytics-page__money-grid" aria-label="Фінансовий підсумок">
               <article className="analytics-page__money-card analytics-page__money-card--primary">
-                <span>Зароблено</span>
+                <span>Базовий заробіток</span>
                 <strong>{formatMoney(summary.currentSalary, settings.incognitoEnabled)}</strong>
               </article>
               <article className="analytics-page__money-card">
                 <span>Очікується</span>
                 <strong>{formatMoney(summary.plannedSalary, settings.incognitoEnabled)}</strong>
+              </article>
+              <article className="analytics-page__money-card">
+                <span>Фіксована премія</span>
+                <strong>{formatMoney(summary.monthlyBonus, settings.incognitoEnabled)}</strong>
+              </article>
+              <article className="analytics-page__money-card">
+                <span>Грейдова премія</span>
+                <strong>{formatMoney(summary.gradeBonus, settings.incognitoEnabled)}</strong>
               </article>
               <article className="analytics-page__money-card analytics-page__money-card--count">
                 <span>Змін</span>
@@ -391,6 +402,51 @@ export function AnalyticsPage({
                 </dl>
               </div>
             ) : null}
+          </section>
+
+          <section className="analytics-page__panel" aria-labelledby="analytics-production-title">
+            <header className="analytics-page__panel-header">
+              <div>
+                <p className="analytics-page__eyebrow">Тікети</p>
+                <h3 id="analytics-production-title">Виробіток</h3>
+              </div>
+              <ChartNoAxesColumnIncreasing aria-hidden="true" size={24} />
+            </header>
+
+            <dl className="analytics-page__detail-list" aria-label="Показники виробітку">
+              <div>
+                <dt>Факт</dt>
+                <dd>{summary.production.actualQuantity} шт</dd>
+              </div>
+              <div>
+                <dt>План поточного Г</dt>
+                <dd>{summary.production.currentGradeTarget} шт</dd>
+              </div>
+              <div>
+                <dt>Виконання</dt>
+                <dd>{formatPercent(summary.production.completionPercent)}</dd>
+              </div>
+              <div>
+                <dt>Середній факт</dt>
+                <dd>{summary.production.averageActualPerTicket.toFixed(1)} шт</dd>
+              </div>
+              <div>
+                <dt>Продуктивний час</dt>
+                <dd>{formatDurationMinutes(summary.production.productiveMinutes)}</dd>
+              </div>
+              <div>
+                <dt>Простій</dt>
+                <dd>{formatDurationMinutes(summary.production.downtimeMinutes)}</dd>
+              </div>
+              <div>
+                <dt>Заповнено</dt>
+                <dd>{summary.production.filledTicketCount}/{summary.production.ticketCount}</dd>
+              </div>
+              <div>
+                <dt>Незаповнені</dt>
+                <dd>{summary.production.unfilledTicketCount}</dd>
+              </div>
+            </dl>
           </section>
 
           <section className="analytics-page__panel" aria-labelledby="analytics-shifts-title">

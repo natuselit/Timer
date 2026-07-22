@@ -5,7 +5,7 @@ import {
 } from '../../../../entities/enterprise-schedule';
 import type { EnterpriseScheduleItem } from '../../../../entities/enterprise-schedule';
 import {
-  calculateGradeHourlyRateFromMonthlySalary,
+  calculateHourlyRateFromMonthlySalary,
   createGradeSnapshot
 } from '../../../../entities/settings';
 import type { Settings } from '../../../../entities/settings';
@@ -65,10 +65,9 @@ const createMissingShiftsFromSchedule = async (
       continue;
     }
 
-    const hourlyRates = calculateGradeHourlyRateFromMonthlySalary(
+    const baseHourlyRate = calculateHourlyRateFromMonthlySalary(
       settings.monthlySalary,
-      item.date,
-      settings
+      item.date
     );
 
     await createManualShift(shiftRepository, {
@@ -77,8 +76,8 @@ const createMissingShiftsFromSchedule = async (
       type: item.shiftType,
       startTime: combineLocalDateAndTime(item.date, item.enterpriseStartTime),
       endTime: combineLocalDateAndTime(item.date, item.enterpriseEndTime),
-      baseHourlyRateSnapshot: hourlyRates.baseHourlyRate,
-      hourlyRateSnapshot: hourlyRates.effectiveHourlyRate,
+      baseHourlyRateSnapshot: baseHourlyRate,
+      hourlyRateSnapshot: baseHourlyRate,
       gradeSnapshot: createGradeSnapshot(settings),
       coefficientMode: settings.coefficientMode,
       now

@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto';
+import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import {
@@ -14,6 +15,7 @@ import {
   BackupValidationError,
   BACKUP_SCHEMA_VERSION,
   addWorkTicketToActiveShift,
+  completeWorkTicket,
   createBackup,
   createManualShift,
   createShift,
@@ -34,6 +36,8 @@ import {
   serializeBackup,
   saveSettings,
   skipEnterpriseScheduleDiscrepancy,
+  startWorkTicketDowntime,
+  stopWorkTicketDowntime,
   syncShiftWithEnterpriseSchedule,
   updateWorkTicketInActiveShift,
   updateShift
@@ -114,6 +118,59 @@ beforeEach(() => {
 afterEach(async () => {
   db.close();
   await db.delete();
+});
+
+describe('database migrations', () => {
+  it('normalizes legacy ticket production fields and hourly snapshots in IndexedDB', async () => {
+    const databaseName = makeDbName();
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase.version(1).stores({
+      settings: '&id',
+      shifts: '&id,&date,updatedAt,createdAt',
+      enterpriseSchedule: '&id,&date,createdAt',
+      appMeta: '&key'
+    });
+    const legacyShift = {
+      ...makeShift({
+        id: 'legacy-indexed-db-shift',
+        endTime: '2026-06-10T14:30:00.000Z',
+        baseHourlyRateSnapshot: 100,
+        hourlyRateSnapshot: 125
+      }),
+      workTickets: [
+        {
+          id: 'legacy-ticket',
+          normPerEightHours: 80,
+          startedAt: '2026-06-10T07:00:00.000Z',
+          endedAt: '2026-06-10T08:00:00.000Z',
+          createdAt: '2026-06-10T07:00:00.000Z',
+          updatedAt: '2026-06-10T08:00:00.000Z'
+        }
+      ]
+    } as unknown as Shift;
+
+    await legacyDatabase.table<Shift, string>('shifts').put(legacyShift);
+    legacyDatabase.close();
+
+    const migratedDatabase = new ShifterDatabase(databaseName);
+
+    try {
+      await expect(migratedDatabase.shifts.get(legacyShift.id)).resolves.toMatchObject({
+        hourlyRateSnapshot: 100,
+        workTickets: [
+          {
+            id: 'legacy-ticket',
+            actualQuantity: null,
+            downtimeMinutes: 0,
+            downtimeIntervals: []
+          }
+        ]
+      });
+    } finally {
+      migratedDatabase.close();
+      await migratedDatabase.delete();
+    }
+  });
 });
 
 describe('settings repository use-cases', () => {
@@ -296,7 +353,7 @@ describe('shift repository use-cases', () => {
     await expect(getActiveShift(shiftRepository)).resolves.toEqual(shift);
   });
 
-  it('adds a work ticket and closes previous active ticket in the same shift', async () => {
+  it('requires each ticket to be completed with fact before starting the next one', async () => {
     const shift = await createShift(shiftRepository, {
       id: 'ticket-shift',
       startTime: '2026-06-10T06:30:00.000Z',
@@ -310,11 +367,29 @@ describe('shift repository use-cases', () => {
       normPerEightHours: 50,
       startedAt: '2026-06-10T07:00:00.000Z'
     });
+    await expect(addWorkTicketToActiveShift(shiftRepository, {
+      shiftId: shift.id,
+      id: 'ticket-2',
+      normPerEightHours: 20,
+      startedAt: '2026-06-10T09:00:00.000Z'
+    })).rejects.toThrow('Спершу завершіть активний тікет.');
+    await completeWorkTicket(shiftRepository, {
+      shiftId: shift.id,
+      endedAt: '2026-06-10T09:00:00.000Z',
+      actualQuantity: 17,
+      downtimeMinutes: 10
+    });
     const updatedShift = await addWorkTicketToActiveShift(shiftRepository, {
       shiftId: shift.id,
       id: 'ticket-2',
       normPerEightHours: 20,
       startedAt: '2026-06-10T09:00:00.000Z'
+    });
+    await completeWorkTicket(shiftRepository, {
+      shiftId: shift.id,
+      endedAt: '2026-06-10T10:00:00.000Z',
+      actualQuantity: 5,
+      downtimeMinutes: 0
     });
     const finalShift = await addWorkTicketToActiveShift(shiftRepository, {
       shiftId: shift.id,
@@ -328,12 +403,15 @@ describe('shift repository use-cases', () => {
       expect.objectContaining({
         id: 'ticket-1',
         normPerEightHours: 50,
-        endedAt: '2026-06-10T09:00:00.000Z'
+        endedAt: '2026-06-10T09:00:00.000Z',
+        actualQuantity: 17,
+        downtimeMinutes: 10
       }),
       expect.objectContaining({
         id: 'ticket-2',
         normPerEightHours: 20,
-        endedAt: '2026-06-10T10:00:00.000Z'
+        endedAt: '2026-06-10T10:00:00.000Z',
+        actualQuantity: 5
       }),
       expect.objectContaining({
         id: 'ticket-3',
@@ -377,6 +455,76 @@ describe('shift repository use-cases', () => {
     ]);
   });
 
+  it('persists downtime intervals, auto-closes an open interval and accepts zero fact', async () => {
+    const shift = await createShift(shiftRepository, {
+      id: 'downtime-ticket-shift',
+      startTime: '2026-06-10T06:30:00.000Z',
+      hourlyRateSnapshot: 120,
+      now: '2026-06-10T06:30:00.000Z'
+    });
+    await addWorkTicketToActiveShift(shiftRepository, {
+      shiftId: shift.id,
+      id: 'downtime-ticket',
+      normPerEightHours: 50,
+      startedAt: '2026-06-10T07:00:00.000Z'
+    });
+    await startWorkTicketDowntime(shiftRepository, {
+      shiftId: shift.id,
+      id: 'downtime-1',
+      startedAt: '2026-06-10T07:30:00.000Z'
+    });
+    await stopWorkTicketDowntime(shiftRepository, {
+      shiftId: shift.id,
+      endedAt: '2026-06-10T07:45:00.000Z'
+    });
+    await startWorkTicketDowntime(shiftRepository, {
+      shiftId: shift.id,
+      id: 'downtime-2',
+      startedAt: '2026-06-10T08:00:00.000Z'
+    });
+
+    const reloaded = await getActiveShift(shiftRepository);
+    expect(reloaded?.workTickets[0].downtimeIntervals[1].endedAt).toBeNull();
+
+    const completed = await completeWorkTicket(shiftRepository, {
+      shiftId: shift.id,
+      endedAt: '2026-06-10T08:30:00.000Z',
+      actualQuantity: 0,
+      downtimeMinutes: 45
+    });
+
+    expect(completed.workTickets[0]).toMatchObject({
+      actualQuantity: 0,
+      downtimeMinutes: 45,
+      downtimeIntervals: [
+        { id: 'downtime-1', endedAt: '2026-06-10T07:45:00.000Z' },
+        { id: 'downtime-2', endedAt: '2026-06-10T08:30:00.000Z' }
+      ]
+    });
+  });
+
+  it('rejects leaving a shift while its ticket is still active', async () => {
+    const shift = await createShift(shiftRepository, {
+      id: 'blocked-leave-shift',
+      startTime: '2026-06-10T06:30:00.000Z',
+      hourlyRateSnapshot: 120,
+      now: '2026-06-10T06:30:00.000Z'
+    });
+    const withTicket = await addWorkTicketToActiveShift(shiftRepository, {
+      shiftId: shift.id,
+      id: 'blocking-ticket',
+      normPerEightHours: 50,
+      startedAt: '2026-06-10T07:00:00.000Z'
+    });
+
+    await expect(
+      updateShift(shiftRepository, {
+        ...withTicket,
+        endTime: '2026-06-10T14:30:00.000Z'
+      })
+    ).rejects.toThrow('Active work ticket must be completed');
+  });
+
   it('manually finishes an active ticket and keeps the shift active', async () => {
     const shift = await createShift(shiftRepository, {
       id: 'finish-ticket-shift',
@@ -391,12 +539,24 @@ describe('shift repository use-cases', () => {
       startedAt: '2026-06-10T07:00:00.000Z'
     });
 
+    await expect(
+      updateWorkTicketInActiveShift(shiftRepository, {
+        shiftId: shift.id,
+        ticketId: 'finished-ticket',
+        normPerEightHours: 50,
+        startedAt: '2026-06-10T07:05:00.000Z',
+        endedAt: '2026-06-10T08:15:00.000Z',
+        updatedAt: '2026-06-10T09:00:00.000Z'
+      })
+    ).rejects.toThrow('обовʼязково вкажіть фактичну кількість');
+
     const updatedShift = await updateWorkTicketInActiveShift(shiftRepository, {
       shiftId: shift.id,
       ticketId: 'finished-ticket',
       normPerEightHours: 50,
       startedAt: '2026-06-10T07:05:00.000Z',
       endedAt: '2026-06-10T08:15:00.000Z',
+      actualQuantity: 0,
       updatedAt: '2026-06-10T09:00:00.000Z'
     });
 
@@ -407,7 +567,8 @@ describe('shift repository use-cases', () => {
         expect.objectContaining({
           id: 'finished-ticket',
           startedAt: '2026-06-10T07:05:00.000Z',
-          endedAt: '2026-06-10T08:15:00.000Z'
+          endedAt: '2026-06-10T08:15:00.000Z',
+          actualQuantity: 0
         })
       ]
     });
@@ -426,6 +587,12 @@ describe('shift repository use-cases', () => {
       id: 'ticket-1',
       normPerEightHours: 50,
       startedAt: '2026-06-10T07:00:00.000Z'
+    });
+    await completeWorkTicket(shiftRepository, {
+      shiftId: shift.id,
+      endedAt: '2026-06-10T09:00:00.000Z',
+      actualQuantity: 20,
+      downtimeMinutes: 0
     });
     await addWorkTicketToActiveShift(shiftRepository, {
       shiftId: shift.id,
@@ -470,6 +637,12 @@ describe('shift repository use-cases', () => {
       normPerEightHours: 50,
       startedAt: '2026-06-10T07:00:00.000Z'
     });
+    await completeWorkTicket(shiftRepository, {
+      shiftId: shift.id,
+      endedAt: '2026-06-10T09:00:00.000Z',
+      actualQuantity: 20,
+      downtimeMinutes: 0
+    });
     await addWorkTicketToActiveShift(shiftRepository, {
       shiftId: shift.id,
       id: 'deleted-ticket-2',
@@ -508,6 +681,9 @@ describe('shift repository use-cases', () => {
           normPerEightHours: 50,
           startedAt: '2026-06-11T07:00:00.000Z',
           endedAt: '2026-06-11T10:00:00.000Z',
+          actualQuantity: 20,
+          downtimeMinutes: 0,
+          downtimeIntervals: [],
           createdAt: '2026-06-11T07:00:00.000Z',
           updatedAt: '2026-06-11T07:00:00.000Z'
         },
@@ -516,6 +692,9 @@ describe('shift repository use-cases', () => {
           normPerEightHours: 25,
           startedAt: '2026-06-11T10:00:00.000Z',
           endedAt: '2026-06-11T14:30:00.000Z',
+          actualQuantity: 15,
+          downtimeMinutes: 0,
+          downtimeIntervals: [],
           createdAt: '2026-06-11T10:00:00.000Z',
           updatedAt: '2026-06-11T10:00:00.000Z'
         }
@@ -552,6 +731,30 @@ describe('shift repository use-cases', () => {
         })
       ]
     });
+  });
+
+  it('rejects invalid production values on repository writes', async () => {
+    await expect(
+      shiftRepository.createShift(
+        makeShift({
+          id: 'invalid-production-write',
+          endTime: '2026-06-10T14:30:00.000Z',
+          workTickets: [
+            {
+              id: 'invalid-fact-ticket',
+              normPerEightHours: 50,
+              startedAt: '2026-06-10T07:00:00.000Z',
+              endedAt: '2026-06-10T08:00:00.000Z',
+              actualQuantity: 1.5,
+              downtimeMinutes: 0,
+              downtimeIntervals: [],
+              createdAt: '2026-06-10T07:00:00.000Z',
+              updatedAt: '2026-06-10T08:00:00.000Z'
+            }
+          ]
+        })
+      )
+    ).rejects.toThrow('Фактична кількість');
   });
 
   it('creates a completed manual shift with selected type and planned window', async () => {
@@ -829,13 +1032,13 @@ describe('shift repository use-cases', () => {
       }),
       updatedAt: '2026-07-31T12:00:00.000Z'
     });
-    expect(updatedShifts[0].hourlyRateSnapshot).toBeCloseTo(110, 6);
+    expect(updatedShifts[0].hourlyRateSnapshot).toBeCloseTo(100, 6);
     expect(updatedShifts[1]).toMatchObject({
       id: 'completed-2',
       updatedAt: '2026-07-31T12:00:00.000Z'
     });
     expect(updatedShifts[1].baseHourlyRateSnapshot).toBeCloseTo(95.652_173_913, 6);
-    expect(updatedShifts[1].hourlyRateSnapshot).toBeCloseTo(105.217_391_304, 6);
+    expect(updatedShifts[1].hourlyRateSnapshot).toBeCloseTo(95.652_173_913, 6);
   });
 });
 
@@ -920,7 +1123,7 @@ Total: 08:00`,
       }),
       coefficientMode: 'x1.5'
     });
-    expect(createdShifts[0].hourlyRateSnapshot).toBeCloseTo(231, 6);
+    expect(createdShifts[0].hourlyRateSnapshot).toBeCloseTo(210, 6);
     expect(createdShifts[1]).toEqual(existingShift);
   });
 
@@ -1049,6 +1252,41 @@ describe('backup use-cases', () => {
       shifts: [shift],
       enterpriseSchedule: [scheduleItem]
     });
+  });
+
+  it('round-trips schema v5 ticket fact and downtime data', () => {
+    const shift = makeShift({
+      id: 'production-backup-shift',
+      endTime: '2026-06-10T14:30:00.000Z',
+      workTickets: [
+        {
+          id: 'production-ticket',
+          normPerEightHours: 80,
+          startedAt: '2026-06-10T07:00:00.000Z',
+          endedAt: '2026-06-10T08:00:00.000Z',
+          actualQuantity: 9,
+          downtimeMinutes: 6,
+          downtimeIntervals: [
+            {
+              id: 'downtime-1',
+              startedAt: '2026-06-10T07:20:00.000Z',
+              endedAt: '2026-06-10T07:26:00.000Z'
+            }
+          ],
+          createdAt: '2026-06-10T07:00:00.000Z',
+          updatedAt: '2026-06-10T08:00:00.000Z'
+        }
+      ]
+    });
+    const source = serializeBackup({
+      schemaVersion: BACKUP_SCHEMA_VERSION,
+      exportedAt: '2026-06-24T12:00:00.000Z',
+      settings: makeSettings(),
+      shifts: [shift],
+      enterpriseSchedule: []
+    });
+
+    expect(parseBackupJson(source).shifts[0]).toEqual(shift);
   });
 
   it('parses older backups without employee first name', () => {
@@ -1184,7 +1422,7 @@ describe('backup use-cases', () => {
     expect(parsed.settings.themePreference).toBe('system');
     expect(parsed.shifts[0]).toMatchObject({
       baseHourlyRateSnapshot: 100,
-      hourlyRateSnapshot: 110,
+      hourlyRateSnapshot: 100,
       gradeSnapshot: legacyShift.gradeSnapshot,
       workTickets: []
     });
@@ -1272,6 +1510,9 @@ describe('backup use-cases', () => {
               normPerEightHours: 50,
               startedAt: '2026-06-10T09:00:00.000Z',
               endedAt: '2026-06-10T08:00:00.000Z',
+              actualQuantity: 0,
+              downtimeMinutes: 0,
+              downtimeIntervals: [],
               createdAt: '2026-06-10T09:00:00.000Z',
               updatedAt: '2026-06-10T08:00:00.000Z'
             }
@@ -1283,6 +1524,39 @@ describe('backup use-cases', () => {
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
     expect(() => parseBackupJson(source)).toThrow('Тікет не може завершуватись раніше старту.');
+  });
+
+  it.each([
+    ['нецілий факт', { actualQuantity: 1.5, downtimeMinutes: 0 }],
+    ['простій довший за тікет', { actualQuantity: 1, downtimeMinutes: 61 }]
+  ])('rejects ticket with %s', (_label, invalidValues) => {
+    const source = serializeBackup({
+      schemaVersion: BACKUP_SCHEMA_VERSION,
+      exportedAt: '2026-06-24T12:00:00.000Z',
+      settings: makeSettings(),
+      shifts: [
+        makeShift({
+          id: 'invalid-production-shift',
+          endTime: '2026-06-10T14:30:00.000Z',
+          workTickets: [
+            {
+              id: 'invalid-production-ticket',
+              normPerEightHours: 80,
+              startedAt: '2026-06-10T07:00:00.000Z',
+              endedAt: '2026-06-10T08:00:00.000Z',
+              actualQuantity: invalidValues.actualQuantity,
+              downtimeMinutes: invalidValues.downtimeMinutes,
+              downtimeIntervals: [],
+              createdAt: '2026-06-10T07:00:00.000Z',
+              updatedAt: '2026-06-10T08:00:00.000Z'
+            }
+          ]
+        })
+      ],
+      enterpriseSchedule: []
+    });
+
+    expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
   });
 
   it('rejects calendar-invalid dates and a shift ending before arrival', () => {

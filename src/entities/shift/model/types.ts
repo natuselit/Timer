@@ -20,11 +20,20 @@ export type GradeSnapshot = {
   cumulativeSalaryBonusPercent: number;
 };
 
+export type WorkTicketDowntimeInterval = {
+  id: string;
+  startedAt: ISODateTimeString;
+  endedAt: ISODateTimeString | null;
+};
+
 export type WorkTicket = {
   id: string;
   normPerEightHours: number;
   startedAt: ISODateTimeString;
   endedAt: ISODateTimeString | null;
+  actualQuantity: number | null;
+  downtimeMinutes: number;
+  downtimeIntervals: WorkTicketDowntimeInterval[];
   createdAt: ISODateTimeString;
   updatedAt: ISODateTimeString;
 };

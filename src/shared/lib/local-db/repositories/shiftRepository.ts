@@ -1,9 +1,16 @@
 import {
-  calculateGradeHourlyRateFromMonthlySalary,
+  calculateHourlyRateFromMonthlySalary,
   createGradeSnapshot,
   type Settings
 } from '../../../../entities/settings';
-import type { GradeSnapshot, LocalDateString, Shift, WorkTicket } from '../../../../entities/shift';
+import type {
+  GradeSnapshot,
+  LocalDateString,
+  Shift,
+  WorkTicket,
+  WorkTicketDowntimeInterval
+} from '../../../../entities/shift';
+import { validateAndSortWorkTickets } from '../../../../entities/shift';
 import type { ShifterDatabase } from '../database';
 
 export class ShiftConstraintError extends Error {
@@ -14,6 +21,12 @@ export class ShiftConstraintError extends Error {
 }
 
 const isActiveShift = (shift: Pick<Shift, 'endTime'>): boolean => shift.endTime === null;
+
+const assertNoOpenTicketInCompletedShift = (shift: Shift): void => {
+  if (shift.endTime !== null && shift.workTickets.some((ticket) => ticket.endedAt === null)) {
+    throw new ShiftConstraintError('Active work ticket must be completed before leaving');
+  }
+};
 
 type LegacyShiftRecord = Partial<Shift> & Pick<
   Shift,
@@ -40,6 +53,28 @@ type GradeSettings = Pick<
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
+const normalizeDowntimeIntervals = (value: unknown): WorkTicketDowntimeInterval[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((interval): interval is WorkTicketDowntimeInterval => {
+      if (typeof interval !== 'object' || interval === null || Array.isArray(interval)) {
+        return false;
+      }
+
+      const candidate = interval as Partial<WorkTicketDowntimeInterval>;
+
+      return (
+        typeof candidate.id === 'string' &&
+        typeof candidate.startedAt === 'string' &&
+        (candidate.endedAt === null || typeof candidate.endedAt === 'string')
+      );
+    })
+    .map((interval) => ({ ...interval }));
+};
+
 const normalizeWorkTickets = (value: unknown): WorkTicket[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -63,7 +98,18 @@ const normalizeWorkTickets = (value: unknown): WorkTicket[] => {
         typeof candidate.updatedAt === 'string'
       );
     })
-    .map((ticket) => ({ ...ticket }));
+    .map((ticket) => ({
+      ...ticket,
+      actualQuantity:
+        Number.isSafeInteger(ticket.actualQuantity) && ticket.actualQuantity! >= 0
+          ? ticket.actualQuantity!
+          : null,
+      downtimeMinutes:
+        Number.isSafeInteger(ticket.downtimeMinutes) && ticket.downtimeMinutes! >= 0
+          ? ticket.downtimeMinutes!
+          : 0,
+      downtimeIntervals: normalizeDowntimeIntervals(ticket.downtimeIntervals)
+    }));
 };
 
 const normalizeGradeSnapshot = (value: unknown): GradeSnapshot | null => {
@@ -99,6 +145,42 @@ export const normalizeShiftRecord = (record: LegacyShiftRecord): Shift => ({
   workTickets: normalizeWorkTickets(record.workTickets)
 });
 
+const prepareShiftForWrite = (record: Shift): Shift => {
+  record.workTickets.forEach((ticket) => {
+    if (!Number.isFinite(ticket.normPerEightHours) || ticket.normPerEightHours <= 0) {
+      throw new Error('Норма має бути більшою за 0.');
+    }
+
+    if (
+      ticket.actualQuantity !== null &&
+      (!Number.isSafeInteger(ticket.actualQuantity) || ticket.actualQuantity < 0)
+    ) {
+      throw new Error('Фактична кількість має бути цілим невідʼємним числом.');
+    }
+
+    if (!Number.isSafeInteger(ticket.downtimeMinutes) || ticket.downtimeMinutes < 0) {
+      throw new Error('Простій має бути цілою невідʼємною кількістю хвилин.');
+    }
+
+    if (!Array.isArray(ticket.downtimeIntervals)) {
+      throw new Error('Інтервали простою мають бути масивом.');
+    }
+  });
+
+  const shift = normalizeShiftRecord(record);
+
+  assertNoOpenTicketInCompletedShift(shift);
+  if (shift.workTickets.length > 0) {
+    shift.workTickets = validateAndSortWorkTickets(shift.workTickets, {
+      shiftStartTime: shift.startTime,
+      effectiveShiftEndTime: shift.endTime ?? shift.updatedAt,
+      allowOpenTicket: shift.endTime === null
+    });
+  }
+
+  return shift;
+};
+
 const getMonthRange = (
   year: number,
   month: number
@@ -117,7 +199,7 @@ export class ShiftRepository {
   constructor(private readonly db: ShifterDatabase) {}
 
   async createShift(shift: Shift): Promise<Shift> {
-    const normalizedShift = normalizeShiftRecord(shift);
+    const normalizedShift = prepareShiftForWrite(shift);
 
     await this.db.transaction('rw', this.db.shifts, async () => {
       await this.assertNoShiftForDate(normalizedShift.date);
@@ -133,7 +215,7 @@ export class ShiftRepository {
   }
 
   async updateShift(shift: Shift): Promise<Shift> {
-    const normalizedShift = normalizeShiftRecord(shift);
+    const normalizedShift = prepareShiftForWrite(shift);
 
     await this.db.transaction('rw', this.db.shifts, async () => {
       const existing = await this.db.shifts.get(normalizedShift.id);
@@ -168,14 +250,13 @@ export class ShiftRepository {
     const gradeSnapshot = createGradeSnapshot(gradeSettings);
 
     return this.db.shifts.toCollection().modify((shift) => {
-      const hourlyRates = calculateGradeHourlyRateFromMonthlySalary(
+      const baseHourlyRate = calculateHourlyRateFromMonthlySalary(
         monthlySalary,
-        shift.date,
-        gradeSettings
+        shift.date
       );
 
-      shift.baseHourlyRateSnapshot = hourlyRates.baseHourlyRate;
-      shift.hourlyRateSnapshot = hourlyRates.effectiveHourlyRate;
+      shift.baseHourlyRateSnapshot = baseHourlyRate;
+      shift.hourlyRateSnapshot = baseHourlyRate;
       shift.gradeSnapshot = gradeSnapshot;
       shift.workTickets = normalizeWorkTickets(shift.workTickets);
       shift.updatedAt = updatedAt;

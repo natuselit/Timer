@@ -143,13 +143,11 @@ export const calculateSalaryBreakdown = (
     | 'startTime'
     | 'endTime'
     | 'baseHourlyRateSnapshot'
-    | 'hourlyRateSnapshot'
     | 'coefficientMode'
   >
 ): SalaryBreakdown => {
   const timeBreakdown = calculateShiftTimeBreakdown(shift);
-  const hourlyRate = shift.hourlyRateSnapshot;
-  const baseHourlyRate = shift.baseHourlyRateSnapshot;
+  const hourlyRate = shift.baseHourlyRateSnapshot;
 
   if (shift.coefficientMode !== 'auto') {
     const coefficient = COEFFICIENT_VALUES[shift.coefficientMode];
@@ -190,14 +188,14 @@ export const calculateSalaryBreakdown = (
       label: 'Перепрацювання до початку x1.5',
       minutes: timeBreakdown.overtimeBeforeShiftMinutes,
       coefficient: 1.5,
-      amount: calculateAmount(baseHourlyRate, timeBreakdown.overtimeBeforeShiftMinutes, 1.5)
+      amount: calculateAmount(hourlyRate, timeBreakdown.overtimeBeforeShiftMinutes, 1.5)
     },
     {
       key: 'overtime-after',
       label: 'Перепрацювання після кінця x1.5',
       minutes: timeBreakdown.overtimeAfterShiftMinutes,
       coefficient: 1.5,
-      amount: calculateAmount(baseHourlyRate, timeBreakdown.overtimeAfterShiftMinutes, 1.5)
+      amount: calculateAmount(hourlyRate, timeBreakdown.overtimeAfterShiftMinutes, 1.5)
     }
   ];
 

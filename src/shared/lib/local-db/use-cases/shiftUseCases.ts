@@ -61,27 +61,17 @@ const createId = (): string => {
   return `shift-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
-const closeActiveWorkTickets = (
-  workTickets: WorkTicket[],
-  endedAt: ISODateTimeString
-): WorkTicket[] =>
-  workTickets.map((ticket) =>
-    ticket.endedAt === null
-      ? {
-          ...ticket,
-          endedAt,
-          updatedAt: endedAt
-        }
-      : ticket
-  );
+const assertActualQuantity = (actualQuantity: number): void => {
+  if (!Number.isSafeInteger(actualQuantity) || actualQuantity < 0) {
+    throw new Error('Фактична кількість має бути цілим невідʼємним числом.');
+  }
+};
 
-export const closeShiftWorkTickets = (
-  shift: Shift,
-  endedAt: ISODateTimeString
-): Shift => ({
-  ...shift,
-  workTickets: closeActiveWorkTickets(shift.workTickets, endedAt)
-});
+const assertDowntimeMinutes = (downtimeMinutes: number): void => {
+  if (!Number.isSafeInteger(downtimeMinutes) || downtimeMinutes < 0) {
+    throw new Error('Простій має бути цілою невідʼємною кількістю хвилин.');
+  }
+};
 
 const assertTicketNorm = (normPerEightHours: number): void => {
   if (!Number.isFinite(normPerEightHours) || normPerEightHours <= 0) {
@@ -204,17 +194,24 @@ export const addWorkTicketToActiveShift = async (
     throw new Error('Не можна додати тікет до завершеної зміни.');
   }
 
+  if (shift.workTickets.some((ticket) => ticket.endedAt === null)) {
+    throw new Error('Спершу завершіть активний тікет.');
+  }
+
   const ticket: WorkTicket = {
     id: input.id ?? createId(),
     normPerEightHours: input.normPerEightHours,
     startedAt: input.startedAt,
     endedAt: null,
+    actualQuantity: null,
+    downtimeMinutes: 0,
+    downtimeIntervals: [],
     createdAt: input.startedAt,
     updatedAt: input.startedAt
   };
 
   const workTickets = validateAndSortWorkTickets(
-    [...closeActiveWorkTickets(shift.workTickets, input.startedAt), ticket],
+    [...shift.workTickets, ticket],
     {
       shiftStartTime: shift.startTime,
       effectiveShiftEndTime: input.startedAt,
@@ -229,6 +226,148 @@ export const addWorkTicketToActiveShift = async (
   });
 };
 
+const getActiveTicket = (shift: Shift): WorkTicket => {
+  const ticket = shift.workTickets.find((item) => item.endedAt === null);
+
+  if (!ticket) {
+    throw new Error('Активний тікет не знайдено.');
+  }
+
+  return ticket;
+};
+
+export const startWorkTicketDowntime = async (
+  repository: ShiftRepository,
+  input: { shiftId: string; startedAt: ISODateTimeString; id?: string }
+): Promise<Shift> => {
+  const shift = await repository.getShiftById(input.shiftId);
+
+  if (!shift || shift.endTime !== null) {
+    throw new Error('Активну зміну не знайдено.');
+  }
+
+  const activeTicket = getActiveTicket(shift);
+
+  if (activeTicket.downtimeIntervals.some((interval) => interval.endedAt === null)) {
+    throw new Error('Простій уже активний.');
+  }
+
+  const workTickets = shift.workTickets.map((ticket) =>
+    ticket.id === activeTicket.id
+      ? {
+          ...ticket,
+          downtimeIntervals: [
+            ...ticket.downtimeIntervals,
+            { id: input.id ?? createId(), startedAt: input.startedAt, endedAt: null }
+          ],
+          updatedAt: input.startedAt
+        }
+      : ticket
+  );
+
+  const sortedWorkTickets = validateAndSortWorkTickets(workTickets, {
+    shiftStartTime: shift.startTime,
+    effectiveShiftEndTime: input.startedAt,
+    allowOpenTicket: true
+  });
+
+  return repository.updateShift({ ...shift, workTickets: sortedWorkTickets, updatedAt: input.startedAt });
+};
+
+export const stopWorkTicketDowntime = async (
+  repository: ShiftRepository,
+  input: { shiftId: string; endedAt: ISODateTimeString }
+): Promise<Shift> => {
+  const shift = await repository.getShiftById(input.shiftId);
+
+  if (!shift || shift.endTime !== null) {
+    throw new Error('Активну зміну не знайдено.');
+  }
+
+  const activeTicket = getActiveTicket(shift);
+  const activeInterval = activeTicket.downtimeIntervals.find((interval) => interval.endedAt === null);
+
+  if (!activeInterval) {
+    throw new Error('Активний простій не знайдено.');
+  }
+
+  const intervalMinutes = Math.floor(
+    (new Date(input.endedAt).getTime() - new Date(activeInterval.startedAt).getTime()) / 60_000
+  );
+
+  if (intervalMinutes < 0) {
+    throw new Error('Завершення простою не може бути раніше початку.');
+  }
+
+  const workTickets = shift.workTickets.map((ticket) =>
+    ticket.id === activeTicket.id
+      ? {
+          ...ticket,
+          downtimeMinutes: ticket.downtimeMinutes + intervalMinutes,
+          downtimeIntervals: ticket.downtimeIntervals.map((interval) =>
+            interval.id === activeInterval.id ? { ...interval, endedAt: input.endedAt } : interval
+          ),
+          updatedAt: input.endedAt
+        }
+      : ticket
+  );
+
+  const sortedWorkTickets = validateAndSortWorkTickets(workTickets, {
+    shiftStartTime: shift.startTime,
+    effectiveShiftEndTime: input.endedAt,
+    allowOpenTicket: true
+  });
+
+  return repository.updateShift({ ...shift, workTickets: sortedWorkTickets, updatedAt: input.endedAt });
+};
+
+export const completeWorkTicket = async (
+  repository: ShiftRepository,
+  input: {
+    shiftId: string;
+    endedAt: ISODateTimeString;
+    actualQuantity: number;
+    downtimeMinutes: number;
+  }
+): Promise<Shift> => {
+  assertActualQuantity(input.actualQuantity);
+  assertDowntimeMinutes(input.downtimeMinutes);
+  const shift = await repository.getShiftById(input.shiftId);
+
+  if (!shift || shift.endTime !== null) {
+    throw new Error('Активну зміну не знайдено.');
+  }
+
+  const activeTicket = getActiveTicket(shift);
+  const workTickets = shift.workTickets.map((ticket) => {
+    if (ticket.id !== activeTicket.id) {
+      return ticket;
+    }
+
+    return {
+      ...ticket,
+      endedAt: input.endedAt,
+      actualQuantity: input.actualQuantity,
+      downtimeMinutes: input.downtimeMinutes,
+      downtimeIntervals: ticket.downtimeIntervals.map((interval) =>
+        interval.endedAt === null ? { ...interval, endedAt: input.endedAt } : interval
+      ),
+      updatedAt: input.endedAt
+    };
+  });
+  const sortedWorkTickets = validateAndSortWorkTickets(workTickets, {
+    shiftStartTime: shift.startTime,
+    effectiveShiftEndTime: input.endedAt,
+    allowOpenTicket: true
+  });
+
+  return repository.updateShift({
+    ...shift,
+    workTickets: sortedWorkTickets,
+    updatedAt: input.endedAt
+  });
+};
+
 export const updateWorkTicketInActiveShift = async (
   repository: ShiftRepository,
   input: {
@@ -237,10 +376,18 @@ export const updateWorkTicketInActiveShift = async (
     normPerEightHours: number;
     startedAt: ISODateTimeString;
     endedAt: ISODateTimeString | null;
+    actualQuantity?: number | null;
+    downtimeMinutes?: number;
     updatedAt: ISODateTimeString;
   }
 ): Promise<Shift> => {
   assertTicketNorm(input.normPerEightHours);
+  if (input.actualQuantity !== undefined && input.actualQuantity !== null) {
+    assertActualQuantity(input.actualQuantity);
+  }
+  if (input.downtimeMinutes !== undefined) {
+    assertDowntimeMinutes(input.downtimeMinutes);
+  }
 
   const shift = await repository.getShiftById(input.shiftId);
 
@@ -264,11 +411,26 @@ export const updateWorkTicketInActiveShift = async (
       throw new Error('Завершений тікет не можна знову зробити активним.');
     }
 
+    if (
+      ticket.endedAt === null &&
+      input.endedAt !== null &&
+      (input.actualQuantity === undefined || input.actualQuantity === null)
+    ) {
+      throw new Error('Для завершення тікета обовʼязково вкажіть фактичну кількість.');
+    }
+
     return {
       ...ticket,
       normPerEightHours: input.normPerEightHours,
       startedAt: input.startedAt,
       endedAt: input.endedAt,
+      actualQuantity:
+        input.endedAt === null
+          ? null
+          : input.actualQuantity === undefined
+            ? ticket.actualQuantity
+            : input.actualQuantity,
+      downtimeMinutes: input.downtimeMinutes ?? ticket.downtimeMinutes,
       updatedAt: input.updatedAt
     };
   });

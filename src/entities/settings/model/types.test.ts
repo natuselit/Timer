@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   calculateCumulativeGradePercent,
-  calculateEffectiveHourlyRate,
+  calculateGradeMonthlyBonus,
   calculateGradeProductionTarget,
   calculateHourlyRateFromMonthlySalary,
   calculateMonthlySalaryFromHourlyRate,
@@ -66,8 +66,8 @@ describe('settings domain types', () => {
     expect(getNextDesiredGrade(4)).toBe(4);
   });
 
-  it('calculates effective hourly rate from base rate and grade bonus', () => {
-    expect(calculateEffectiveHourlyRate(100, 20)).toBe(120);
+  it('calculates a separate cumulative grade monthly bonus', () => {
+    expect(calculateGradeMonthlyBonus(20_000, 20)).toBe(4_000);
   });
 
   it('calculates grade production target for elapsed ticket time', () => {
@@ -78,5 +78,12 @@ describe('settings domain types', () => {
         elapsedMinutes: 120
       })
     ).toBe(15);
+    expect(
+      calculateGradeProductionTarget({
+        normPerEightHours: 50,
+        gradeNormPercent: 120,
+        elapsedMinutes: 121
+      })
+    ).toBe(16);
   });
 });
