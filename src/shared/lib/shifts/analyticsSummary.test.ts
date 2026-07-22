@@ -62,10 +62,19 @@ describe('calculateAnalyticsSummary', () => {
       shiftCount: 2,
       overtimeMinutes: 20,
       overtimeIncome: 60,
+      averageSalaryPerShift: 965,
+      effectiveHourlyIncome: 1_930 * 60 / 955,
+      averageShiftMinutes: 477.5,
       averageOvertimeMinutes: 10,
       maxOvertimeMinutes: 20,
       lateArrivalMinutes: 15,
       earlyExitMinutes: 10,
+      lateArrivalShiftCount: 1,
+      earlyExitShiftCount: 1,
+      onScheduleShiftCount: 1,
+      averageLateArrivalMinutes: 15,
+      averageEarlyExitMinutes: 10,
+      scheduleAdherencePercent: 50,
       coefficientBreakdown: [
         {
           coefficient: 1,
@@ -98,6 +107,34 @@ describe('calculateAnalyticsSummary', () => {
         overtimeMinutes: 0
       },
       monthlyBonus: 2_000
+    });
+  });
+
+  it('returns safe empty averages when the selected period has no shifts', () => {
+    const summary = calculateAnalyticsSummary({
+      now: '2026-06-23T20:00:00.000+03:00',
+      periodStart: '2026-06-01',
+      periodEnd: '2026-06-30',
+      monthlyBonus: 2_000,
+      includeMonthlyBonus: false,
+      shifts: []
+    });
+
+    expect(summary).toMatchObject({
+      shiftCount: 0,
+      averageSalaryPerShift: 0,
+      effectiveHourlyIncome: 0,
+      averageShiftMinutes: 0,
+      averageLateArrivalMinutes: 0,
+      averageEarlyExitMinutes: 0,
+      scheduleAdherencePercent: null,
+      production: {
+        averageTicketsPerShift: 0,
+        quantityPerProductiveHour: null,
+        averageProductiveMinutesPerTicket: 0,
+        averageDowntimeMinutesPerTicket: 0,
+        downtimePercent: null
+      }
     });
   });
 
@@ -351,7 +388,12 @@ describe('calculateAnalyticsSummary', () => {
         downtimeMinutes: 20,
         currentGradeTarget: 22,
         completionPercent: 25 / 22 * 100,
-        averageActualPerTicket: 12.5
+        averageActualPerTicket: 12.5,
+        averageTicketsPerShift: 1.5,
+        quantityPerProductiveHour: 25 * 60 / 160,
+        averageProductiveMinutesPerTicket: 80,
+        averageDowntimeMinutesPerTicket: 10,
+        downtimePercent: 20 / 180 * 100
       }
     });
   });

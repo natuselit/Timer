@@ -25,8 +25,10 @@ import {
   completeWorkTicket,
   createShift,
   deleteWorkTicketFromActiveShift,
+  EnterpriseScheduleRepository,
   getActiveShift,
   getLatestCompletedShift,
+  getLocalDataDateBounds,
   localDb,
   ShiftConstraintError,
   ShiftRepository,
@@ -37,6 +39,7 @@ import {
 } from '../../../shared/lib/local-db';
 import {
   combineLocalDateAndTime,
+  getCalendarPresetSelection,
   formatTimeInputDraft,
   formatDate,
   formatDurationMinutes,
@@ -46,11 +49,12 @@ import {
   getDurationMinutes,
   getTimeInputValue,
   normalizeTimeInput,
-  toLocalIsoString
+  toLocalIsoString,
+  type CalendarDateRange,
+  type CalendarRangePreset
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import type { NavigationItem } from '../../../shared/config/navigation';
-import type { CalendarDateRange } from '../../../shared/ui/month-calendar';
 import './MainPage.css';
 
 type MainPageProps = {
@@ -90,6 +94,7 @@ const createEmptyTicketEditDraft = (): TicketEditDraft => ({
 });
 
 const shiftRepository = new ShiftRepository(localDb);
+const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
 
 const getShiftTitle = (shift: Shift): string => (shift.type === 'first' ? '1 зміна' : '2 зміна');
 
@@ -236,6 +241,9 @@ export function MainPage({
   const [localDataRefreshKey, setLocalDataRefreshKey] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
   const [sharedCalendarRange, setSharedCalendarRange] = useState<CalendarDateRange | null>(null);
+  const [allTimeRange, setAllTimeRange] = useState<CalendarDateRange | null>(null);
+  const [activeCalendarRangePreset, setActiveCalendarRangePreset] =
+    useState<CalendarRangePreset | null>('month');
 
   const notifyLocalDataChange = useCallback(() => {
     setLocalDataRefreshKey((current) => current + 1);
@@ -271,6 +279,38 @@ export function MainPage({
     };
 
     void loadTimerData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [dataVersion, localDataRefreshKey]);
+
+  useEffect(() => {
+    if (activeCalendarRangePreset !== 'all') {
+      return;
+    }
+
+    setSharedCalendarRange(allTimeRange);
+
+    if (!allTimeRange) {
+      setActiveCalendarRangePreset(null);
+    }
+  }, [activeCalendarRangePreset, allTimeRange]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getLocalDataDateBounds(shiftRepository, enterpriseScheduleRepository)
+      .then((bounds) => {
+        if (isMounted) {
+          setAllTimeRange(bounds ? { start: bounds.start, end: bounds.end } : null);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setAllTimeRange(null);
+        }
+      });
 
     return () => {
       isMounted = false;
@@ -675,6 +715,25 @@ export function MainPage({
       setPendingTicketId(null);
     }
   };
+  const changeSharedCalendarRange = useCallback((range: CalendarDateRange | null) => {
+    setSharedCalendarRange(range);
+    setActiveCalendarRangePreset(null);
+  }, []);
+  const selectCalendarRangePreset = useCallback(
+    (preset: CalendarRangePreset) => {
+      const selection = getCalendarPresetSelection({
+        preset,
+        calendarMonth: sharedCalendarMonth,
+        allTimeRange,
+        now: new Date()
+      });
+
+      setSharedCalendarMonth(selection.calendarMonth);
+      setSharedCalendarRange(selection.selectedRange);
+      setActiveCalendarRangePreset(preset);
+    },
+    [allTimeRange, sharedCalendarMonth]
+  );
   const currentDate = getDateFromDateTime(now);
   const currentHourlyRate = calculateHourlyRateFromMonthlySalary(
     settings.monthlySalary,
@@ -716,7 +775,10 @@ export function MainPage({
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
           onCalendarMonthChange={setSharedCalendarMonth}
-          onSelectedRangeChange={setSharedCalendarRange}
+          onSelectedRangeChange={changeSharedCalendarRange}
+          activeRangePreset={activeCalendarRangePreset}
+          isAllTimePresetEnabled={allTimeRange !== null}
+          onRangePresetSelect={selectCalendarRangePreset}
           onDataChange={notifyLocalDataChange}
         />
       ) : activePage === 'analytics' ? (
@@ -726,7 +788,10 @@ export function MainPage({
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
           onCalendarMonthChange={setSharedCalendarMonth}
-          onSelectedRangeChange={setSharedCalendarRange}
+          onSelectedRangeChange={changeSharedCalendarRange}
+          activeRangePreset={activeCalendarRangePreset}
+          isAllTimePresetEnabled={allTimeRange !== null}
+          onRangePresetSelect={selectCalendarRangePreset}
         />
       ) : activePage === 'schedule' ? (
         <SchedulePage
@@ -735,7 +800,10 @@ export function MainPage({
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
           onCalendarMonthChange={setSharedCalendarMonth}
-          onSelectedRangeChange={setSharedCalendarRange}
+          onSelectedRangeChange={changeSharedCalendarRange}
+          activeRangePreset={activeCalendarRangePreset}
+          isAllTimePresetEnabled={allTimeRange !== null}
+          onRangePresetSelect={selectCalendarRangePreset}
           onDataChange={notifyLocalDataChange}
         />
       ) : activePage === 'settings' ? (
@@ -947,7 +1015,7 @@ export function MainPage({
                             data-current={target.grade === activeTicketTargets.currentGrade ? 'true' : 'false'}
                             key={target.grade}
                           >
-                            <span>Г{target.grade}</span>
+                            <span>G{target.grade}</span>
                             <strong>{target.quantity} шт</strong>
                           </article>
                         ))}
@@ -1139,10 +1207,10 @@ export function MainPage({
                                   {formatDurationMinutes(targets.downtimeMinutes)}
                                 </small>
                                 <small>
-                                  {targets.targets.map((target) => `Г${target.grade}: ${target.quantity}`).join(' · ')}
+                                  {targets.targets.map((target) => `G${target.grade}: ${target.quantity}`).join(' · ')}
                                 </small>
                                 <small>
-                                  Виконання Г{targets.currentGrade}:{' '}
+                                  Виконання G{targets.currentGrade}:{' '}
                                   {targets.completionPercent === null
                                     ? '—'
                                     : `${Math.round(targets.completionPercent)}%`}
@@ -1153,8 +1221,8 @@ export function MainPage({
                                     : targets.productiveMinutes === 0
                                       ? 'грейд не визначено'
                                     : targets.achievedGrade
-                                      ? `Г${targets.achievedGrade}`
-                                      : 'нижче Г1'}
+                                      ? `G${targets.achievedGrade}`
+                                      : 'нижче G1'}
                                 </small>
                                 <div className="main-page__ticket-actions" aria-label="Дії з завершеним тікетом">
                                   <button

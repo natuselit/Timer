@@ -25,6 +25,7 @@ import {
   getEnterpriseScheduleBetween,
   getEnterpriseScheduleByMonth,
   getLatestCompletedShift,
+  getLocalDataDateBounds,
   getShiftsBetween,
   getSettings,
   getShiftsByMonth,
@@ -1222,6 +1223,65 @@ Total: 10:55`,
         updatedAt: '2026-06-23T11:00:00.000+03:00'
       })
     ]);
+  });
+});
+
+describe('local data date bounds', () => {
+  it('returns null for an empty database', async () => {
+    await expect(
+      getLocalDataDateBounds(shiftRepository, enterpriseScheduleRepository)
+    ).resolves.toBeNull();
+  });
+
+  it('uses the earliest and latest shift dates when only shifts exist', async () => {
+    await shiftRepository.createShift(
+      makeShift({
+        id: 'later-shift',
+        date: '2026-07-22',
+        endTime: '2026-07-22T14:30:00.000Z'
+      })
+    );
+    await shiftRepository.createShift(
+      makeShift({
+        id: 'earlier-shift',
+        date: '2026-05-10',
+        startTime: '2026-05-10T06:30:00.000Z',
+        endTime: '2026-05-10T14:30:00.000Z'
+      })
+    );
+
+    await expect(
+      getLocalDataDateBounds(shiftRepository, enterpriseScheduleRepository)
+    ).resolves.toEqual({ start: '2026-05-10', end: '2026-07-22' });
+  });
+
+  it('uses enterprise schedule dates when only schedule records exist', async () => {
+    await enterpriseScheduleRepository.importItems([
+      makeScheduleItem({ id: 'schedule-later', date: '2026-08-01' }),
+      makeScheduleItem({ id: 'schedule-earlier', date: '2026-04-30' })
+    ]);
+
+    await expect(
+      getLocalDataDateBounds(shiftRepository, enterpriseScheduleRepository)
+    ).resolves.toEqual({ start: '2026-04-30', end: '2026-08-01' });
+  });
+
+  it('combines shift and enterprise schedule bounds', async () => {
+    await shiftRepository.createShift(
+      makeShift({
+        id: 'middle-shift',
+        date: '2026-06-10',
+        endTime: '2026-06-10T14:30:00.000Z'
+      })
+    );
+    await enterpriseScheduleRepository.importItems([
+      makeScheduleItem({ id: 'schedule-first', date: '2026-03-01' }),
+      makeScheduleItem({ id: 'schedule-last', date: '2026-09-30' })
+    ]);
+
+    await expect(
+      getLocalDataDateBounds(shiftRepository, enterpriseScheduleRepository)
+    ).resolves.toEqual({ start: '2026-03-01', end: '2026-09-30' });
   });
 });
 

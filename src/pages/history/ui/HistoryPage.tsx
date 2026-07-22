@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Edit3, Plus, Tickets, Trash2, X } from 'lucide-react';
+import { ChevronDown, Edit3, Plus, Tickets, Trash2, X } from 'lucide-react';
 import type {
   CoefficientMode,
   ISODateTimeString,
@@ -22,7 +22,11 @@ import {
   type GradePercentSet,
   type Settings
 } from '../../../entities/settings';
-import { MonthCalendar, type CalendarDateRange } from '../../../shared/ui/month-calendar';
+import {
+  MonthCalendar,
+  type CalendarDateRange,
+  type CalendarRangePreset
+} from '../../../shared/ui/month-calendar';
 import {
   createManualShift,
   deleteShift,
@@ -55,6 +59,9 @@ type HistoryPageProps = {
   selectedRange: CalendarDateRange | null;
   onCalendarMonthChange: (month: CalendarMonth) => void;
   onSelectedRangeChange: (range: CalendarDateRange | null) => void;
+  activeRangePreset: CalendarRangePreset | null;
+  isAllTimePresetEnabled: boolean;
+  onRangePresetSelect: (preset: CalendarRangePreset) => void;
   onDataChange?: () => void;
 };
 
@@ -434,6 +441,9 @@ export function HistoryPage({
   selectedRange,
   onCalendarMonthChange,
   onSelectedRangeChange,
+  activeRangePreset,
+  isAllTimePresetEnabled,
+  onRangePresetSelect,
   onDataChange
 }: HistoryPageProps) {
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -908,7 +918,9 @@ export function HistoryPage({
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}
         onDateSelect={selectDate}
-        onRangeReset={() => onSelectedRangeChange(null)}
+        activeRangePreset={activeRangePreset}
+        isAllTimePresetEnabled={isAllTimePresetEnabled}
+        onRangePresetSelect={onRangePresetSelect}
       />
 
       <section className="history-page__panel" aria-labelledby="history-list-title">
@@ -918,7 +930,7 @@ export function HistoryPage({
             <h2 id="history-list-title">Список змін</h2>
           </div>
           <button className="history-page__primary-button" type="button" onClick={openCreateEditor}>
-            <Plus size={18} />
+            <Plus size={16} />
             <span>Додати</span>
           </button>
         </header>
@@ -1009,25 +1021,6 @@ export function HistoryPage({
                       <dt>Ставка</dt>
                       <dd>{formatHourlyRate(shift.baseHourlyRateSnapshot, settings.incognitoEnabled)}</dd>
                     </div>
-                    <div className="history-page__detail history-page__detail--muted history-page__detail--tickets">
-                      <dt>
-                        <Tickets aria-hidden="true" size={16} />
-                        <span>Тікети</span>
-                      </dt>
-                      <dd className="history-page__ticket-summary">
-                        {shift.workTickets.length > 0 ? (
-                          <>
-                            <strong>{shift.workTickets.length}</strong>
-                            <span>
-                              Ост. норма{' '}
-                              {shift.workTickets[shift.workTickets.length - 1].normPerEightHours}
-                            </span>
-                          </>
-                        ) : (
-                          <span>Немає</span>
-                        )}
-                      </dd>
-                    </div>
                   </dl>
 
                   <ul className="history-page__coefficients" aria-label="Зароблено по коефіцієнтах">
@@ -1040,17 +1033,28 @@ export function HistoryPage({
                   </ul>
 
                   {shift.workTickets.length > 0 ? (
-                    <section
+                    <details
                       className="history-page__ticket-details"
                       aria-label={`Деталі тікетів за ${shiftDateLabel}`}
                     >
-                      <header className="history-page__ticket-details-header">
-                        <div>
-                          <span>Виробіток</span>
-                          <strong>Деталі тікетів</strong>
-                        </div>
-                        <span>{shift.workTickets.length}</span>
-                      </header>
+                      <summary className="history-page__ticket-details-summary">
+                        <span className="history-page__ticket-details-label">
+                          <Tickets aria-hidden="true" size={16} />
+                          <span>Тікети</span>
+                        </span>
+                        <span className="history-page__ticket-summary">
+                          <strong>{shift.workTickets.length}</strong>
+                          <span>
+                            Ост. норма{' '}
+                            {shift.workTickets[shift.workTickets.length - 1].normPerEightHours}
+                          </span>
+                          <ChevronDown
+                            className="history-page__details-chevron"
+                            aria-hidden="true"
+                            size={18}
+                          />
+                        </span>
+                      </summary>
 
                       <div className="history-page__ticket-details-list">
                         {shift.workTickets.map((ticket, ticketIndex) => {
@@ -1065,20 +1069,10 @@ export function HistoryPage({
                             currentGrade,
                             gradeNormPercents
                           });
-                          const resultLabel =
-                            ticket.endedAt === null
-                              ? 'Тікет триває'
-                              : ticket.actualQuantity === null
-                                ? 'Факт не внесено'
-                                : production.productiveMinutes === 0
-                                  ? 'Грейд не визначено'
-                                  : production.achievedGrade
-                                    ? `Досягнуто Г${production.achievedGrade}`
-                                    : 'Результат нижче Г1';
 
                           return (
-                            <article className="history-page__ticket-detail" key={ticket.id}>
-                              <header className="history-page__ticket-detail-header">
+                            <details className="history-page__ticket-detail" key={ticket.id}>
+                              <summary className="history-page__ticket-detail-header">
                                 <div>
                                   <strong>Тікет {ticketIndex + 1}</strong>
                                   <span>
@@ -1090,71 +1084,80 @@ export function HistoryPage({
                                 <span data-active={ticket.endedAt === null ? 'true' : 'false'}>
                                   {ticket.endedAt === null ? 'Активний' : 'Завершений'}
                                 </span>
-                              </header>
+                                <ChevronDown
+                                  className="history-page__details-chevron"
+                                  aria-hidden="true"
+                                  size={17}
+                                />
+                              </summary>
 
-                              <dl className="history-page__ticket-detail-metrics">
-                                <div>
-                                  <dt>Норма / 8 год</dt>
-                                  <dd>{ticket.normPerEightHours} шт</dd>
-                                </div>
-                                <div>
-                                  <dt>Факт</dt>
-                                  <dd>
-                                    {ticket.actualQuantity === null
-                                      ? 'Не внесено'
-                                      : `${ticket.actualQuantity} шт`}
-                                  </dd>
-                                </div>
-                                <div>
-                                  <dt>Тривалість</dt>
-                                  <dd>{formatDurationMinutes(production.elapsedMinutes)}</dd>
-                                </div>
-                                <div>
-                                  <dt>Продуктивно</dt>
-                                  <dd>{formatDurationMinutes(production.productiveMinutes)}</dd>
-                                </div>
-                                <div>
-                                  <dt>Простій</dt>
-                                  <dd>{formatDurationMinutes(production.downtimeMinutes)}</dd>
-                                </div>
-                                <div>
-                                  <dt>Виконання Г{production.currentGrade}</dt>
-                                  <dd>
-                                    {production.completionPercent === null
-                                      ? '—'
-                                      : `${Math.round(production.completionPercent)}%`}
-                                  </dd>
-                                </div>
-                              </dl>
-
-                              <div
-                                className="history-page__ticket-detail-targets"
-                                aria-label={`Плани грейдів тікета ${ticketIndex + 1}`}
-                              >
-                                {production.targets.map((target) => (
-                                  <div
-                                    data-current={target.grade === production.currentGrade ? 'true' : 'false'}
-                                    key={target.grade}
-                                  >
-                                    <span>Г{target.grade}</span>
-                                    <strong>{target.quantity} шт</strong>
+                              <div className="history-page__ticket-detail-body">
+                                <dl className="history-page__ticket-detail-metrics">
+                                  <div>
+                                    <dt>Норма / 8 год</dt>
+                                    <dd>{ticket.normPerEightHours} шт</dd>
                                   </div>
-                                ))}
-                              </div>
+                                  <div>
+                                    <dt>Факт</dt>
+                                    <dd>
+                                      {ticket.actualQuantity === null
+                                        ? 'Не внесено'
+                                        : `${ticket.actualQuantity} шт`}
+                                    </dd>
+                                  </div>
+                                  <div>
+                                    <dt>Тривалість</dt>
+                                    <dd>{formatDurationMinutes(production.elapsedMinutes)}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>Продуктивно</dt>
+                                    <dd>{formatDurationMinutes(production.productiveMinutes)}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>Простій</dt>
+                                    <dd>{formatDurationMinutes(production.downtimeMinutes)}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>Виконання G{production.currentGrade}</dt>
+                                    <dd>
+                                      {production.completionPercent === null
+                                        ? '—'
+                                        : `${Math.round(production.completionPercent)}%`}
+                                    </dd>
+                                  </div>
+                                </dl>
 
-                              <footer
-                                className="history-page__ticket-detail-result"
-                                data-empty={ticket.actualQuantity === null ? 'true' : 'false'}
-                              >
-                                <span>Результат</span>
-                                <strong>{resultLabel}</strong>
-                              </footer>
-                            </article>
+                                <div
+                                  className="history-page__ticket-detail-targets"
+                                  aria-label={`Плани грейдів тікета ${ticketIndex + 1}`}
+                                >
+                                  {production.targets.map((target) => (
+                                    <div
+                                      data-current={target.grade === production.currentGrade ? 'true' : 'false'}
+                                      key={target.grade}
+                                    >
+                                      <span>G{target.grade}</span>
+                                      <strong>{target.quantity} шт</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </details>
                           );
                         })}
                       </div>
-                    </section>
-                  ) : null}
+                    </details>
+                  ) : (
+                    <div className="history-page__ticket-details-summary history-page__ticket-details-summary--empty">
+                      <span className="history-page__ticket-details-label">
+                        <Tickets aria-hidden="true" size={16} />
+                        <span>Тікети</span>
+                      </span>
+                      <span className="history-page__ticket-summary">
+                        <span>Немає</span>
+                      </span>
+                    </div>
+                  )}
                 </article>
               );
             })}
@@ -1438,10 +1441,10 @@ export function HistoryPage({
                                 {formatDurationMinutes(production.downtimeMinutes)}
                               </span>
                               <span>
-                                {production.targets.map((target) => `Г${target.grade}: ${target.quantity}`).join(' · ')}
+                                {production.targets.map((target) => `G${target.grade}: ${target.quantity}`).join(' · ')}
                               </span>
                               <span>
-                                Виконання Г{production.currentGrade}:{' '}
+                                Виконання G{production.currentGrade}:{' '}
                                 {production.completionPercent === null
                                   ? '—'
                                   : `${Math.round(production.completionPercent)}%`}
@@ -1452,8 +1455,8 @@ export function HistoryPage({
                                   : production.productiveMinutes === 0
                                     ? 'Грейд не визначено'
                                   : production.achievedGrade
-                                    ? `Досягнуто Г${production.achievedGrade}`
-                                    : 'Результат нижче Г1'}
+                                    ? `Досягнуто G${production.achievedGrade}`
+                                    : 'Результат нижче G1'}
                               </strong>
                             </div>
                           ) : ticket.actualQuantity.trim() === '' ? (

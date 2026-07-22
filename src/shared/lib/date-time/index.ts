@@ -1,6 +1,7 @@
 import type { ISODateTimeString, LocalDateString, LocalTimeString } from '../../../entities/shift';
 
 export * from './timeInput';
+export * from './calendarRange';
 
 export const padTimePart = (value: number): string => String(value).padStart(2, '0');
 

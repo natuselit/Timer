@@ -158,7 +158,7 @@
   background: var(--color-background);
 }
 
-.analytics-page__detail-list div:first-child {
+.analytics-page__detail-list .analytics-page__detail-item--featured {
   grid-column: 1 / -1;
   min-height: 68px;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -168,15 +168,21 @@
   background: linear-gradient(135deg, var(--color-primary-surface), var(--color-primary-soft));
 }
 
-.analytics-page__detail-list div:first-child dd {
-  color: var(--color-primary);
-  font-size: clamp(1.16rem, 5.5vw, 1.34rem);
-  letter-spacing: -0.025em;
-  text-align: right;
-  white-space: nowrap;
+.analytics-page__detail-list .analytics-page__detail-item--featured dt {
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
-.analytics-page__detail-list div:nth-child(2) {
+.analytics-page__detail-list .analytics-page__detail-item--featured dd {
+  color: var(--color-primary);
+  font-size: clamp(1.05rem, 4.8vw, 1.2rem);
+  letter-spacing: -0.025em;
+  text-align: right;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.analytics-page__detail-list .analytics-page__detail-item--wide {
   grid-column: 1 / -1;
   min-height: 50px;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -184,7 +190,7 @@
   align-content: center;
 }
 
-.analytics-page__detail-list div:nth-child(2) dd {
+.analytics-page__detail-list .analytics-page__detail-item--wide dd {
   text-align: right;
 }
 
@@ -464,6 +470,12 @@
   font-weight: 700;
 }
 
+.analytics-page__deviation-totals small {
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
 .analytics-page__deviation-totals strong {
   color: var(--color-text-primary);
   font-size: 1.1rem;
@@ -486,6 +498,15 @@
 
 .analytics-page__deviation-totals article[data-tone='early'] strong {
   color: var(--color-info);
+}
+
+.analytics-page__deviation-totals article[data-tone='success'] {
+  border-color: var(--color-success-border);
+  background: var(--color-success-surface);
+}
+
+.analytics-page__deviation-totals article[data-tone='success'] strong {
+  color: var(--color-success);
 }
 
 .analytics-page__deviation-list {

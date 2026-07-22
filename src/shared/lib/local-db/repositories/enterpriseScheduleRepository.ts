@@ -38,6 +38,20 @@ export class EnterpriseScheduleRepository {
     return this.db.enterpriseSchedule.where('date').between(start, end, true, true).sortBy('date');
   }
 
+  async getDateBounds(): Promise<{ start: LocalDateString; end: LocalDateString } | null> {
+    const [firstItem, lastItem] = await Promise.all([
+      this.db.enterpriseSchedule.orderBy('date').first(),
+      this.db.enterpriseSchedule.orderBy('date').last()
+    ]);
+
+    return firstItem && lastItem
+      ? {
+          start: firstItem.date,
+          end: lastItem.date
+        }
+      : null;
+  }
+
   async getItemById(id: string): Promise<EnterpriseScheduleItem | null> {
     return (await this.db.enterpriseSchedule.get(id)) ?? null;
   }

@@ -3,6 +3,7 @@ export * from './repositories/enterpriseScheduleRepository';
 export * from './repositories/settingsRepository';
 export * from './repositories/shiftRepository';
 export * from './use-cases/backupUseCases';
+export * from './use-cases/dateRangeUseCases';
 export * from './use-cases/demoDataUseCases';
 export * from './use-cases/enterpriseScheduleUseCases';
 export * from './use-cases/settingsUseCases';

@@ -277,6 +277,20 @@ export class ShiftRepository {
     return shifts.map(normalizeShiftRecord);
   }
 
+  async getDateBounds(): Promise<{ start: LocalDateString; end: LocalDateString } | null> {
+    const [firstShift, lastShift] = await Promise.all([
+      this.db.shifts.orderBy('date').first(),
+      this.db.shifts.orderBy('date').last()
+    ]);
+
+    return firstShift && lastShift
+      ? {
+          start: firstShift.date,
+          end: lastShift.date
+        }
+      : null;
+  }
+
   async getActiveShift(): Promise<Shift | null> {
     const shifts = (await this.db.shifts.toArray()).map(normalizeShiftRecord);
     return shifts.find(isActiveShift) ?? null;

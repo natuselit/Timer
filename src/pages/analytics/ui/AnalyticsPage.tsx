@@ -17,12 +17,16 @@ import {
   padTimePart,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
-import { formatMoney } from '../../../shared/lib/format';
+import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import {
   calculateAnalyticsSummary,
   type ShiftTypeAnalytics
 } from '../../../shared/lib/shifts/analyticsSummary';
-import { MonthCalendar, type CalendarDateRange } from '../../../shared/ui/month-calendar';
+import {
+  MonthCalendar,
+  type CalendarDateRange,
+  type CalendarRangePreset
+} from '../../../shared/ui/month-calendar';
 import './AnalyticsPage.css';
 
 type AnalyticsPageProps = {
@@ -31,6 +35,9 @@ type AnalyticsPageProps = {
   selectedRange: CalendarDateRange | null;
   onCalendarMonthChange: (month: CalendarMonth) => void;
   onSelectedRangeChange: (range: CalendarDateRange | null) => void;
+  activeRangePreset: CalendarRangePreset | null;
+  isAllTimePresetEnabled: boolean;
+  onRangePresetSelect: (preset: CalendarRangePreset) => void;
 };
 
 type CalendarMonth = {
@@ -127,6 +134,14 @@ const formatDeviationDuration = (minutes: number): string => {
 const formatPercent = (value: number | null): string =>
   value === null ? '—' : `${Math.round(value)}%`;
 
+const formatDecimal = (value: number | null, suffix = ''): string =>
+  value === null
+    ? '—'
+    : `${value.toLocaleString('uk-UA', {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1
+      })}${suffix}`;
+
 const getDeviationFacts = ({
   lateArrivalMinutes,
   earlyExitMinutes
@@ -203,7 +218,10 @@ export function AnalyticsPage({
   calendarMonth,
   selectedRange,
   onCalendarMonthChange,
-  onSelectedRangeChange
+  onSelectedRangeChange,
+  activeRangePreset,
+  isAllTimePresetEnabled,
+  onRangePresetSelect
 }: AnalyticsPageProps) {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [calendarShifts, setCalendarShifts] = useState<Shift[]>([]);
@@ -290,7 +308,6 @@ export function AnalyticsPage({
   };
   const hasAnalyticsData = summary.shiftCount > 0;
   const visibleCoefficientBreakdown = summary.coefficientBreakdown.filter((item) => item.minutes > 0);
-  const hasDeviations = summary.deviations.length > 0;
 
   return (
     <div className="analytics-page">
@@ -308,7 +325,9 @@ export function AnalyticsPage({
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}
         onDateSelect={selectDate}
-        onRangeReset={() => onSelectedRangeChange(null)}
+        activeRangePreset={activeRangePreset}
+        isAllTimePresetEnabled={isAllTimePresetEnabled}
+        onRangePresetSelect={onRangePresetSelect}
       />
 
       {error ? (
@@ -355,6 +374,14 @@ export function AnalyticsPage({
                 <span>Змін</span>
                 <strong>{summary.shiftCount}</strong>
               </article>
+              <article className="analytics-page__money-card">
+                <span>Середньо за зміну</span>
+                <strong>{formatMoney(summary.averageSalaryPerShift, settings.incognitoEnabled)}</strong>
+              </article>
+              <article className="analytics-page__money-card">
+                <span>Ефективно за годину</span>
+                <strong>{formatHourlyRate(summary.effectiveHourlyIncome, settings.incognitoEnabled)}</strong>
+              </article>
             </div>
           </section>
 
@@ -368,13 +395,17 @@ export function AnalyticsPage({
             </header>
 
             <dl className="analytics-page__detail-list" aria-label="Показники часу">
-              <div>
+              <div className="analytics-page__detail-item--featured">
                 <dt>Загалом</dt>
                 <dd>{formatDurationMinutes(summary.totalMinutes)}</dd>
               </div>
-              <div>
+              <div className="analytics-page__detail-item--wide">
                 <dt>Перепрацювання</dt>
                 <dd>{formatDurationMinutes(summary.overtimeMinutes)}</dd>
+              </div>
+              <div>
+                <dt>Сер. тривалість зміни</dt>
+                <dd>{formatDurationMinutes(Math.round(summary.averageShiftMinutes))}</dd>
               </div>
               <div>
                 <dt>Сер. перепрацювання</dt>
@@ -414,12 +445,12 @@ export function AnalyticsPage({
             </header>
 
             <dl className="analytics-page__detail-list" aria-label="Показники виробітку">
-              <div>
+              <div className="analytics-page__detail-item--featured">
                 <dt>Факт</dt>
                 <dd>{summary.production.actualQuantity} шт</dd>
               </div>
-              <div>
-                <dt>План поточного Г</dt>
+              <div className="analytics-page__detail-item--wide">
+                <dt>План поточного G</dt>
                 <dd>{summary.production.currentGradeTarget} шт</dd>
               </div>
               <div>
@@ -445,6 +476,26 @@ export function AnalyticsPage({
               <div>
                 <dt>Незаповнені</dt>
                 <dd>{summary.production.unfilledTicketCount}</dd>
+              </div>
+              <div>
+                <dt>Сер. тікетів / зміну</dt>
+                <dd>{formatDecimal(summary.production.averageTicketsPerShift)}</dd>
+              </div>
+              <div>
+                <dt>Темп виробітку</dt>
+                <dd>{formatDecimal(summary.production.quantityPerProductiveHour, ' шт/год')}</dd>
+              </div>
+              <div>
+                <dt>Сер. продуктивно / тікет</dt>
+                <dd>{formatDurationMinutes(Math.round(summary.production.averageProductiveMinutesPerTicket))}</dd>
+              </div>
+              <div>
+                <dt>Сер. простій / тікет</dt>
+                <dd>{formatDurationMinutes(Math.round(summary.production.averageDowntimeMinutesPerTicket))}</dd>
+              </div>
+              <div>
+                <dt>Частка простою</dt>
+                <dd>{formatPercent(summary.production.downtimePercent)}</dd>
               </div>
             </dl>
           </section>
@@ -502,35 +553,50 @@ export function AnalyticsPage({
             </div>
           </section>
 
-          {hasDeviations ? (
-            <section className="analytics-page__panel analytics-page__deviations" aria-labelledby="analytics-deviations-title">
-              <header className="analytics-page__deviation-header">
-                <div className="analytics-page__deviation-title-row">
-                  <span className="analytics-page__deviation-icon" aria-hidden="true">
-                    <AlertTriangle size={20} />
-                  </span>
-                  <div>
-                    <p className="analytics-page__eyebrow">Контроль графіка</p>
-                    <h3 id="analytics-deviations-title">Відхилення</h3>
-                  </div>
-                  <strong className="analytics-page__deviation-count">
-                    {summary.deviations.length} {getDayCountLabel(summary.deviations.length)}
+          <section
+            className="analytics-page__panel analytics-page__deviations"
+            aria-labelledby="analytics-deviations-title"
+          >
+            <header className="analytics-page__deviation-header">
+              <div className="analytics-page__deviation-title-row">
+                <span className="analytics-page__deviation-icon" aria-hidden="true">
+                  <AlertTriangle size={20} />
+                </span>
+                <div>
+                  <p className="analytics-page__eyebrow">Контроль графіка</p>
+                  <h3 id="analytics-deviations-title">Відхилення</h3>
+                </div>
+                <strong className="analytics-page__deviation-count">
+                  {summary.deviations.length} {getDayCountLabel(summary.deviations.length)}
+                </strong>
+              </div>
+
+              <div className="analytics-page__deviation-totals" aria-label="Підсумок відхилень">
+                <article data-tone="success">
+                  <span>Без відхилень</span>
+                  <strong>
+                    {summary.onScheduleShiftCount}/{summary.shiftCount} ·{' '}
+                    {formatPercent(summary.scheduleAdherencePercent)}
                   </strong>
-                </div>
+                </article>
+                <article data-tone="late">
+                  <span>Запізнення</span>
+                  <strong>{formatDeviationDuration(summary.lateArrivalMinutes)}</strong>
+                  <small>
+                    Сер. {formatDeviationDuration(Math.round(summary.averageLateArrivalMinutes))}
+                  </small>
+                </article>
+                <article data-tone="early">
+                  <span>Ранній вихід</span>
+                  <strong>{formatDeviationDuration(summary.earlyExitMinutes)}</strong>
+                  <small>
+                    Сер. {formatDeviationDuration(Math.round(summary.averageEarlyExitMinutes))}
+                  </small>
+                </article>
+              </div>
+            </header>
 
-                <div className="analytics-page__deviation-totals" aria-label="Підсумок відхилень">
-                  {getDeviationFacts({
-                    lateArrivalMinutes: summary.lateArrivalMinutes,
-                    earlyExitMinutes: summary.earlyExitMinutes
-                  }).map((fact) => (
-                    <article data-tone={fact.key} key={fact.key}>
-                      <span>{fact.label}</span>
-                      <strong>{fact.value}</strong>
-                    </article>
-                  ))}
-                </div>
-              </header>
-
+            {summary.deviations.length > 0 ? (
               <div className="analytics-page__deviation-list">
                 {summary.deviations.map((item) => {
                   const facts = getDeviationFacts(item);
@@ -555,8 +621,8 @@ export function AnalyticsPage({
                   );
                 })}
               </div>
-            </section>
-          ) : null}
+            ) : null}
+          </section>
 
           {settings.incognitoEnabled ? (
             <section className="analytics-page__note" aria-label="Інкогніто">

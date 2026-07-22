@@ -26,14 +26,23 @@ export type AnalyticsSummary = {
   plannedSalary: number;
   monthlyBonus: number;
   gradeBonus: number;
+  averageSalaryPerShift: number;
+  effectiveHourlyIncome: number;
   totalMinutes: number;
   shiftCount: number;
+  averageShiftMinutes: number;
   overtimeMinutes: number;
   overtimeIncome: number;
   averageOvertimeMinutes: number;
   maxOvertimeMinutes: number;
   lateArrivalMinutes: number;
   earlyExitMinutes: number;
+  lateArrivalShiftCount: number;
+  earlyExitShiftCount: number;
+  onScheduleShiftCount: number;
+  averageLateArrivalMinutes: number;
+  averageEarlyExitMinutes: number;
+  scheduleAdherencePercent: number | null;
   coefficientBreakdown: Array<{
     coefficient: number;
     minutes: number;
@@ -56,6 +65,11 @@ export type AnalyticsSummary = {
     currentGradeTarget: number;
     completionPercent: number | null;
     averageActualPerTicket: number;
+    averageTicketsPerShift: number;
+    quantityPerProductiveHour: number | null;
+    averageProductiveMinutesPerTicket: number;
+    averageDowntimeMinutesPerTicket: number;
+    downtimePercent: number | null;
   };
 };
 
@@ -129,6 +143,9 @@ export const calculateAnalyticsSummary = ({
   let maxOvertimeMinutes = 0;
   let lateArrivalMinutes = 0;
   let earlyExitMinutes = 0;
+  let lateArrivalShiftCount = 0;
+  let earlyExitShiftCount = 0;
+  let onScheduleShiftCount = 0;
   const coefficientBreakdown = new Map<number, { coefficient: number; minutes: number; amount: number }>();
   const deviations: AnalyticsSummary['deviations'] = [];
   const production: AnalyticsSummary['production'] = {
@@ -140,7 +157,12 @@ export const calculateAnalyticsSummary = ({
     downtimeMinutes: 0,
     currentGradeTarget: 0,
     completionPercent: null,
-    averageActualPerTicket: 0
+    averageActualPerTicket: 0,
+    averageTicketsPerShift: 0,
+    quantityPerProductiveHour: null,
+    averageProductiveMinutesPerTicket: 0,
+    averageDowntimeMinutesPerTicket: 0,
+    downtimePercent: null
   };
 
   completedShifts.forEach((shift) => {
@@ -155,6 +177,18 @@ export const calculateAnalyticsSummary = ({
     maxOvertimeMinutes = Math.max(maxOvertimeMinutes, time.totalOvertimeMinutes);
     lateArrivalMinutes += time.lateArrivalMinutes;
     earlyExitMinutes += time.earlyExitMinutes;
+
+    if (time.lateArrivalMinutes > 0) {
+      lateArrivalShiftCount += 1;
+    }
+
+    if (time.earlyExitMinutes > 0) {
+      earlyExitShiftCount += 1;
+    }
+
+    if (time.lateArrivalMinutes === 0 && time.earlyExitMinutes === 0) {
+      onScheduleShiftCount += 1;
+    }
 
     salary.lines.forEach((line) => {
       if (line.minutes <= 0) {
@@ -234,6 +268,30 @@ export const calculateAnalyticsSummary = ({
     production.filledTicketCount > 0
       ? production.actualQuantity / production.filledTicketCount
       : 0;
+  production.averageTicketsPerShift =
+    completedShifts.length > 0
+      ? production.ticketCount / completedShifts.length
+      : 0;
+  production.quantityPerProductiveHour =
+    production.productiveMinutes > 0
+      ? (production.actualQuantity * 60) / production.productiveMinutes
+      : null;
+  production.averageProductiveMinutesPerTicket =
+    production.filledTicketCount > 0
+      ? production.productiveMinutes / production.filledTicketCount
+      : 0;
+  production.averageDowntimeMinutesPerTicket =
+    production.filledTicketCount > 0
+      ? production.downtimeMinutes / production.filledTicketCount
+      : 0;
+  production.downtimePercent =
+    production.productiveMinutes + production.downtimeMinutes > 0
+      ? (production.downtimeMinutes /
+          (production.productiveMinutes + production.downtimeMinutes)) *
+        100
+      : null;
+
+  const shiftCount = completedShifts.length;
 
   return {
     currentSalary: workSalary,
@@ -241,8 +299,11 @@ export const calculateAnalyticsSummary = ({
     plannedSalary,
     monthlyBonus: effectiveMonthlyBonus,
     gradeBonus,
+    averageSalaryPerShift: shiftCount > 0 ? workSalary / shiftCount : 0,
+    effectiveHourlyIncome: totalMinutes > 0 ? (workSalary * 60) / totalMinutes : 0,
     totalMinutes,
-    shiftCount: completedShifts.length,
+    shiftCount,
+    averageShiftMinutes: shiftCount > 0 ? totalMinutes / shiftCount : 0,
     overtimeMinutes,
     overtimeIncome,
     averageOvertimeMinutes:
@@ -250,6 +311,15 @@ export const calculateAnalyticsSummary = ({
     maxOvertimeMinutes,
     lateArrivalMinutes,
     earlyExitMinutes,
+    lateArrivalShiftCount,
+    earlyExitShiftCount,
+    onScheduleShiftCount,
+    averageLateArrivalMinutes:
+      lateArrivalShiftCount > 0 ? lateArrivalMinutes / lateArrivalShiftCount : 0,
+    averageEarlyExitMinutes:
+      earlyExitShiftCount > 0 ? earlyExitMinutes / earlyExitShiftCount : 0,
+    scheduleAdherencePercent:
+      shiftCount > 0 ? (onScheduleShiftCount / shiftCount) * 100 : null,
     coefficientBreakdown: [...coefficientBreakdown.values()].sort(
       (left, right) => left.coefficient - right.coefficient
     ),

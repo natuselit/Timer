@@ -11,7 +11,6 @@ import type {
 import {
   calculateHourlyRateFromMonthlySalary,
   calculateMonthlySalaryFromHourlyRate,
-  countWeekdayWorkdaysInMonth,
   type Settings
 } from '../../../entities/settings';
 import type { LocalDateString, Shift, ShiftType } from '../../../entities/shift';
@@ -30,10 +29,15 @@ import {
   formatDurationClock,
   formatDurationMinutes,
   formatTime,
+  countWeekdaysInDateRange,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
-import { MonthCalendar, type CalendarDateRange } from '../../../shared/ui/month-calendar';
+import {
+  MonthCalendar,
+  type CalendarDateRange,
+  type CalendarRangePreset
+} from '../../../shared/ui/month-calendar';
 import './SchedulePage.css';
 
 const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
@@ -45,6 +49,9 @@ type SchedulePageProps = {
   selectedRange: CalendarDateRange | null;
   onCalendarMonthChange: (month: CalendarMonth) => void;
   onSelectedRangeChange: (range: CalendarDateRange | null) => void;
+  activeRangePreset: CalendarRangePreset | null;
+  isAllTimePresetEnabled: boolean;
+  onRangePresetSelect: (preset: CalendarRangePreset) => void;
   onDataChange?: () => void;
 };
 
@@ -168,6 +175,9 @@ export function SchedulePage({
   selectedRange,
   onCalendarMonthChange,
   onSelectedRangeChange,
+  activeRangePreset,
+  isAllTimePresetEnabled,
+  onRangePresetSelect,
   onDataChange
 }: SchedulePageProps) {
   const [importText, setImportText] = useState('');
@@ -199,13 +209,13 @@ export function SchedulePage({
         : calendarMonthRange,
     [selectedRange, calendarMonthRange]
   );
-  const workedMinutes = useMemo(
-    () => calendarShifts.reduce((total, shift) => total + getActualShiftDurationMinutes(shift), 0),
-    [calendarShifts]
+  const periodWorkedMinutes = useMemo(
+    () => shifts.reduce((total, shift) => total + getActualShiftDurationMinutes(shift), 0),
+    [shifts]
   );
-  const monthlyNormMinutes = useMemo(
-    () => countWeekdayWorkdaysInMonth(calendarMonth.year, calendarMonth.month) * 8 * 60,
-    [calendarMonth]
+  const periodNormMinutes = useMemo(
+    () => countWeekdaysInDateRange(loadedDateRange.start, loadedDateRange.end) * 8 * 60,
+    [loadedDateRange]
   );
   const visibleMonthlySalary = useMemo(
     () => getVisibleMonthlySalary(settings, calendarShifts),
@@ -444,22 +454,24 @@ export function SchedulePage({
       <MonthCalendar
         year={calendarMonth.year}
         month={calendarMonth.month}
-        salaryLabel={String(calendarShifts.length)}
+        salaryLabel={String(shifts.length)}
         salaryTitle="Змін"
-        shiftCount={formatDurationClock(workedMinutes)}
+        shiftCount={formatDurationClock(periodWorkedMinutes)}
         shiftCountTitle="Відробив"
-        hoursLabel={formatDurationClock(monthlyNormMinutes)}
+        hoursLabel={formatDurationClock(periodNormMinutes)}
         hoursTitle="Норма"
         shifts={calendarScheduleItems.map((item) => ({ id: item.id, date: item.date }))}
         selectedRange={selectedRange}
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}
         onDateSelect={selectDate}
-        onRangeReset={() => onSelectedRangeChange(null)}
+        activeRangePreset={activeRangePreset}
+        isAllTimePresetEnabled={isAllTimePresetEnabled}
+        onRangePresetSelect={onRangePresetSelect}
       />
 
-      <section className="schedule-page__rate-card" aria-label="Ставка за обраний місяць">
-        <span>Ставка за обраний місяць</span>
+      <section className="schedule-page__rate-card" aria-label="Ставка за видимий місяць">
+        <span>Ставка за видимий місяць</span>
         <strong>{formatHourlyRate(visibleHourlyRate, settings.incognitoEnabled)}</strong>
       </section>
 

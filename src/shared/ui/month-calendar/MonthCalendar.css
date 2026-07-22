@@ -60,25 +60,39 @@
   height: 38px;
 }
 
-.month-calendar__reset-button {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  justify-self: center;
-  gap: 6px;
-  padding: 0 11px;
-  border: 1px solid var(--color-primary-border);
+.month-calendar__presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 3px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-background);
+}
+
+.month-calendar__presets button {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 7px;
+  border: 1px solid transparent;
   border-radius: var(--radius-compact);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
+  background: transparent;
+  color: var(--color-text-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 800;
 }
 
-.month-calendar__reset-button:active {
+.month-calendar__presets button[aria-pressed='true'] {
+  border-color: var(--color-primary-border);
   background: var(--color-primary-surface);
+  color: var(--color-primary);
+}
+
+.month-calendar__presets button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .month-calendar[data-compact='true'] {

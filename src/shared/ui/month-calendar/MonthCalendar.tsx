@@ -1,15 +1,16 @@
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { LocalDateString } from '../../../entities/shift';
+import type {
+  CalendarDateRange,
+  CalendarRangePreset
+} from '../../lib/date-time';
 import './MonthCalendar.css';
+
+export type { CalendarDateRange, CalendarRangePreset } from '../../lib/date-time';
 
 export type CalendarShiftMarker = {
   id: string;
   date: LocalDateString;
-};
-
-export type CalendarDateRange = {
-  start: LocalDateString;
-  end: LocalDateString | null;
 };
 
 type MonthCalendarProps = {
@@ -26,7 +27,9 @@ type MonthCalendarProps = {
   onPreviousMonth: () => void;
   onNextMonth: () => void;
   onDateSelect: (date: LocalDateString) => void;
-  onRangeReset?: () => void;
+  activeRangePreset?: CalendarRangePreset | null;
+  isAllTimePresetEnabled?: boolean;
+  onRangePresetSelect?: (preset: CalendarRangePreset) => void;
   titleId?: string;
   hideSummary?: boolean;
   isCompact?: boolean;
@@ -35,6 +38,12 @@ type MonthCalendarProps = {
 };
 
 const weekdayLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
+
+const rangePresetLabels: Record<CalendarRangePreset, string> = {
+  today: 'Сьогодні',
+  month: 'Місяць',
+  all: 'Весь час'
+};
 
 const toDateKey = (year: number, month: number, day: number): LocalDateString =>
   `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -105,7 +114,9 @@ export function MonthCalendar({
   onPreviousMonth,
   onNextMonth,
   onDateSelect,
-  onRangeReset,
+  activeRangePreset,
+  isAllTimePresetEnabled = false,
+  onRangePresetSelect,
   titleId = 'month-calendar-title',
   hideSummary = false,
   isCompact = false,
@@ -125,9 +136,6 @@ export function MonthCalendar({
   const previousMonth = new Date(year, month - 2, 1);
   const nextMonth = new Date(year, month, 1);
   const calendarRange = getCalendarRange(year, month, selectedRange);
-  const canResetRange = Boolean(
-    selectedRange && selectionMode === 'range' && onRangeReset
-  );
   const cells: CalendarCell[] = [
     ...Array.from({ length: leadingEmptyDays }, (_, index) => {
       const day = daysInPreviousMonth - leadingEmptyDays + index + 1;
@@ -197,20 +205,24 @@ export function MonthCalendar({
         )}
       </header>
 
-      {canResetRange ? (
-        <button
-          className="month-calendar__reset-button"
-          type="button"
-          aria-label="Скинути обраний діапазон"
-          onClick={onRangeReset}
-        >
-          <X aria-hidden="true" size={16} />
-          <span>Скинути діапазон</span>
-        </button>
+      {onRangePresetSelect && selectionMode === 'range' && !isCompact ? (
+        <div className="month-calendar__presets" role="group" aria-label="Швидкий вибір періоду">
+          {(Object.keys(rangePresetLabels) as CalendarRangePreset[]).map((preset) => (
+            <button
+              type="button"
+              aria-pressed={activeRangePreset === preset}
+              disabled={preset === 'all' && !isAllTimePresetEnabled}
+              key={preset}
+              onClick={() => onRangePresetSelect(preset)}
+            >
+              {rangePresetLabels[preset]}
+            </button>
+          ))}
+        </div>
       ) : null}
 
       {!hideSummary ? (
-        <div className="month-calendar__summary" aria-label="Підсумок місяця">
+        <div className="month-calendar__summary" aria-label="Підсумок періоду">
           <article>
             <span>{salaryTitle}</span>
             <strong>{salaryLabel}</strong>
