@@ -205,7 +205,6 @@ export const addWorkTicketToActiveShift = async (
     endedAt: null,
     actualQuantity: null,
     downtimeMinutes: 0,
-    downtimeIntervals: [],
     createdAt: input.startedAt,
     updatedAt: input.startedAt
   };
@@ -236,10 +235,18 @@ const getActiveTicket = (shift: Shift): WorkTicket => {
   return ticket;
 };
 
-export const startWorkTicketDowntime = async (
+export const adjustWorkTicketDowntime = async (
   repository: ShiftRepository,
-  input: { shiftId: string; startedAt: ISODateTimeString; id?: string }
+  input: {
+    shiftId: string;
+    deltaMinutes: number;
+    updatedAt: ISODateTimeString;
+  }
 ): Promise<Shift> => {
+  if (!Number.isSafeInteger(input.deltaMinutes) || input.deltaMinutes === 0) {
+    throw new Error('Коригування простою має бути цілою ненульовою кількістю хвилин.');
+  }
+
   const shift = await repository.getShiftById(input.shiftId);
 
   if (!shift || shift.endTime !== null) {
@@ -247,78 +254,41 @@ export const startWorkTicketDowntime = async (
   }
 
   const activeTicket = getActiveTicket(shift);
+  const nextDowntimeMinutes = activeTicket.downtimeMinutes + input.deltaMinutes;
 
-  if (activeTicket.downtimeIntervals.some((interval) => interval.endedAt === null)) {
-    throw new Error('Простій уже активний.');
+  if (nextDowntimeMinutes < 0) {
+    throw new Error('Загальний простій не може бути відʼємним.');
+  }
+
+  const elapsedMinutes = Math.floor(
+    (new Date(input.updatedAt).getTime() - new Date(activeTicket.startedAt).getTime()) / 60_000
+  );
+
+  if (nextDowntimeMinutes > elapsedMinutes) {
+    throw new Error('Простій не може бути довшим за тікет.');
   }
 
   const workTickets = shift.workTickets.map((ticket) =>
     ticket.id === activeTicket.id
       ? {
           ...ticket,
-          downtimeIntervals: [
-            ...ticket.downtimeIntervals,
-            { id: input.id ?? createId(), startedAt: input.startedAt, endedAt: null }
-          ],
-          updatedAt: input.startedAt
+          downtimeMinutes: nextDowntimeMinutes,
+          updatedAt: input.updatedAt
         }
       : ticket
   );
 
   const sortedWorkTickets = validateAndSortWorkTickets(workTickets, {
     shiftStartTime: shift.startTime,
-    effectiveShiftEndTime: input.startedAt,
+    effectiveShiftEndTime: input.updatedAt,
     allowOpenTicket: true
   });
 
-  return repository.updateShift({ ...shift, workTickets: sortedWorkTickets, updatedAt: input.startedAt });
-};
-
-export const stopWorkTicketDowntime = async (
-  repository: ShiftRepository,
-  input: { shiftId: string; endedAt: ISODateTimeString }
-): Promise<Shift> => {
-  const shift = await repository.getShiftById(input.shiftId);
-
-  if (!shift || shift.endTime !== null) {
-    throw new Error('Активну зміну не знайдено.');
-  }
-
-  const activeTicket = getActiveTicket(shift);
-  const activeInterval = activeTicket.downtimeIntervals.find((interval) => interval.endedAt === null);
-
-  if (!activeInterval) {
-    throw new Error('Активний простій не знайдено.');
-  }
-
-  const intervalMinutes = Math.floor(
-    (new Date(input.endedAt).getTime() - new Date(activeInterval.startedAt).getTime()) / 60_000
-  );
-
-  if (intervalMinutes < 0) {
-    throw new Error('Завершення простою не може бути раніше початку.');
-  }
-
-  const workTickets = shift.workTickets.map((ticket) =>
-    ticket.id === activeTicket.id
-      ? {
-          ...ticket,
-          downtimeMinutes: ticket.downtimeMinutes + intervalMinutes,
-          downtimeIntervals: ticket.downtimeIntervals.map((interval) =>
-            interval.id === activeInterval.id ? { ...interval, endedAt: input.endedAt } : interval
-          ),
-          updatedAt: input.endedAt
-        }
-      : ticket
-  );
-
-  const sortedWorkTickets = validateAndSortWorkTickets(workTickets, {
-    shiftStartTime: shift.startTime,
-    effectiveShiftEndTime: input.endedAt,
-    allowOpenTicket: true
+  return repository.updateShift({
+    ...shift,
+    workTickets: sortedWorkTickets,
+    updatedAt: input.updatedAt
   });
-
-  return repository.updateShift({ ...shift, workTickets: sortedWorkTickets, updatedAt: input.endedAt });
 };
 
 export const completeWorkTicket = async (
@@ -327,11 +297,9 @@ export const completeWorkTicket = async (
     shiftId: string;
     endedAt: ISODateTimeString;
     actualQuantity: number;
-    downtimeMinutes: number;
   }
 ): Promise<Shift> => {
   assertActualQuantity(input.actualQuantity);
-  assertDowntimeMinutes(input.downtimeMinutes);
   const shift = await repository.getShiftById(input.shiftId);
 
   if (!shift || shift.endTime !== null) {
@@ -348,10 +316,6 @@ export const completeWorkTicket = async (
       ...ticket,
       endedAt: input.endedAt,
       actualQuantity: input.actualQuantity,
-      downtimeMinutes: input.downtimeMinutes,
-      downtimeIntervals: ticket.downtimeIntervals.map((interval) =>
-        interval.endedAt === null ? { ...interval, endedAt: input.endedAt } : interval
-      ),
       updatedAt: input.endedAt
     };
   });

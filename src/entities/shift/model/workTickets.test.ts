@@ -12,7 +12,6 @@ const makeTicket = (overrides: Partial<WorkTicket> = {}): WorkTicket => ({
   endedAt: '2026-06-10T08:00:00.000Z',
   actualQuantity: 12,
   downtimeMinutes: 0,
-  downtimeIntervals: [],
   createdAt: '2026-06-10T07:00:00.000Z',
   updatedAt: '2026-06-10T08:00:00.000Z',
   ...overrides
@@ -133,7 +132,7 @@ describe('validateAndSortWorkTickets', () => {
     ).toThrow('Незавершений тікет може бути лише один і останній.');
   });
 
-  it('rejects invalid actual quantity, excessive downtime and overlapping downtime intervals', () => {
+  it('rejects invalid actual quantity and excessive downtime', () => {
     expect(() =>
       validateAndSortWorkTickets(
         [makeTicket({ actualQuantity: -1 })],
@@ -147,45 +146,15 @@ describe('validateAndSortWorkTickets', () => {
         completedBounds
       )
     ).toThrow('Простій не може бути довшим за тікет.');
-
-    expect(() =>
-      validateAndSortWorkTickets(
-        [
-          makeTicket({
-            downtimeMinutes: 20,
-            downtimeIntervals: [
-              {
-                id: 'pause-1',
-                startedAt: '2026-06-10T07:10:00.000Z',
-                endedAt: '2026-06-10T07:30:00.000Z'
-              },
-              {
-                id: 'pause-2',
-                startedAt: '2026-06-10T07:20:00.000Z',
-                endedAt: '2026-06-10T07:40:00.000Z'
-              }
-            ]
-          })
-        ],
-        completedBounds
-      )
-    ).toThrow('Інтервали простою не можуть накладатися.');
   });
 });
 
 describe('calculateTicketProductionSummary', () => {
-  it('subtracts downtime, freezes targets during an active pause and returns all grade targets', () => {
+  it('subtracts accumulated downtime and returns all grade targets', () => {
     const ticket = makeTicket({
       endedAt: null,
       actualQuantity: null,
-      downtimeMinutes: 15,
-      downtimeIntervals: [
-        {
-          id: 'active-pause',
-          startedAt: '2026-06-10T09:00:45.000Z',
-          endedAt: null
-        }
-      ]
+      downtimeMinutes: 75
     });
     const atTen = calculateTicketProductionSummary({
       ticket,
@@ -202,7 +171,7 @@ describe('calculateTicketProductionSummary', () => {
 
     expect(atTen).toMatchObject({
       elapsedMinutes: 180,
-      downtimeMinutes: 74,
+      downtimeMinutes: 75,
       productiveMinutes: 105,
       currentTarget: 14
     });
@@ -212,7 +181,18 @@ describe('calculateTicketProductionSummary', () => {
       { grade: 3, quantity: 16 },
       { grade: 4, quantity: 18 }
     ]);
-    expect(atEleven.targets).toEqual(atTen.targets);
+    expect(atEleven).toMatchObject({
+      elapsedMinutes: 240,
+      downtimeMinutes: 75,
+      productiveMinutes: 165,
+      currentTarget: 21
+    });
+    expect(atEleven.targets).toEqual([
+      { grade: 1, quantity: 18 },
+      { grade: 2, quantity: 21 },
+      { grade: 3, quantity: 25 },
+      { grade: 4, quantity: 28 }
+    ]);
   });
 
   it('finds the highest achieved grade and reports below grade one', () => {

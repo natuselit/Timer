@@ -14,6 +14,7 @@ import { ShiftConstraintError, ShiftRepository } from './repositories/shiftRepos
 import {
   BackupValidationError,
   BACKUP_SCHEMA_VERSION,
+  adjustWorkTicketDowntime,
   addWorkTicketToActiveShift,
   completeWorkTicket,
   createBackup,
@@ -37,8 +38,6 @@ import {
   serializeBackup,
   saveSettings,
   skipEnterpriseScheduleDiscrepancy,
-  startWorkTicketDowntime,
-  stopWorkTicketDowntime,
   syncShiftWithEnterpriseSchedule,
   updateWorkTicketInActiveShift,
   updateShift
@@ -156,17 +155,77 @@ describe('database migrations', () => {
     const migratedDatabase = new ShifterDatabase(databaseName);
 
     try {
-      await expect(migratedDatabase.shifts.get(legacyShift.id)).resolves.toMatchObject({
+      const migratedShift = await migratedDatabase.shifts.get(legacyShift.id);
+
+      expect(migratedShift).toMatchObject({
         hourlyRateSnapshot: 100,
         workTickets: [
           {
             id: 'legacy-ticket',
             actualQuantity: null,
-            downtimeMinutes: 0,
-            downtimeIntervals: []
+            downtimeMinutes: 0
           }
         ]
       });
+      expect(migratedShift?.workTickets[0]).not.toHaveProperty('downtimeIntervals');
+    } finally {
+      migratedDatabase.close();
+      await migratedDatabase.delete();
+    }
+  });
+
+  it('converts an open legacy downtime interval to accumulated minutes', async () => {
+    const databaseName = makeDbName();
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase.version(2).stores({
+      settings: '&id',
+      shifts: '&id,&date,updatedAt,createdAt',
+      enterpriseSchedule: '&id,&date,createdAt',
+      appMeta: '&key'
+    });
+    const migrationStartedAt = Date.now();
+    const ticketStartedAt = new Date(migrationStartedAt - 60 * 60_000).toISOString();
+    const downtimeStartedAt = new Date(migrationStartedAt - 10 * 60_000).toISOString();
+    const legacyShift = {
+      ...makeShift({
+        id: 'legacy-open-downtime-shift',
+        date: ticketStartedAt.slice(0, 10),
+        startTime: ticketStartedAt,
+        updatedAt: downtimeStartedAt
+      }),
+      workTickets: [
+        {
+          id: 'legacy-open-downtime-ticket',
+          normPerEightHours: 80,
+          startedAt: ticketStartedAt,
+          endedAt: null,
+          actualQuantity: null,
+          downtimeMinutes: 5,
+          downtimeIntervals: [
+            {
+              id: 'legacy-open-downtime',
+              startedAt: downtimeStartedAt,
+              endedAt: null
+            }
+          ],
+          createdAt: ticketStartedAt,
+          updatedAt: downtimeStartedAt
+        }
+      ]
+    };
+
+    await legacyDatabase.table('shifts').put(legacyShift);
+    legacyDatabase.close();
+
+    const migratedDatabase = new ShifterDatabase(databaseName);
+
+    try {
+      const migratedShift = await migratedDatabase.shifts.get(legacyShift.id);
+      const migratedTicket = migratedShift?.workTickets[0];
+
+      expect(migratedTicket?.downtimeMinutes).toBeGreaterThanOrEqual(15);
+      expect(migratedTicket?.downtimeMinutes).toBeLessThanOrEqual(16);
+      expect(migratedTicket).not.toHaveProperty('downtimeIntervals');
     } finally {
       migratedDatabase.close();
       await migratedDatabase.delete();
@@ -374,11 +433,15 @@ describe('shift repository use-cases', () => {
       normPerEightHours: 20,
       startedAt: '2026-06-10T09:00:00.000Z'
     })).rejects.toThrow('Спершу завершіть активний тікет.');
+    await adjustWorkTicketDowntime(shiftRepository, {
+      shiftId: shift.id,
+      deltaMinutes: 10,
+      updatedAt: '2026-06-10T08:00:00.000Z'
+    });
     await completeWorkTicket(shiftRepository, {
       shiftId: shift.id,
       endedAt: '2026-06-10T09:00:00.000Z',
-      actualQuantity: 17,
-      downtimeMinutes: 10
+      actualQuantity: 17
     });
     const updatedShift = await addWorkTicketToActiveShift(shiftRepository, {
       shiftId: shift.id,
@@ -389,8 +452,7 @@ describe('shift repository use-cases', () => {
     await completeWorkTicket(shiftRepository, {
       shiftId: shift.id,
       endedAt: '2026-06-10T10:00:00.000Z',
-      actualQuantity: 5,
-      downtimeMinutes: 0
+      actualQuantity: 5
     });
     const finalShift = await addWorkTicketToActiveShift(shiftRepository, {
       shiftId: shift.id,
@@ -456,7 +518,7 @@ describe('shift repository use-cases', () => {
     ]);
   });
 
-  it('persists downtime intervals, auto-closes an open interval and accepts zero fact', async () => {
+  it('accumulates signed downtime corrections and accepts zero fact', async () => {
     const shift = await createShift(shiftRepository, {
       id: 'downtime-ticket-shift',
       startTime: '2026-06-10T06:30:00.000Z',
@@ -469,38 +531,63 @@ describe('shift repository use-cases', () => {
       normPerEightHours: 50,
       startedAt: '2026-06-10T07:00:00.000Z'
     });
-    await startWorkTicketDowntime(shiftRepository, {
+    await adjustWorkTicketDowntime(shiftRepository, {
       shiftId: shift.id,
-      id: 'downtime-1',
-      startedAt: '2026-06-10T07:30:00.000Z'
+      deltaMinutes: 15,
+      updatedAt: '2026-06-10T07:30:00.000Z'
     });
-    await stopWorkTicketDowntime(shiftRepository, {
+    await adjustWorkTicketDowntime(shiftRepository, {
       shiftId: shift.id,
-      endedAt: '2026-06-10T07:45:00.000Z'
+      deltaMinutes: 10,
+      updatedAt: '2026-06-10T07:45:00.000Z'
     });
-    await startWorkTicketDowntime(shiftRepository, {
+    await adjustWorkTicketDowntime(shiftRepository, {
       shiftId: shift.id,
-      id: 'downtime-2',
-      startedAt: '2026-06-10T08:00:00.000Z'
+      deltaMinutes: -5,
+      updatedAt: '2026-06-10T08:00:00.000Z'
     });
 
     const reloaded = await getActiveShift(shiftRepository);
-    expect(reloaded?.workTickets[0].downtimeIntervals[1].endedAt).toBeNull();
+    expect(reloaded?.workTickets[0].downtimeMinutes).toBe(20);
+
+    await expect(
+      adjustWorkTicketDowntime(shiftRepository, {
+        shiftId: shift.id,
+        deltaMinutes: 0,
+        updatedAt: '2026-06-10T08:30:00.000Z'
+      })
+    ).rejects.toThrow('цілою ненульовою');
+    await expect(
+      adjustWorkTicketDowntime(shiftRepository, {
+        shiftId: shift.id,
+        deltaMinutes: 1.5,
+        updatedAt: '2026-06-10T08:30:00.000Z'
+      })
+    ).rejects.toThrow('цілою ненульовою');
+    await expect(
+      adjustWorkTicketDowntime(shiftRepository, {
+        shiftId: shift.id,
+        deltaMinutes: -21,
+        updatedAt: '2026-06-10T08:30:00.000Z'
+      })
+    ).rejects.toThrow('не може бути відʼємним');
+    await expect(
+      adjustWorkTicketDowntime(shiftRepository, {
+        shiftId: shift.id,
+        deltaMinutes: 71,
+        updatedAt: '2026-06-10T08:30:00.000Z'
+      })
+    ).rejects.toThrow('не може бути довшим');
 
     const completed = await completeWorkTicket(shiftRepository, {
       shiftId: shift.id,
       endedAt: '2026-06-10T08:30:00.000Z',
-      actualQuantity: 0,
-      downtimeMinutes: 45
+      actualQuantity: 0
     });
 
     expect(completed.workTickets[0]).toMatchObject({
       actualQuantity: 0,
-      downtimeMinutes: 45,
-      downtimeIntervals: [
-        { id: 'downtime-1', endedAt: '2026-06-10T07:45:00.000Z' },
-        { id: 'downtime-2', endedAt: '2026-06-10T08:30:00.000Z' }
-      ]
+      downtimeMinutes: 20
     });
   });
 
@@ -592,8 +679,7 @@ describe('shift repository use-cases', () => {
     await completeWorkTicket(shiftRepository, {
       shiftId: shift.id,
       endedAt: '2026-06-10T09:00:00.000Z',
-      actualQuantity: 20,
-      downtimeMinutes: 0
+      actualQuantity: 20
     });
     await addWorkTicketToActiveShift(shiftRepository, {
       shiftId: shift.id,
@@ -641,8 +727,7 @@ describe('shift repository use-cases', () => {
     await completeWorkTicket(shiftRepository, {
       shiftId: shift.id,
       endedAt: '2026-06-10T09:00:00.000Z',
-      actualQuantity: 20,
-      downtimeMinutes: 0
+      actualQuantity: 20
     });
     await addWorkTicketToActiveShift(shiftRepository, {
       shiftId: shift.id,
@@ -684,7 +769,6 @@ describe('shift repository use-cases', () => {
           endedAt: '2026-06-11T10:00:00.000Z',
           actualQuantity: 20,
           downtimeMinutes: 0,
-          downtimeIntervals: [],
           createdAt: '2026-06-11T07:00:00.000Z',
           updatedAt: '2026-06-11T07:00:00.000Z'
         },
@@ -695,7 +779,6 @@ describe('shift repository use-cases', () => {
           endedAt: '2026-06-11T14:30:00.000Z',
           actualQuantity: 15,
           downtimeMinutes: 0,
-          downtimeIntervals: [],
           createdAt: '2026-06-11T10:00:00.000Z',
           updatedAt: '2026-06-11T10:00:00.000Z'
         }
@@ -748,7 +831,6 @@ describe('shift repository use-cases', () => {
               endedAt: '2026-06-10T08:00:00.000Z',
               actualQuantity: 1.5,
               downtimeMinutes: 0,
-              downtimeIntervals: [],
               createdAt: '2026-06-10T07:00:00.000Z',
               updatedAt: '2026-06-10T08:00:00.000Z'
             }
@@ -1314,7 +1396,7 @@ describe('backup use-cases', () => {
     });
   });
 
-  it('round-trips schema v5 ticket fact and downtime data', () => {
+  it('round-trips schema v6 ticket fact and downtime data', () => {
     const shift = makeShift({
       id: 'production-backup-shift',
       endTime: '2026-06-10T14:30:00.000Z',
@@ -1326,13 +1408,6 @@ describe('backup use-cases', () => {
           endedAt: '2026-06-10T08:00:00.000Z',
           actualQuantity: 9,
           downtimeMinutes: 6,
-          downtimeIntervals: [
-            {
-              id: 'downtime-1',
-              startedAt: '2026-06-10T07:20:00.000Z',
-              endedAt: '2026-06-10T07:26:00.000Z'
-            }
-          ],
           createdAt: '2026-06-10T07:00:00.000Z',
           updatedAt: '2026-06-10T08:00:00.000Z'
         }
@@ -1347,6 +1422,47 @@ describe('backup use-cases', () => {
     });
 
     expect(parseBackupJson(source).shifts[0]).toEqual(shift);
+  });
+
+  it('converts an open downtime interval while importing schema v5', () => {
+    const legacyShift = {
+      ...makeShift({
+        id: 'legacy-production-backup-shift',
+        endTime: null,
+        updatedAt: '2026-06-10T08:00:00.000Z'
+      }),
+      workTickets: [
+        {
+          id: 'legacy-production-ticket',
+          normPerEightHours: 80,
+          startedAt: '2026-06-10T07:00:00.000Z',
+          endedAt: null,
+          actualQuantity: null,
+          downtimeMinutes: 5,
+          downtimeIntervals: [
+            {
+              id: 'legacy-open-downtime',
+              startedAt: '2026-06-10T08:00:00.000Z',
+              endedAt: null
+            }
+          ],
+          createdAt: '2026-06-10T07:00:00.000Z',
+          updatedAt: '2026-06-10T08:00:00.000Z'
+        }
+      ]
+    };
+    const source = JSON.stringify({
+      schemaVersion: 5,
+      exportedAt: '2026-06-10T09:00:00.000Z',
+      settings: makeSettings(),
+      shifts: [legacyShift],
+      enterpriseSchedule: []
+    });
+
+    const parsedTicket = parseBackupJson(source).shifts[0].workTickets[0];
+
+    expect(parsedTicket.downtimeMinutes).toBe(65);
+    expect(parsedTicket).not.toHaveProperty('downtimeIntervals');
   });
 
   it('parses older backups without employee first name', () => {
@@ -1572,7 +1688,6 @@ describe('backup use-cases', () => {
               endedAt: '2026-06-10T08:00:00.000Z',
               actualQuantity: 0,
               downtimeMinutes: 0,
-              downtimeIntervals: [],
               createdAt: '2026-06-10T09:00:00.000Z',
               updatedAt: '2026-06-10T08:00:00.000Z'
             }
@@ -1606,7 +1721,6 @@ describe('backup use-cases', () => {
               endedAt: '2026-06-10T08:00:00.000Z',
               actualQuantity: invalidValues.actualQuantity,
               downtimeMinutes: invalidValues.downtimeMinutes,
-              downtimeIntervals: [],
               createdAt: '2026-06-10T07:00:00.000Z',
               updatedAt: '2026-06-10T08:00:00.000Z'
             }

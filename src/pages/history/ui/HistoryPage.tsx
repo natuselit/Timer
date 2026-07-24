@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ChevronDown, Edit3, Plus, Tickets, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ChevronDown, Edit3, Plus, Tickets, Trash2, X } from 'lucide-react';
 import type {
   CoefficientMode,
   ISODateTimeString,
@@ -51,6 +51,11 @@ import {
 import { INCOGNITO_FINANCIAL_MASK, formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import { calculateSalaryBreakdown } from '../../../entities/shift';
 import { calculateMonthShiftSummary } from '../../../shared/lib/shifts/monthSummary';
+import {
+  sortShifts,
+  type ShiftSortCriterion,
+  type ShiftSortDirection
+} from '../model/sorting';
 import './HistoryPage.css';
 
 type HistoryPageProps = {
@@ -124,6 +129,15 @@ const coefficientLabels: Record<CoefficientMode, string> = {
   x2: 'x2'
 };
 
+const sortCriterionLabels: Record<ShiftSortCriterion, string> = {
+  date: 'Дата',
+  duration: 'Тривалість',
+  earnings: 'Заробіток',
+  hourlyRate: 'Ставка',
+  tickets: 'Кількість тікетів',
+  downtime: 'Простій'
+};
+
 const getMonthlySalaryInputValue = (value: number): string => String(Math.floor(value));
 
 const formatCoefficientLabel = (coefficient: number): string => `x${coefficient}`;
@@ -134,6 +148,34 @@ const normalizeTicketNormDraft = (value: string): string => {
   return digits === '' ? '' : String(Math.min(Number(digits), 999));
 };
 
+const createDraftId = (): string => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `ticket-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+};
+
+const createTicketFormValue = (): TicketFormValue => {
+  const createdAt = toLocalIsoString(new Date());
+
+  return {
+    id: createDraftId(),
+    normPerEightHours: '',
+    startedAt: '',
+    endedAt: '',
+    actualQuantity: '',
+    downtimeMinutes: '0',
+    createdAt,
+    updatedAt: createdAt,
+    originalNormPerEightHours: 0,
+    originalStartedAt: '',
+    originalEndedAt: null,
+    originalActualQuantity: null,
+    originalDowntimeMinutes: 0
+  };
+};
+
 const toTicketFormValues = (workTickets: WorkTicket[]): TicketFormValue[] =>
   workTickets.map((ticket) => ({
     id: ticket.id,
@@ -142,7 +184,6 @@ const toTicketFormValues = (workTickets: WorkTicket[]): TicketFormValue[] =>
     endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : '',
     actualQuantity: ticket.actualQuantity === null ? '' : String(ticket.actualQuantity),
     downtimeMinutes: String(ticket.downtimeMinutes),
-    downtimeIntervals: ticket.downtimeIntervals.map((interval) => ({ ...interval })),
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
     originalNormPerEightHours: ticket.normPerEightHours,
@@ -219,7 +260,6 @@ const createWorkTicketsFromFormValues = (
       endedAt,
       actualQuantity: endedAt === null ? null : actualQuantity,
       downtimeMinutes,
-      downtimeIntervals: ticket.downtimeIntervals,
       createdAt: ticket.createdAt,
       updatedAt: didChange ? updatedAt : ticket.updatedAt
     };
@@ -256,7 +296,6 @@ const getTicketProductionPreview = (
       endedAt,
       actualQuantity,
       downtimeMinutes: Number(ticket.downtimeMinutes),
-      downtimeIntervals: ticket.downtimeIntervals,
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt
     };
@@ -453,6 +492,8 @@ export function HistoryPage({
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [editorCalendarMonth, setEditorCalendarMonth] = useState<CalendarMonth | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [sortCriterion, setSortCriterion] = useState<ShiftSortCriterion>('date');
+  const [sortDirection, setSortDirection] = useState<ShiftSortDirection>('descending');
 
   const now = useMemo(() => toLocalIsoString(new Date()), []);
   const loadedDateRange = useMemo(
@@ -519,6 +560,10 @@ export function HistoryPage({
   const visibleShifts = useMemo(
     () => shifts.filter((shift) => isDateInRange(shift.date, selectedRange)),
     [selectedRange, shifts]
+  );
+  const sortedVisibleShifts = useMemo(
+    () => sortShifts(visibleShifts, sortCriterion, sortDirection, now),
+    [now, sortCriterion, sortDirection, visibleShifts]
   );
   const monthSummary = useMemo(
     () => calculateMonthShiftSummary(visibleShifts, now),
@@ -654,7 +699,7 @@ export function HistoryPage({
 
   const changeEditorTicketNorm = (ticketId: string, value: string) => {
     setEditor((current) =>
-      current?.mode === 'edit'
+      current
         ? {
             ...current,
             values: {
@@ -681,7 +726,7 @@ export function HistoryPage({
     const normalizedValue = value.replace(/\D/g, '');
 
     setEditor((current) =>
-      current?.mode === 'edit'
+      current
         ? {
             ...current,
             values: {
@@ -701,7 +746,7 @@ export function HistoryPage({
     value: string
   ) => {
     setEditor((current) =>
-      current?.mode === 'edit'
+      current
         ? {
             ...current,
             values: {
@@ -722,7 +767,7 @@ export function HistoryPage({
 
   const completeEditorTicketTime = (ticketId: string, key: 'startedAt' | 'endedAt') => {
     setEditor((current) =>
-      current?.mode === 'edit'
+      current
         ? {
             ...current,
             values: {
@@ -747,12 +792,26 @@ export function HistoryPage({
     }
 
     setEditor((current) =>
-      current?.mode === 'edit'
+      current
         ? {
             ...current,
             values: {
               ...current.values,
               workTickets: current.values.workTickets.filter((ticket) => ticket.id !== ticketId)
+            }
+          }
+        : current
+    );
+  };
+
+  const addEditorTicket = () => {
+    setEditor((current) =>
+      current
+        ? {
+            ...current,
+            values: {
+              ...current.values,
+              workTickets: [...current.values.workTickets, createTicketFormValue()]
             }
           }
         : current
@@ -841,6 +900,7 @@ export function HistoryPage({
               ? editedBaseHourlyRateSnapshot
               : newShiftHourlyRate,
           gradeSnapshot: createGradeSnapshot(settings),
+          workTickets,
           coefficientMode: normalizedValues.coefficientMode,
           now: savedAt
         });
@@ -929,10 +989,49 @@ export function HistoryPage({
             <p className="history-page__eyebrow">Зміни</p>
             <h2 id="history-list-title">Список змін</h2>
           </div>
-          <button className="history-page__primary-button" type="button" onClick={openCreateEditor}>
-            <Plus size={16} />
-            <span>Додати</span>
-          </button>
+          <div className="history-page__header-actions">
+            <div className="history-page__sort-control">
+              <label>
+                <span>Сортування</span>
+                <select
+                  value={sortCriterion}
+                  onChange={(event) =>
+                    setSortCriterion(event.target.value as ShiftSortCriterion)
+                  }
+                >
+                  {Object.entries(sortCriterionLabels).map(([criterion, label]) => (
+                    <option value={criterion} key={criterion}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                aria-label={
+                  sortDirection === 'descending'
+                    ? 'За спаданням. Змінити на зростання'
+                    : 'За зростанням. Змінити на спадання'
+                }
+                title={sortDirection === 'descending' ? 'За спаданням' : 'За зростанням'}
+                onClick={() =>
+                  setSortDirection((current) =>
+                    current === 'descending' ? 'ascending' : 'descending'
+                  )
+                }
+              >
+                {sortDirection === 'descending' ? (
+                  <ArrowDown aria-hidden="true" size={18} />
+                ) : (
+                  <ArrowUp aria-hidden="true" size={18} />
+                )}
+              </button>
+            </div>
+            <button className="history-page__primary-button" type="button" onClick={openCreateEditor}>
+              <Plus size={16} />
+              <span>Додати</span>
+            </button>
+          </div>
         </header>
 
         {error ? (
@@ -949,7 +1048,7 @@ export function HistoryPage({
           </p>
         ) : (
           <div className="history-page__list">
-            {visibleShifts.map((shift) => {
+            {sortedVisibleShifts.map((shift) => {
               const effectiveEndTime = shift.endTime ?? now;
               const salary = calculateSalaryBreakdown({
                 ...shift,
@@ -1294,16 +1393,26 @@ export function HistoryPage({
                 </div>
               </section>
 
-              {editor.mode === 'edit' ? (
-                <section className="history-page__editor-section history-page__form-field history-page__form-field--full history-page__ticket-editor">
+              <section className="history-page__editor-section history-page__form-field history-page__form-field--full history-page__ticket-editor">
                   <div className="history-page__ticket-editor-header">
                     <div className="history-page__ticket-editor-title">
-                      <span>Тікети зміни</span>
-                      <strong aria-label={`Кількість тікетів: ${editor.values.workTickets.length}`}>
-                        {editor.values.workTickets.length}
-                      </strong>
+                      <div>
+                        <span>Тікети зміни</span>
+                        <strong aria-label={`Кількість тікетів: ${editor.values.workTickets.length}`}>
+                          {editor.values.workTickets.length}
+                        </strong>
+                      </div>
+                      <button
+                        className="history-page__ticket-add-button"
+                        type="button"
+                        disabled={isSaving}
+                        onClick={addEditorTicket}
+                      >
+                        <Plus aria-hidden="true" size={16} />
+                        <span>Додати тікет</span>
+                      </button>
                     </div>
-                    <small>Редагування застосується після збереження.</small>
+                    <small>Час тікетів має бути в межах зміни та не перетинатися.</small>
                   </div>
                   {editor.values.workTickets.length > 0 ? (
                     <div className="history-page__ticket-list">
@@ -1311,7 +1420,9 @@ export function HistoryPage({
                         const productionPreview = getTicketProductionPreview(
                           ticket,
                           editor.values.date,
-                          editor.shift.gradeSnapshot
+                          editor.mode === 'edit'
+                            ? editor.shift.gradeSnapshot
+                            : createGradeSnapshot(settings)
                         );
                         const production = productionPreview?.summary ?? null;
                         const previewActualQuantity = productionPreview?.actualQuantity ?? null;
@@ -1471,7 +1582,6 @@ export function HistoryPage({
                     <p className="history-page__ticket-empty">У цій зміні тікетів немає.</p>
                   )}
                 </section>
-              ) : null}
             </div>
 
             {error ? (

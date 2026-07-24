@@ -61,6 +61,53 @@
   color: var(--color-on-primary);
 }
 
+.history-page__header-actions,
+.history-page__sort-control {
+  display: flex;
+  min-width: 0;
+  align-items: end;
+  gap: 7px;
+}
+
+.history-page__sort-control label {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.history-page__sort-control label > span {
+  color: var(--color-text-secondary);
+  font-size: 0.65rem;
+  font-weight: 800;
+}
+
+.history-page__sort-control select {
+  min-width: 138px;
+  min-height: 44px;
+  padding: 0 30px 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.history-page__sort-control button {
+  display: inline-grid;
+  width: 44px;
+  min-height: 44px;
+  flex: 0 0 44px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
 .history-page__icon-button {
   width: 46px;
   flex: 0 0 auto;
@@ -679,6 +726,14 @@
   display: flex;
   min-width: 0;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-page__ticket-editor-title > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
   gap: 8px;
 }
 
@@ -700,6 +755,29 @@
   color: var(--color-text-secondary);
   font-size: 0.75rem;
   font-weight: 700;
+}
+
+.history-page__ticket-add-button {
+  display: inline-flex;
+  min-height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-compact);
+  background: var(--color-primary-surface);
+  color: var(--color-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 850;
+}
+
+.history-page__ticket-add-button:disabled {
+  cursor: progress;
+  opacity: 0.65;
 }
 
 .history-page__ticket-list {
@@ -1025,22 +1103,45 @@
   .history-page__editor-overlay {
     align-items: end;
     padding:
-      max(10px, env(safe-area-inset-top))
-      0
-      0;
+      max(12px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
   }
 
   .history-page__editor {
     width: 100%;
-    height: calc(100dvh - max(10px, env(safe-area-inset-top)));
-    max-height: calc(100dvh - max(10px, env(safe-area-inset-top)));
-    padding:
-      14px
-      max(14px, env(safe-area-inset-right))
-      max(14px, env(safe-area-inset-bottom))
-      max(14px, env(safe-area-inset-left));
-    border-bottom: 0;
-    border-radius: 24px 24px 0 0;
+    height: auto;
+    max-height: calc(
+      100dvh - max(12px, env(safe-area-inset-top)) -
+        max(12px, env(safe-area-inset-bottom))
+    );
+    padding: 14px;
+    border-radius: 24px;
+  }
+
+  .history-page__panel > .history-page__panel-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .history-page__header-actions {
+    width: 100%;
+    align-items: end;
+  }
+
+  .history-page__sort-control {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .history-page__sort-control label {
+    flex: 1 1 auto;
+  }
+
+  .history-page__sort-control select {
+    width: 100%;
+    min-width: 0;
   }
 
   .history-page__ticket-row {

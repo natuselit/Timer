@@ -21,6 +21,7 @@ import {
   type WorkTicket
 } from '../../../entities/shift';
 import {
+  adjustWorkTicketDowntime,
   addWorkTicketToActiveShift,
   completeWorkTicket,
   createShift,
@@ -32,8 +33,6 @@ import {
   localDb,
   ShiftConstraintError,
   ShiftRepository,
-  startWorkTicketDowntime,
-  stopWorkTicketDowntime,
   updateWorkTicketInActiveShift,
   updateShift
 } from '../../../shared/lib/local-db';
@@ -54,6 +53,10 @@ import {
   type CalendarRangePreset
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
+import {
+  copyTextToClipboard,
+  formatShiftClipboardText
+} from '../../../shared/lib/clipboard/shiftClipboard';
 import type { NavigationItem } from '../../../shared/config/navigation';
 import './MainPage.css';
 
@@ -130,6 +133,14 @@ const normalizeTicketNormDraft = (value: string): string => {
   const digits = value.replace(/\D/g, '');
 
   return digits === '' ? '' : String(Math.min(Number(digits), 999));
+};
+
+const normalizeSignedIntegerDraft = (value: string): string => {
+  const trimmed = value.trim();
+  const sign = trimmed.startsWith('-') ? '-' : trimmed.startsWith('+') ? '+' : '';
+  const digits = trimmed.replace(/\D/g, '');
+
+  return `${sign}${digits}`;
 };
 
 const getTicketErrorMessage = (error: unknown): string =>
@@ -234,9 +245,12 @@ export function MainPage({
   const [isAddingTicket, setIsAddingTicket] = useState(false);
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
   const [ticketActualDraft, setTicketActualDraft] = useState('');
-  const [ticketDowntimeDraft, setTicketDowntimeDraft] = useState('');
-  const [isDowntimeDraftEdited, setIsDowntimeDraftEdited] = useState(false);
+  const [downtimeAdjustmentDraft, setDowntimeAdjustmentDraft] = useState('');
   const [isCompletingTicket, setIsCompletingTicket] = useState(false);
+  const [clipboardNotice, setClipboardNotice] = useState<{
+    tone: 'success' | 'warning';
+    message: string;
+  } | null>(null);
   const [isTogglingIncognito, setIsTogglingIncognito] = useState(false);
   const [localDataRefreshKey, setLocalDataRefreshKey] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
@@ -347,8 +361,6 @@ export function MainPage({
   }, [latestCompletedShift]);
   const currentEarning = activeSalaryBreakdown?.totalAmount ?? 0;
   const activeWorkTicket = activeShift ? getActiveWorkTicket(activeShift) : null;
-  const activeDowntimeInterval =
-    activeWorkTicket?.downtimeIntervals.find((interval) => interval.endedAt === null) ?? null;
   const activeTicketTargets = useMemo(() => {
     if (!activeShift || !activeWorkTicket) {
       return null;
@@ -372,8 +384,7 @@ export function MainPage({
 
   useEffect(() => {
     setTicketActualDraft('');
-    setTicketDowntimeDraft('');
-    setIsDowntimeDraftEdited(false);
+    setDowntimeAdjustmentDraft('');
   }, [activeWorkTicket?.id]);
 
   const toggleIncognito = async () => {
@@ -395,6 +406,7 @@ export function MainPage({
 
   const arrive = async () => {
     setTimerError(null);
+    setClipboardNotice(null);
     const startedAt = toLocalIsoString(new Date());
     const startedDate = getDateFromDateTime(startedAt);
     const baseHourlyRate = calculateHourlyRateFromMonthlySalary(
@@ -447,6 +459,21 @@ export function MainPage({
       setTicketNormDraft('');
       setTicketError(null);
       notifyLocalDataChange();
+
+      if (completedShift.endTime !== null) {
+        const clipboardText = formatShiftClipboardText(settings, {
+          ...completedShift,
+          endTime: completedShift.endTime
+        });
+        const didCopy = await copyTextToClipboard(clipboardText);
+
+        setClipboardNotice({
+          tone: didCopy ? 'success' : 'warning',
+          message: didCopy
+            ? `Скопійовано: ${clipboardText}`
+            : `Зміну завершено, але текст не скопійовано: ${clipboardText}`
+        });
+      }
     } catch (error) {
       setTimerError(getTimerErrorMessage(error));
     }
@@ -502,8 +529,15 @@ export function MainPage({
     }
   };
 
-  const toggleTicketDowntime = async () => {
+  const addTicketDowntimeAdjustment = async () => {
     if (!activeShift || !activeWorkTicket) {
+      return;
+    }
+
+    const deltaMinutes = Number(downtimeAdjustmentDraft);
+
+    if (!Number.isSafeInteger(deltaMinutes) || deltaMinutes === 0) {
+      setTicketError('Вкажіть цілу ненульову кількість хвилин, наприклад +15 або -5.');
       return;
     }
 
@@ -512,18 +546,15 @@ export function MainPage({
     setTicketError(null);
 
     try {
-      const updatedShift = activeDowntimeInterval
-        ? await stopWorkTicketDowntime(shiftRepository, {
-            shiftId: activeShift.id,
-            endedAt: changedAt
-          })
-        : await startWorkTicketDowntime(shiftRepository, {
-            shiftId: activeShift.id,
-            startedAt: changedAt
-          });
+      const updatedShift = await adjustWorkTicketDowntime(shiftRepository, {
+        shiftId: activeShift.id,
+        deltaMinutes,
+        updatedAt: changedAt
+      });
 
       setNow(changedAt);
       setActiveShift(updatedShift);
+      setDowntimeAdjustmentDraft('');
       notifyLocalDataChange();
     } catch (error) {
       setTicketError(getTicketErrorMessage(error));
@@ -549,19 +580,6 @@ export function MainPage({
       return;
     }
 
-    const downtimeMinutes = isDowntimeDraftEdited
-      ? Number(ticketDowntimeDraft)
-      : activeTicketTargets.downtimeMinutes;
-
-    if (
-      !Number.isSafeInteger(downtimeMinutes) ||
-      downtimeMinutes < 0 ||
-      downtimeMinutes > activeTicketTargets.elapsedMinutes
-    ) {
-      setTicketError('Простій має бути цілою кількістю хвилин у межах тікета.');
-      return;
-    }
-
     const endedAt = toLocalIsoString(new Date());
     setIsCompletingTicket(true);
     setTicketError(null);
@@ -570,8 +588,7 @@ export function MainPage({
       const updatedShift = await completeWorkTicket(shiftRepository, {
         shiftId: activeShift.id,
         endedAt,
-        actualQuantity,
-        downtimeMinutes
+        actualQuantity
       });
 
       setNow(endedAt);
@@ -1025,13 +1042,28 @@ export function MainPage({
                           <span>Простій</span>
                           <strong>{formatDurationMinutes(activeTicketTargets.downtimeMinutes)}</strong>
                         </div>
+                        <label>
+                          <span>Коригування, хв</span>
+                          <input
+                            type="text"
+                            inputMode="text"
+                            pattern="[+-]?[0-9]*"
+                            value={downtimeAdjustmentDraft}
+                            placeholder="+15 або -5"
+                            onChange={(event) => {
+                              setDowntimeAdjustmentDraft(
+                                normalizeSignedIntegerDraft(event.target.value)
+                              );
+                              setTicketError(null);
+                            }}
+                          />
+                        </label>
                         <button
                           type="button"
-                          data-active={activeDowntimeInterval ? 'true' : 'false'}
                           disabled={pendingTicketId !== null || isCompletingTicket}
-                          onClick={() => void toggleTicketDowntime()}
+                          onClick={() => void addTicketDowntimeAdjustment()}
                         >
-                          {activeDowntimeInterval ? 'Завершити простій' : 'Почати простій'}
+                          Додати
                         </button>
                       </div>
                       <div className="main-page__ticket-complete-form">
@@ -1044,23 +1076,6 @@ export function MainPage({
                             placeholder="0"
                             onChange={(event) => {
                               setTicketActualDraft(event.target.value.replace(/\D/g, ''));
-                              setTicketError(null);
-                            }}
-                          />
-                        </label>
-                        <label>
-                          <span>Простій, хв</span>
-                          <input
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            value={
-                              isDowntimeDraftEdited
-                                ? ticketDowntimeDraft
-                                : String(activeTicketTargets.downtimeMinutes)
-                            }
-                            onChange={(event) => {
-                              setIsDowntimeDraftEdited(true);
-                              setTicketDowntimeDraft(event.target.value.replace(/\D/g, ''));
                               setTicketError(null);
                             }}
                           />
@@ -1259,18 +1274,16 @@ export function MainPage({
                   ) : null}
           </section>
 
-          <div className="main-page__action-bar">
-            {activeWorkTicket ? (
-              <p className="main-page__hold-hint">Спершу завершіть активний тікет</p>
-            ) : null}
-            <HoldButton
-              label="Пішов"
-              delayMs={settings.leaveHoldDelayMs}
-              onConfirm={leave}
-              tone="danger"
-              disabled={Boolean(activeWorkTicket)}
-            />
-          </div>
+          {!activeWorkTicket ? (
+            <div className="main-page__action-bar">
+              <HoldButton
+                label="Пішов"
+                delayMs={settings.leaveHoldDelayMs}
+                onConfirm={leave}
+                tone="danger"
+              />
+            </div>
+          ) : null}
         </>
       ) : (
         <>
@@ -1368,6 +1381,16 @@ export function MainPage({
                 {timerError ? (
                   <p className="main-page__error" role="alert">
                     {timerError}
+                  </p>
+                ) : null}
+                {clipboardNotice ? (
+                  <p
+                    className="main-page__notice"
+                    data-tone={clipboardNotice.tone}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {clipboardNotice.message}
                   </p>
                 ) : null}
           </section>

@@ -7,8 +7,7 @@ import type {
   GradeSnapshot,
   LocalDateString,
   Shift,
-  WorkTicket,
-  WorkTicketDowntimeInterval
+  WorkTicket
 } from '../../../../entities/shift';
 import { validateAndSortWorkTickets } from '../../../../entities/shift';
 import type { ShifterDatabase } from '../database';
@@ -53,28 +52,6 @@ type GradeSettings = Pick<
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
-const normalizeDowntimeIntervals = (value: unknown): WorkTicketDowntimeInterval[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .filter((interval): interval is WorkTicketDowntimeInterval => {
-      if (typeof interval !== 'object' || interval === null || Array.isArray(interval)) {
-        return false;
-      }
-
-      const candidate = interval as Partial<WorkTicketDowntimeInterval>;
-
-      return (
-        typeof candidate.id === 'string' &&
-        typeof candidate.startedAt === 'string' &&
-        (candidate.endedAt === null || typeof candidate.endedAt === 'string')
-      );
-    })
-    .map((interval) => ({ ...interval }));
-};
-
 const normalizeWorkTickets = (value: unknown): WorkTicket[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -99,7 +76,10 @@ const normalizeWorkTickets = (value: unknown): WorkTicket[] => {
       );
     })
     .map((ticket) => ({
-      ...ticket,
+      id: ticket.id,
+      normPerEightHours: ticket.normPerEightHours,
+      startedAt: ticket.startedAt,
+      endedAt: ticket.endedAt,
       actualQuantity:
         Number.isSafeInteger(ticket.actualQuantity) && ticket.actualQuantity! >= 0
           ? ticket.actualQuantity!
@@ -108,7 +88,8 @@ const normalizeWorkTickets = (value: unknown): WorkTicket[] => {
         Number.isSafeInteger(ticket.downtimeMinutes) && ticket.downtimeMinutes! >= 0
           ? ticket.downtimeMinutes!
           : 0,
-      downtimeIntervals: normalizeDowntimeIntervals(ticket.downtimeIntervals)
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt
     }));
 };
 
@@ -162,9 +143,6 @@ const prepareShiftForWrite = (record: Shift): Shift => {
       throw new Error('Простій має бути цілою невідʼємною кількістю хвилин.');
     }
 
-    if (!Array.isArray(ticket.downtimeIntervals)) {
-      throw new Error('Інтервали простою мають бути масивом.');
-    }
   });
 
   const shift = normalizeShiftRecord(record);

@@ -326,7 +326,6 @@ describe('calculateAnalyticsSummary', () => {
               endedAt: '2026-06-10T08:00:00.000+03:00',
               actualQuantity: 10,
               downtimeMinutes: 0,
-              downtimeIntervals: [],
               createdAt: '2026-06-10T07:00:00.000+03:00',
               updatedAt: '2026-06-10T08:00:00.000+03:00'
             }
@@ -354,7 +353,6 @@ describe('calculateAnalyticsSummary', () => {
               endedAt: '2026-06-20T09:00:00.000+03:00',
               actualQuantity: 15,
               downtimeMinutes: 20,
-              downtimeIntervals: [],
               createdAt: '2026-06-20T07:00:00.000+03:00',
               updatedAt: '2026-06-20T09:00:00.000+03:00'
             },
@@ -365,7 +363,6 @@ describe('calculateAnalyticsSummary', () => {
               endedAt: '2026-06-20T10:00:00.000+03:00',
               actualQuantity: null,
               downtimeMinutes: 0,
-              downtimeIntervals: [],
               createdAt: '2026-06-20T09:00:00.000+03:00',
               updatedAt: '2026-06-20T10:00:00.000+03:00'
             }

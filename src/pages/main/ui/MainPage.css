@@ -1,4 +1,4 @@
-.app-shell__content:has(.main-page__timer-screen--active) {
+.app-shell__content:has(.main-page__timer-screen--active):has(.main-page__action-bar) {
   padding-bottom: 0;
 }
 
@@ -465,11 +465,11 @@
 
 .main-page__ticket-downtime {
   grid-column: 1 / -1;
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-height: 44px;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 8px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-compact);
@@ -479,6 +479,32 @@
 .main-page__ticket-downtime > div {
   display: grid;
   gap: 2px;
+}
+
+.main-page__ticket-downtime label {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.main-page__ticket-downtime label span {
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.main-page__ticket-downtime input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-compact);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: center;
 }
 
 .main-page__ticket-downtime button,
@@ -495,15 +521,10 @@
   font-weight: 850;
 }
 
-.main-page__ticket-downtime button[data-active='true'] {
-  background: var(--color-error);
-  color: var(--color-on-error);
-}
-
 .main-page__ticket-complete-form {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.75fr);
+  grid-template-columns: 1fr;
   gap: 7px;
   padding: 8px;
   border: 1px solid var(--color-primary-border);
@@ -818,6 +839,24 @@
   font-weight: 700;
 }
 
+.main-page__notice {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--color-success-border);
+  border-radius: var(--radius-control);
+  background: var(--color-success-surface);
+  color: var(--color-success);
+  font-size: 0.85rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.main-page__notice[data-tone='warning'] {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
+}
+
 @media (max-width: 380px) {
   .main-page__summary {
     padding: 14px;
@@ -872,5 +911,13 @@
   .main-page__ticket-edit-form input {
     padding-inline: 3px;
     font-size: 0.78rem;
+  }
+
+  .main-page__ticket-downtime {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .main-page__ticket-downtime > div {
+    grid-column: 1 / -1;
   }
 }

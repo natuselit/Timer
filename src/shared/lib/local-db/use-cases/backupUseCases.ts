@@ -31,12 +31,14 @@ export const LEGACY_BACKUP_SCHEMA_VERSION = 1;
 const GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION = 3;
 const THEME_BACKUP_SCHEMA_VERSION = 4;
 const TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION = 5;
-export const BACKUP_SCHEMA_VERSION = TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION;
+const MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION = 6;
+export const BACKUP_SCHEMA_VERSION = MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION;
 const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   LEGACY_BACKUP_SCHEMA_VERSION,
   2,
   GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION,
   THEME_BACKUP_SCHEMA_VERSION,
+  TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION,
   BACKUP_SCHEMA_VERSION
 ]);
 
@@ -310,7 +312,13 @@ const parseGradeSnapshot = (value: unknown): GradeSnapshot | null => {
   };
 };
 
-const parseDowntimeIntervals = (value: unknown): WorkTicket['downtimeIntervals'] => {
+type LegacyDowntimeInterval = {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+};
+
+const parseDowntimeIntervals = (value: unknown): LegacyDowntimeInterval[] => {
   if (!Array.isArray(value)) {
     throw new BackupValidationError('ticket.downtimeIntervals має бути масивом.');
   }
@@ -338,18 +346,57 @@ const parseDowntimeIntervals = (value: unknown): WorkTicket['downtimeIntervals']
   });
 };
 
-const parseWorkTicket = (value: unknown, schemaVersion: number): WorkTicket => {
+const getLegacyOpenDowntimeMinutes = (
+  intervals: LegacyDowntimeInterval[],
+  effectiveEndTime: string
+): number => {
+  const openIntervals = intervals.filter((interval) => interval.endedAt === null);
+
+  if (openIntervals.length > 1) {
+    throw new BackupValidationError('Тікет містить більше одного активного простою.');
+  }
+
+  const activeInterval = openIntervals[0];
+
+  if (!activeInterval) {
+    return 0;
+  }
+
+  const startedAt = new Date(activeInterval.startedAt).getTime();
+  const endedAt = new Date(effectiveEndTime).getTime();
+
+  if (Number.isNaN(startedAt) || Number.isNaN(endedAt) || endedAt < startedAt) {
+    throw new BackupValidationError('Активний простій містить невалідний час.');
+  }
+
+  return Math.floor((endedAt - startedAt) / 60_000);
+};
+
+const parseWorkTicket = (
+  value: unknown,
+  schemaVersion: number,
+  fallbackEndTime: string
+): WorkTicket => {
   if (!isRecord(value)) {
     throw new BackupValidationError('Кожен тікет має бути обʼєктом.');
   }
 
   const endedAt = value.endedAt;
   const actualQuantity = value.actualQuantity;
+  const parsedEndedAt = endedAt === null ? null : readString(value, 'endedAt');
+  const legacyIntervals =
+    schemaVersion === TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION
+      ? parseDowntimeIntervals(value.downtimeIntervals)
+      : [];
+  const baseDowntimeMinutes =
+    schemaVersion < TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION
+      ? 0
+      : readNonNegativeNumber(value, 'downtimeMinutes');
   const ticket: WorkTicket = {
     id: readString(value, 'id'),
     normPerEightHours: readNonNegativeNumber(value, 'normPerEightHours'),
     startedAt: readString(value, 'startedAt'),
-    endedAt: endedAt === null ? null : readString(value, 'endedAt'),
+    endedAt: parsedEndedAt,
     actualQuantity:
       schemaVersion < TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION
         ? null
@@ -357,13 +404,8 @@ const parseWorkTicket = (value: unknown, schemaVersion: number): WorkTicket => {
           ? null
           : readFiniteNumber(value, 'actualQuantity'),
     downtimeMinutes:
-      schemaVersion < TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION
-        ? 0
-        : readNonNegativeNumber(value, 'downtimeMinutes'),
-    downtimeIntervals:
-      schemaVersion < TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION
-        ? []
-        : parseDowntimeIntervals(value.downtimeIntervals),
+      baseDowntimeMinutes +
+      getLegacyOpenDowntimeMinutes(legacyIntervals, parsedEndedAt ?? fallbackEndTime),
     createdAt: readString(value, 'createdAt'),
     updatedAt: readString(value, 'updatedAt')
   };
@@ -388,7 +430,11 @@ const parseWorkTicket = (value: unknown, schemaVersion: number): WorkTicket => {
   return ticket;
 };
 
-const parseWorkTickets = (value: unknown, schemaVersion: number): WorkTicket[] => {
+const parseWorkTickets = (
+  value: unknown,
+  schemaVersion: number,
+  fallbackEndTime: string
+): WorkTicket[] => {
   if (schemaVersion < GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION && value === undefined) {
     return [];
   }
@@ -397,7 +443,9 @@ const parseWorkTickets = (value: unknown, schemaVersion: number): WorkTicket[] =
     throw new BackupValidationError('shift.workTickets має бути масивом.');
   }
 
-  const tickets = value.map((ticket) => parseWorkTicket(ticket, schemaVersion));
+  const tickets = value.map((ticket) =>
+    parseWorkTicket(ticket, schemaVersion, fallbackEndTime)
+  );
   const activeTicketCount = tickets.filter((ticket) => ticket.endedAt === null).length;
 
   if (activeTicketCount > 1) {
@@ -407,7 +455,11 @@ const parseWorkTickets = (value: unknown, schemaVersion: number): WorkTicket[] =
   return tickets;
 };
 
-const parseShift = (value: unknown, schemaVersion: number): Shift => {
+const parseShift = (
+  value: unknown,
+  schemaVersion: number,
+  exportedAt: string
+): Shift => {
   if (!isRecord(value)) {
     throw new BackupValidationError('Кожна зміна має бути обʼєктом.');
   }
@@ -452,7 +504,7 @@ const parseShift = (value: unknown, schemaVersion: number): Shift => {
       schemaVersion >= GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION
         ? parseGradeSnapshot(value.gradeSnapshot)
         : null,
-    workTickets: parseWorkTickets(value.workTickets, schemaVersion),
+    workTickets: parseWorkTickets(value.workTickets, schemaVersion, endTime ?? exportedAt),
     coefficientMode: coefficientMode as CoefficientMode,
     isAutoClosed: readBoolean(value, 'isAutoClosed'),
     createdAt: readString(value, 'createdAt'),
@@ -488,7 +540,7 @@ const parseShift = (value: unknown, schemaVersion: number): Shift => {
   try {
     shift.workTickets = validateAndSortWorkTickets(shift.workTickets, {
       shiftStartTime: shift.startTime,
-      effectiveShiftEndTime: shift.endTime ?? shift.updatedAt,
+      effectiveShiftEndTime: shift.endTime ?? exportedAt,
       allowOpenTicket: shift.endTime === null
     });
   } catch (error) {
@@ -644,7 +696,9 @@ export const parseBackupJson = (source: string): ShifterBackup => {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: parsed.exportedAt,
     settings: parseSettings(parsed.settings, sourceSchemaVersion, parsed.exportedAt),
-    shifts: parsed.shifts.map((shift) => parseShift(shift, sourceSchemaVersion)),
+    shifts: parsed.shifts.map((shift) =>
+      parseShift(shift, sourceSchemaVersion, parsed.exportedAt as string)
+    ),
     enterpriseSchedule: parsed.enterpriseSchedule.map(parseEnterpriseScheduleItem)
   };
 

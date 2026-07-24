@@ -113,7 +113,6 @@ const createTickets = (
       endedAt: firstEndedAt,
       actualQuantity: 18 + (index % 5),
       downtimeMinutes: index % 3 === 0 ? 10 : 0,
-      downtimeIntervals: [],
       createdAt,
       updatedAt: firstEndedAt
     },
@@ -124,7 +123,6 @@ const createTickets = (
       endedAt: secondEndedAt,
       actualQuantity: 24 + (index % 7),
       downtimeMinutes: index % 4 === 0 ? 15 : 0,
-      downtimeIntervals: [],
       createdAt,
       updatedAt: secondEndedAt
     }
