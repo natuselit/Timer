@@ -992,19 +992,22 @@ export function HistoryPage({
           <div className="history-page__header-actions">
             <div className="history-page__sort-control">
               <label>
-                <span>Сортування</span>
-                <select
-                  value={sortCriterion}
-                  onChange={(event) =>
-                    setSortCriterion(event.target.value as ShiftSortCriterion)
-                  }
-                >
-                  {Object.entries(sortCriterionLabels).map(([criterion, label]) => (
-                    <option value={criterion} key={criterion}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
+                <span className="history-page__sort-label">Сортування</span>
+                <span className="history-page__sort-select">
+                  <select
+                    value={sortCriterion}
+                    onChange={(event) =>
+                      setSortCriterion(event.target.value as ShiftSortCriterion)
+                    }
+                  >
+                    {Object.entries(sortCriterionLabels).map(([criterion, label]) => (
+                      <option value={criterion} key={criterion}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown aria-hidden="true" size={17} />
+                </span>
               </label>
               <button
                 type="button"

@@ -60,9 +60,10 @@
   line-height: 1.35;
 }
 
-.schedule-page__textarea:focus {
+.schedule-page__textarea:focus-visible {
   border-color: var(--color-primary);
-  outline: 3px solid var(--color-primary-ring);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
 }
 
 .schedule-page__textarea[data-has-errors='true'] {

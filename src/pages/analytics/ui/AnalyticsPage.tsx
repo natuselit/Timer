@@ -13,8 +13,8 @@ import type { LocalDateString, Shift, ShiftType } from '../../../entities/shift'
 import { getShiftsBetween, localDb, ShiftRepository } from '../../../shared/lib/local-db';
 import {
   formatDurationMinutes,
+  formatShortMinuteDuration,
   formatShortNumericDate,
-  padTimePart,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
@@ -119,18 +119,6 @@ const getDayCountLabel = (value: number): string => {
   return 'днів';
 };
 
-const formatDeviationDuration = (minutes: number): string => {
-  const safeMinutes = Math.max(0, minutes);
-  const hours = Math.floor(safeMinutes / 60);
-  const remainingMinutes = safeMinutes % 60;
-
-  if (hours === 0) {
-    return `${remainingMinutes} хв`;
-  }
-
-  return `${hours} год ${padTimePart(remainingMinutes)} хв`;
-};
-
 const formatPercent = (value: number | null): string =>
   value === null ? '—' : `${Math.round(value)}%`;
 
@@ -154,7 +142,7 @@ const getDeviationFacts = ({
         {
           key: 'late' as const,
           label: 'Запізнення',
-          value: formatDeviationDuration(lateArrivalMinutes)
+          value: formatShortMinuteDuration(lateArrivalMinutes)
         }
       ]
     : []),
@@ -163,7 +151,7 @@ const getDeviationFacts = ({
         {
           key: 'early' as const,
           label: 'Ранній вихід',
-          value: formatDeviationDuration(earlyExitMinutes)
+          value: formatShortMinuteDuration(earlyExitMinutes)
         }
       ]
     : [])
@@ -581,16 +569,16 @@ export function AnalyticsPage({
                 </article>
                 <article data-tone="late">
                   <span>Запізнення</span>
-                  <strong>{formatDeviationDuration(summary.lateArrivalMinutes)}</strong>
+                  <strong>{formatShortMinuteDuration(summary.lateArrivalMinutes)}</strong>
                   <small>
-                    Сер. {formatDeviationDuration(Math.round(summary.averageLateArrivalMinutes))}
+                    Сер. {formatShortMinuteDuration(Math.round(summary.averageLateArrivalMinutes))}
                   </small>
                 </article>
                 <article data-tone="early">
                   <span>Ранній вихід</span>
-                  <strong>{formatDeviationDuration(summary.earlyExitMinutes)}</strong>
+                  <strong>{formatShortMinuteDuration(summary.earlyExitMinutes)}</strong>
                   <small>
-                    Сер. {formatDeviationDuration(Math.round(summary.averageEarlyExitMinutes))}
+                    Сер. {formatShortMinuteDuration(Math.round(summary.averageEarlyExitMinutes))}
                   </small>
                 </article>
               </div>

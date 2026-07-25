@@ -131,10 +131,19 @@ button {
   touch-action: manipulation;
 }
 
-button:focus-visible,
-a:focus-visible {
-  outline: 3px solid var(--color-primary-ring);
+:where(button, a, input, select, textarea, summary):focus {
+  outline: none;
+}
+
+:where(button, a, select, summary):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 72%, transparent);
   outline-offset: 2px;
+}
+
+:where(input, textarea):focus-visible {
+  border-color: var(--color-primary);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
 }
 
 #root {

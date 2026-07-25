@@ -150,6 +150,24 @@ describe('validateAndSortWorkTickets', () => {
 });
 
 describe('calculateTicketProductionSummary', () => {
+  it('recalculates grade targets when downtime increases or decreases', () => {
+    const calculateTarget = (downtimeMinutes: number) =>
+      calculateTicketProductionSummary({
+        ticket: makeTicket({ endedAt: null, actualQuantity: null, downtimeMinutes }),
+        effectiveEndTime: '2026-06-10T10:00:00.000Z',
+        currentGrade: 2,
+        gradeNormPercents: [100, 120, 140, 160]
+      });
+
+    expect(calculateTarget(0).currentTarget).toBe(23);
+    expect(calculateTarget(60).currentTarget).toBe(15);
+    expect(calculateTarget(30).currentTarget).toBe(19);
+    expect(calculateTarget(180)).toMatchObject({
+      productiveMinutes: 0,
+      currentTarget: 0
+    });
+  });
+
   it('subtracts accumulated downtime and returns all grade targets', () => {
     const ticket = makeTicket({
       endedAt: null,

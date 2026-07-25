@@ -71,8 +71,8 @@
   opacity: 1;
 }
 
-.settings-page__field input:focus,
-.settings-page__field select:focus {
+.settings-page__field input:focus-visible,
+.settings-page__field select:focus-visible {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px var(--color-primary-ring);
   outline: none;
@@ -209,7 +209,7 @@
   box-shadow: none;
 }
 
-.settings-page__grade-input > input:focus {
+.settings-page__grade-input > input:focus-visible {
   border: 0;
   box-shadow: none;
 }

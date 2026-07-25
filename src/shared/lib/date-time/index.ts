@@ -68,20 +68,22 @@ export const formatShortNumericDate = (date: LocalDateString): string => {
   return `${day}.${month}`;
 };
 
-export const formatDurationMinutes = (durationMinutes: number): string => {
-  const safeMinutes = Math.max(0, durationMinutes);
-  const hours = Math.floor(safeMinutes / 60);
-  const minutes = safeMinutes % 60;
-
-  return `${hours} год ${padTimePart(minutes)} хв`;
-};
-
 export const formatDurationClock = (durationMinutes: number): string => {
   const safeMinutes = Math.max(0, durationMinutes);
   const hours = Math.floor(safeMinutes / 60);
   const minutes = safeMinutes % 60;
 
   return `${hours}:${padTimePart(minutes)}`;
+};
+
+export const formatDurationMinutes = formatDurationClock;
+
+export const formatShortMinuteDuration = (durationMinutes: number): string => {
+  const safeMinutes = Math.max(0, durationMinutes);
+  const hours = Math.floor(safeMinutes / 60);
+  const minutes = safeMinutes % 60;
+
+  return hours === 0 ? `${minutes} хв` : `${hours}:${padTimePart(minutes)}`;
 };
 
 export const getDurationMinutes = (

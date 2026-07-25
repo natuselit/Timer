@@ -70,7 +70,7 @@
   font-size: 1rem;
 }
 
-.onboarding-page__field input:focus {
+.onboarding-page__field input:focus-visible {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px var(--color-primary-ring);
   outline: none;

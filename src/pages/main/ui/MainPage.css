@@ -372,7 +372,7 @@
   grid-area: label;
 }
 
-.main-page__ticket-form input:focus {
+.main-page__ticket-form input:focus-visible {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 3px var(--color-primary-ring);
   outline: none;
@@ -400,26 +400,21 @@
 
 .main-page__ticket-current {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 5px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
 }
 
 .main-page__ticket-current-card {
-  display: grid;
-  gap: 2px;
-  min-height: 40px;
-  align-content: space-between;
-  padding: 6px;
-  border: 1px solid var(--color-border);
+  min-width: 0;
+  border: 1px solid var(--color-primary-border-muted);
   border-radius: var(--radius-compact);
-  background: var(--color-background);
+  background: color-mix(in srgb, var(--color-primary-soft) 74%, var(--color-surface));
 }
 
 .main-page__ticket-current-card--wide {
-  grid-column: 1 / -1;
   display: flex;
-  min-height: 42px;
-  padding: 6px 7px;
+  min-height: 50px;
+  padding: 7px 8px;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -434,14 +429,31 @@
   gap: 8px;
 }
 
+.main-page__ticket-current-main > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.main-page__ticket-current-main small {
+  color: var(--color-text-secondary);
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
 .main-page__ticket-current strong {
   color: var(--color-text-primary);
   font-size: 0.8rem;
   line-height: 1.15;
 }
 
+.main-page__ticket-current-main > strong {
+  color: var(--color-primary);
+  font-size: 1rem;
+  white-space: nowrap;
+}
+
 .main-page__ticket-targets {
-  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
@@ -451,7 +463,7 @@
   display: grid;
   gap: 2px;
   min-width: 0;
-  padding: 7px 4px;
+  padding: 6px 3px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-compact);
   background: var(--color-background);
@@ -464,30 +476,42 @@
 }
 
 .main-page__ticket-downtime {
-  grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 44px;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border);
+  gap: 6px;
+  padding: 7px 8px 8px;
+  border: 1px solid var(--color-primary-border-muted);
   border-radius: var(--radius-compact);
-  background: var(--color-background);
+  background: color-mix(in srgb, var(--color-background) 72%, var(--color-surface));
 }
 
-.main-page__ticket-downtime > div {
+.main-page__ticket-downtime-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.main-page__ticket-downtime-summary strong {
+  color: var(--color-primary);
+  font-size: 0.9rem;
+}
+
+.main-page__ticket-downtime-control {
   display: grid;
-  gap: 2px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-width: 0;
+  align-items: end;
+  gap: 7px;
 }
 
-.main-page__ticket-downtime label {
+.main-page__ticket-downtime-control label {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.main-page__ticket-downtime label span {
+.main-page__ticket-downtime-control label span {
   color: var(--color-text-secondary);
   font-size: 0.68rem;
   font-weight: 700;
@@ -496,7 +520,7 @@
 .main-page__ticket-downtime input {
   width: 100%;
   min-width: 0;
-  min-height: 38px;
+  min-height: 40px;
   box-sizing: border-box;
   padding: 6px 8px;
   border: 1px solid var(--color-border);
@@ -509,7 +533,7 @@
 
 .main-page__ticket-downtime button,
 .main-page__ticket-complete-form button {
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 12px;
   border: 0;
   border-radius: var(--radius-compact);
@@ -522,24 +546,23 @@
 }
 
 .main-page__ticket-complete-form {
-  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: 1fr;
   gap: 7px;
-  padding: 8px;
-  border: 1px solid var(--color-primary-border);
-  border-radius: var(--radius-compact);
-  background: var(--color-primary-soft);
+  padding: 8px 0 0;
+  border-top: 1px solid var(--color-border);
 }
 
 .main-page__ticket-complete-form label {
   display: grid;
-  gap: 3px;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  gap: 8px;
+  align-items: center;
 }
 
 .main-page__ticket-complete-form input {
   width: 100%;
-  min-height: 38px;
+  min-height: 40px;
   box-sizing: border-box;
   padding: 6px 8px;
   border: 1px solid var(--color-border);
@@ -552,6 +575,7 @@
 
 .main-page__ticket-complete-form button {
   grid-column: 1 / -1;
+  min-height: 42px;
 }
 
 .main-page__ticket-actions {
@@ -896,10 +920,6 @@
     height: 112px;
   }
 
-  .main-page__ticket-current {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .main-page__ticket-form {
     grid-template-columns: 76px minmax(0, 1fr);
   }
@@ -913,11 +933,4 @@
     font-size: 0.78rem;
   }
 
-  .main-page__ticket-downtime {
-    grid-template-columns: minmax(0, 1fr) auto;
-  }
-
-  .main-page__ticket-downtime > div {
-    grid-column: 1 / -1;
-  }
 }

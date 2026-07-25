@@ -75,23 +75,51 @@
   gap: 3px;
 }
 
-.history-page__sort-control label > span {
+.history-page__sort-label {
   color: var(--color-text-secondary);
   font-size: 0.65rem;
   font-weight: 800;
 }
 
-.history-page__sort-control select {
+.history-page__sort-select {
+  position: relative;
+  display: grid;
   min-width: 138px;
+}
+
+.history-page__sort-control select {
+  width: 100%;
+  min-width: 0;
   min-height: 44px;
-  padding: 0 30px 0 9px;
+  appearance: none;
+  padding: 0 36px 0 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
-  background: var(--color-surface);
+  background: color-mix(in srgb, var(--color-background) 58%, var(--color-surface));
   color: var(--color-text-primary);
+  cursor: pointer;
   font: inherit;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.history-page__sort-control select:hover {
+  border-color: var(--color-primary-border);
+  background: var(--color-surface);
+}
+
+.history-page__sort-control select:focus-visible {
+  border-color: var(--color-primary);
+  background: var(--color-surface);
+}
+
+.history-page__sort-select > svg {
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  color: var(--color-primary);
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .history-page__sort-control button {
@@ -350,8 +378,9 @@
 }
 
 .history-page__coefficients {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
   gap: 5px;
   margin: 0;
   padding: 6px 0 0;
@@ -361,9 +390,11 @@
 
 .history-page__coefficients li {
   display: inline-flex;
+  width: 100%;
   min-width: 0;
   min-height: 25px;
   align-items: center;
+  justify-content: center;
   gap: 5px;
   padding: 3px 6px;
   border-radius: var(--radius-compact);
@@ -468,8 +499,8 @@
 
 .history-page__ticket-details-summary:focus-visible,
 .history-page__ticket-detail-header:focus-visible {
-  outline: 3px solid var(--color-primary-ring);
-  outline-offset: -3px;
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 72%, transparent);
+  outline-offset: -2px;
 }
 
 .history-page__ticket-details-label {
@@ -675,9 +706,9 @@
   color: var(--color-text-muted);
 }
 
-.history-page__time-input:focus {
+.history-page__time-input:focus-visible {
   border-color: var(--color-primary);
-  outline: 3px solid var(--color-primary-ring);
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
 }
 
 .history-page__segmented {
@@ -880,6 +911,7 @@
   font-size: 0.95rem;
   font-weight: 850;
   outline: 0;
+  box-shadow: none;
 }
 
 .history-page__ticket-norm-control:focus-within {
@@ -1155,6 +1187,24 @@
 }
 
 @media (max-width: 350px) {
+  .history-page,
+  .history-page__panel {
+    min-width: 0;
+  }
+
+  .history-page__header-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .history-page__sort-control {
+    width: 100%;
+  }
+
+  .history-page__sort-select {
+    min-width: 0;
+  }
+
   .history-page__shift {
     padding: 12px;
   }

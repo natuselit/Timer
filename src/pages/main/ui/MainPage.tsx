@@ -925,7 +925,12 @@ export function MainPage({
                     <div className="main-page__ticket-current">
                       <div className="main-page__ticket-current-card main-page__ticket-current-card--wide">
                         <div className="main-page__ticket-current-main">
-                          <span>План поточного грейду</span>
+                          <div>
+                            <span>Потрібно для G{activeTicketTargets.currentGrade}</span>
+                            <small>
+                              Продуктивно {formatDurationMinutes(activeTicketTargets.productiveMinutes)}
+                            </small>
+                          </div>
                           <strong>{activeTicketTargets.currentTarget} шт</strong>
                         </div>
                         <div className="main-page__ticket-actions" aria-label="Дії з активним тікетом">
@@ -1038,33 +1043,35 @@ export function MainPage({
                         ))}
                       </div>
                       <div className="main-page__ticket-downtime">
-                        <div>
+                        <div className="main-page__ticket-downtime-summary">
                           <span>Простій</span>
                           <strong>{formatDurationMinutes(activeTicketTargets.downtimeMinutes)}</strong>
                         </div>
-                        <label>
-                          <span>Коригування, хв</span>
-                          <input
-                            type="text"
-                            inputMode="text"
-                            pattern="[+-]?[0-9]*"
-                            value={downtimeAdjustmentDraft}
-                            placeholder="+15 або -5"
-                            onChange={(event) => {
-                              setDowntimeAdjustmentDraft(
-                                normalizeSignedIntegerDraft(event.target.value)
-                              );
-                              setTicketError(null);
-                            }}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          disabled={pendingTicketId !== null || isCompletingTicket}
-                          onClick={() => void addTicketDowntimeAdjustment()}
-                        >
-                          Додати
-                        </button>
+                        <div className="main-page__ticket-downtime-control">
+                          <label>
+                            <span>Коригування, хв</span>
+                            <input
+                              type="text"
+                              inputMode="text"
+                              pattern="[+-]?[0-9]*"
+                              value={downtimeAdjustmentDraft}
+                              placeholder="+15 або -5"
+                              onChange={(event) => {
+                                setDowntimeAdjustmentDraft(
+                                  normalizeSignedIntegerDraft(event.target.value)
+                                );
+                                setTicketError(null);
+                              }}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            disabled={pendingTicketId !== null || isCompletingTicket}
+                            onClick={() => void addTicketDowntimeAdjustment()}
+                          >
+                            Додати
+                          </button>
+                        </div>
                       </div>
                       <div className="main-page__ticket-complete-form">
                         <label>
