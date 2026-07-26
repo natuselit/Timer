@@ -13,8 +13,8 @@ const manifest: Partial<ManifestOptions> & {
   name: 'Облік робочого часу',
   short_name: 'Облік часу',
   description: 'Offline-first PWA для обліку робочого часу',
-  theme_color: '#eef2f6',
-  background_color: '#eef2f6',
+  theme_color: '#0b0f14',
+  background_color: '#0b0f14',
   color_scheme_dark: {
     theme_color: '#0b0f14',
     background_color: '#0b0f14'

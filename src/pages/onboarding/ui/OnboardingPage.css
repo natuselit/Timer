@@ -11,40 +11,230 @@
 
 .onboarding-page__panel {
   display: grid;
-  width: min(100%, 480px);
-  gap: 22px;
+  width: min(100%, 500px);
+  gap: 18px;
   margin: 0 auto;
 }
 
-.onboarding-page__header {
+.onboarding-page__topline,
+.onboarding-page__progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.onboarding-page__topline p,
+.onboarding-page__topline button,
+.onboarding-page__progress > span {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 750;
+}
+
+.onboarding-page__topline p {
+  color: var(--color-text-secondary);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.onboarding-page__topline button {
+  min-height: 40px;
+  padding: 8px 4px 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  cursor: pointer;
+}
+
+.onboarding-page__progress {
+  gap: 14px;
+}
+
+.onboarding-page__progress > span {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+
+.onboarding-page__progress-track {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.onboarding-page__progress-track span {
+  height: 5px;
+  border-radius: 99px;
+  background: var(--color-border);
+  transition: background-color 180ms ease;
+}
+
+.onboarding-page__progress-track span.is-active {
+  background: var(--color-primary);
+}
+
+.onboarding-page__tutorial,
+.onboarding-page__settings {
+  display: grid;
+  gap: 22px;
+  padding: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: 26px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.onboarding-page__tutorial {
+  min-height: min(620px, calc(100dvh - 130px));
+  grid-template-rows: auto auto 1fr auto;
+}
+
+.onboarding-page__tutorial-icon,
+.onboarding-page__header-icon {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  border: 1px solid var(--color-primary-border-muted);
+  border-radius: 22px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.onboarding-page__tutorial-copy,
+.onboarding-page__header > div {
   display: grid;
   gap: 8px;
-  padding-top: 6px;
 }
 
 .onboarding-page__eyebrow {
   margin: 0;
   color: var(--color-primary);
-  font-size: 0.875rem;
-  font-weight: 700;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
+.onboarding-page__tutorial h1,
 .onboarding-page__header h1 {
   margin: 0;
   color: var(--color-text-primary);
-  font-size: clamp(1.65rem, 7vw, 2.15rem);
+  font-size: clamp(1.65rem, 7vw, 2.1rem);
   line-height: 1.12;
   letter-spacing: -0.04em;
+}
+
+.onboarding-page__tutorial h1:focus,
+.onboarding-page__header h1:focus {
+  outline: none;
+}
+
+.onboarding-page__intro {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.onboarding-page__points {
+  display: grid;
+  align-content: start;
+  gap: 17px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-page__points li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+}
+
+.onboarding-page__points li > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--color-success-surface);
+  color: var(--color-success);
+}
+
+.onboarding-page__points li > div {
+  display: grid;
+  gap: 4px;
+}
+
+.onboarding-page__points strong {
+  color: var(--color-text-primary);
+  font-size: 0.9375rem;
+}
+
+.onboarding-page__points p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.onboarding-page__tutorial-actions,
+.onboarding-page__form-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+}
+
+.onboarding-page__back,
+.onboarding-page__next,
+.onboarding-page__submit {
+  display: inline-flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 17px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.onboarding-page__back {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.onboarding-page__back:disabled {
+  cursor: default;
+  opacity: 0.36;
+}
+
+.onboarding-page__next,
+.onboarding-page__submit {
+  border: 0;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: 0 14px 34px var(--color-primary-shadow);
+}
+
+.onboarding-page__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.onboarding-page__header-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 17px;
 }
 
 .onboarding-page__form {
   display: grid;
   gap: 14px;
-  padding: 22px;
-  border: 1px solid var(--color-border);
-  border-radius: 24px;
-  background: var(--color-surface);
-  box-shadow: var(--shadow-panel);
 }
 
 .onboarding-page__field {
@@ -52,7 +242,7 @@
   gap: 8px;
 }
 
-.onboarding-page__field span {
+.onboarding-page__field > span {
   color: var(--color-text-primary);
   font-size: 0.9375rem;
   font-weight: 700;
@@ -61,19 +251,13 @@
 .onboarding-page__field input {
   width: 100%;
   min-height: 54px;
-  padding: 14px 14px;
+  padding: 14px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-surface);
   color: var(--color-text-primary);
   font: inherit;
   font-size: 1rem;
-}
-
-.onboarding-page__field input:focus-visible {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-ring);
-  outline: none;
 }
 
 .onboarding-page__field input[aria-invalid='true'] {
@@ -88,21 +272,52 @@
   line-height: 1.35;
 }
 
-.onboarding-page__submit {
-  min-height: 58px;
-  width: 100%;
-  border: 0;
-  border-radius: 18px;
-  background: var(--color-primary);
-  color: var(--color-on-primary);
-  cursor: pointer;
-  font-weight: 800;
-  box-shadow: 0 14px 34px var(--color-primary-shadow);
-}
-
 .onboarding-page__submit:disabled {
   cursor: wait;
   opacity: 0.72;
+}
+
+.onboarding-page__submit-error {
+  padding: 12px 14px;
+  border: 1px solid var(--color-error-border);
+  border-radius: var(--radius-compact);
+  background: var(--color-error-surface);
+}
+
+@media (max-width: 380px) {
+  .onboarding-page {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .onboarding-page__tutorial,
+  .onboarding-page__settings {
+    gap: 18px;
+    padding: 20px;
+    border-radius: 22px;
+  }
+
+  .onboarding-page__tutorial {
+    min-height: calc(100dvh - 122px);
+  }
+
+  .onboarding-page__header {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-page__header-icon {
+    width: 48px;
+    height: 48px;
+  }
+
+  .onboarding-page__tutorial-actions,
+  .onboarding-page__form-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-page__tutorial-actions .onboarding-page__back {
+    grid-row: 2;
+  }
 }
 
 @media (min-width: 560px) {
@@ -110,5 +325,11 @@
     align-items: center;
     padding-right: 24px;
     padding-left: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-page__progress-track span {
+    transition: none;
   }
 }

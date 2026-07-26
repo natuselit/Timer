@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { MainPage } from '../pages/main';
 import { OnboardingPage, type OnboardingValues } from '../pages/onboarding';
 import type { Settings } from '../entities/settings';
 import { localDb, SettingsRepository } from '../shared/lib/local-db';
 import { synchronizeTheme } from '../shared/lib/theme';
+import { AppSplash } from './AppSplash';
 
 const settingsRepository = new SettingsRepository(localDb);
 
@@ -33,13 +34,22 @@ export function App() {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!settings) {
       return;
     }
 
-    return synchronizeTheme(settings.themePreference);
+    const stopThemeSynchronization = synchronizeTheme(settings.themePreference);
+    document.documentElement.removeAttribute('data-app-loading');
+
+    return stopThemeSynchronization;
   }, [settings?.themePreference]);
+
+  useLayoutEffect(() => {
+    if (loadError) {
+      document.documentElement.removeAttribute('data-app-loading');
+    }
+  }, [loadError]);
 
   const completeOnboarding = async (values: OnboardingValues) => {
     if (!settings) {
@@ -76,7 +86,7 @@ export function App() {
   }
 
   if (!settings) {
-    return <main className="app-status">Завантаження...</main>;
+    return <AppSplash />;
   }
 
   if (!settings.onboardingCompleted) {
