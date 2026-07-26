@@ -55,10 +55,20 @@ export default defineConfig({
       injectRegister: null,
       includeAssets: ['pwa.svg', 'pwa-192.png', 'pwa-512.png'],
       manifest,
+      integration: {
+        beforeBuildServiceWorker(options) {
+          options.workbox.additionalManifestEntries =
+            options.workbox.additionalManifestEntries?.filter((entry) =>
+              typeof entry === 'string'
+                ? entry !== options.manifestFilename
+                : entry.url !== options.manifestFilename
+            );
+        }
+      },
       workbox: {
         cleanupOutdatedCaches: true,
         navigateFallback: `${basePath}index.html`,
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}']
+        globPatterns: ['**/*.{js,css,html,svg,png,ico}']
       }
     })
   ]
