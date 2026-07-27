@@ -20,8 +20,9 @@ import {
   BackupValidationError,
   createBackup,
   localDb,
-  parseBackupJson,
+  parseBackupImportJson,
   recalculateHourlyRateSnapshotsForAllShifts,
+  replaceShiftsFromLegacyBackup,
   replaceLocalDataWithDemo,
   restoreBackup,
   ShiftRepository,
@@ -57,6 +58,48 @@ type Notice = {
 
 const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
 const delayMaxSeconds = HOLD_DELAY_MAX_MS / 1000;
+const FAQ_ITEMS = [
+  {
+    question: 'Як почати й завершити зміну?',
+    answer:
+      'Утримуйте «Прийшов» для старту та «Пішов» для завершення. Активну зміну не можна завершити, доки активний тікет не закрито з фактичною кількістю.'
+  },
+  {
+    question: 'Як визначається тип зміни?',
+    answer:
+      'Тип визначається автоматично за найближчим плановим часом: 06:30–14:30 або 14:30–22:30. За день може бути лише одна зміна й лише одна активна зміна загалом.'
+  },
+  {
+    question: 'Як працює коефіцієнт?',
+    answer:
+      'В автоматичному режимі плановий час оплачується за x1, а час до початку або після завершення планової зміни — за x1.5. Ручні x1, x1.5 або x2 діють на всю зміну.'
+  },
+  {
+    question: 'Як працюють тікети та простій?',
+    answer:
+      'Одночасно активний лише один тікет. Простій зменшує продуктивний час; його можна коригувати цілими хвилинами через додавання або віднімання.'
+  },
+  {
+    question: 'Як рахуються оплата та грейди?',
+    answer:
+      'Базова погодинна ставка для нової зміни рахується з місячної ставки, робочих днів 5/2 і восьми годин. Грейдова премія додається окремо за повний календарний місяць.'
+  },
+  {
+    question: 'Що робить режим інкогніто?',
+    answer:
+      'Інкогніто приховує фінансові значення та блокує редагування грошових полів, але не видаляє й не змінює реальні дані.'
+  },
+  {
+    question: 'Як працюють backup та імпорт зі старого додатку?',
+    answer:
+      'Звичайний Shifter-backup повністю відновлює налаштування, зміни й графік. Backup старого додатку замінює лише історію змін, залишаючи чинні налаштування та графік.'
+  },
+  {
+    question: 'Як імпортувати графік підприємства?',
+    answer:
+      'Відкрийте вкладку «Графік», вставте текст із датами та часом приходу/виходу, перевірте розпізнані записи й лише тоді застосуйте імпорт.'
+  }
+] as const;
 
 const parseNumber = (value: string): number => Number(value.replace(',', '.'));
 
@@ -447,27 +490,47 @@ export function SettingsPage({
       return;
     }
 
-    if (
-      !window.confirm(
-        'Імпорт backup повністю замінить поточні локальні дані: налаштування, зміни та графік підприємства. Продовжити?'
-      )
-    ) {
-      return;
-    }
-
     setIsBackupBusy(true);
     setNotice(null);
 
     try {
       const source = await file.text();
-      const backup = parseBackupJson(source);
-      const restoredSettings = await restoreBackup(localDb, backup);
+      const parsedImport = parseBackupImportJson(source);
 
-      onLocalDataReplace(restoredSettings);
-      setNotice({
-        tone: 'success',
-        text: `Backup імпортовано. Змін: ${backup.shifts.length}, записів графіка: ${backup.enterpriseSchedule.length}.`
-      });
+      if (parsedImport.kind === 'legacy') {
+        if (
+          !window.confirm(
+            `Старий backup містить ${parsedImport.shifts.length} змін. Поточну історію змін буде повністю замінено, а налаштування та графік підприємства залишаться без змін. Продовжити?`
+          )
+        ) {
+          return;
+        }
+
+        await replaceShiftsFromLegacyBackup(localDb, parsedImport.shifts);
+        onLocalDataChange?.();
+        setNotice({
+          tone: 'success',
+          text: `Стару історію імпортовано. Змін: ${parsedImport.shifts.length}. Налаштування та графік не змінено.`
+        });
+      } else {
+        const { backup } = parsedImport;
+
+        if (
+          !window.confirm(
+            'Імпорт backup повністю замінить поточні локальні дані: налаштування, зміни та графік підприємства. Продовжити?'
+          )
+        ) {
+          return;
+        }
+
+        const restoredSettings = await restoreBackup(localDb, backup);
+
+        onLocalDataReplace(restoredSettings);
+        setNotice({
+          tone: 'success',
+          text: `Backup імпортовано. Змін: ${backup.shifts.length}, записів графіка: ${backup.enterpriseSchedule.length}.`
+        });
+      }
     } catch (error) {
       setNotice({ tone: 'error', text: getImportErrorMessage(error) });
     } finally {
@@ -630,7 +693,10 @@ export function SettingsPage({
         <label className="settings-page__field">
           <span>Ставка за місяць, ₴</span>
           <input
+            type="text"
             inputMode="decimal"
+            autoComplete="off"
+            pattern="[0-9]*([.,][0-9]*)?"
             disabled={settings.incognitoEnabled}
             aria-invalid={errors.monthlySalary ? 'true' : 'false'}
             aria-describedby={errors.monthlySalary ? 'monthlySalary-error' : undefined}
@@ -659,7 +725,10 @@ export function SettingsPage({
         <label className="settings-page__field">
           <span>Премія за місяць, ₴</span>
           <input
+            type="text"
             inputMode="decimal"
+            autoComplete="off"
+            pattern="[0-9]*([.,][0-9]*)?"
             disabled={settings.incognitoEnabled}
             aria-invalid={errors.monthlyBonus ? 'true' : 'false'}
             aria-describedby={errors.monthlyBonus ? 'monthlyBonus-error' : undefined}
@@ -726,7 +795,10 @@ export function SettingsPage({
                 <span>Грейд {index + 1}</span>
                 <span className="settings-page__grade-input">
                   <input
+                    type="text"
                     inputMode="decimal"
+                    autoComplete="off"
+                    pattern="[0-9]*([.,][0-9]*)?"
                     disabled={settings.incognitoEnabled}
                     value={settings.incognitoEnabled ? INCOGNITO_FINANCIAL_MASK : value}
                     onChange={updateGradePercent('gradeSalaryBonusPercents', index)}
@@ -752,7 +824,10 @@ export function SettingsPage({
                 <span>Грейд {index + 1}</span>
                 <span className="settings-page__grade-input">
                   <input
+                    type="text"
                     inputMode="decimal"
+                    autoComplete="off"
+                    pattern="[0-9]*([.,][0-9]*)?"
                     value={value}
                     onChange={updateGradePercent('gradeNormPercents', index)}
                   />
@@ -773,7 +848,10 @@ export function SettingsPage({
           <label className="settings-page__field">
             <span>Затримка кнопок, с</span>
             <input
+              type="text"
               inputMode="decimal"
+              autoComplete="off"
+              pattern="[0-9]*([.,][0-9]*)?"
               aria-invalid={errors.holdDelaySeconds ? 'true' : 'false'}
               aria-describedby={errors.holdDelaySeconds ? 'holdDelaySeconds-error' : undefined}
               value={values.holdDelaySeconds}
@@ -895,6 +973,18 @@ export function SettingsPage({
               Демо 2 міс.
             </button>
           ) : null}
+        </div>
+      </section>
+
+      <section className="settings-page__section" aria-labelledby="faq-settings-title">
+        <h2 id="faq-settings-title">FAQ</h2>
+        <div className="settings-page__faq">
+          {FAQ_ITEMS.map((item) => (
+            <details key={item.question}>
+              <summary>{item.question}</summary>
+              <p>{item.answer}</p>
+            </details>
+          ))}
         </div>
       </section>
 

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import {
   calculateEnterpriseScheduleComparison,
@@ -32,7 +32,9 @@ import {
   getShiftsByMonth,
   importEnterpriseScheduleText,
   parseBackupJson,
+  parseBackupImportJson,
   recalculateHourlyRateSnapshotsForAllShifts,
+  replaceShiftsFromLegacyBackup,
   replaceLocalDataWithDemo,
   restoreBackup,
   serializeBackup,
@@ -116,6 +118,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   db.close();
   await db.delete();
 });
@@ -1899,5 +1902,171 @@ describe('backup use-cases', () => {
     ).rejects.toThrow('Backup містить більше однієї активної зміни.');
 
     await expect(getShiftsByMonth(shiftRepository, 2026, 6)).resolves.toEqual([currentShift]);
+  });
+
+  it('detects the old app format and preserves historical shift snapshots', () => {
+    const firstStartedAt = new Date('2026-07-27T06:00:27.000+03:00').getTime();
+    const firstEndedAt = new Date('2026-07-27T16:48:13.000+03:00').getTime();
+    const secondStartedAt = new Date('2026-07-28T14:26:00.000+03:00').getTime();
+    const secondEndedAt = new Date('2026-07-28T22:31:00.000+03:00').getTime();
+    const parsed = parseBackupImportJson(
+      JSON.stringify({
+        version: 1,
+        exportedAt: '2026-07-28T20:00:00.000Z',
+        settings: {
+          rate: 280,
+          surname: 'Кухарчук',
+          accentColor: 'yellow'
+        },
+        shifts: [
+          {
+            id: 'legacy-first',
+            startedAt: firstStartedAt,
+            endedAt: firstEndedAt,
+            rate: 280,
+            shiftType: '1 зміна',
+            rateMultiplier: 1.5,
+            doubleRate: false
+          },
+          {
+            id: 'legacy-second',
+            startedAt: secondStartedAt,
+            endedAt: secondEndedAt,
+            rate: 234.995,
+            shiftType: '2 зміна',
+            doubleRate: true
+          }
+        ],
+        lastShift: {
+          id: 'legacy-second'
+        }
+      })
+    );
+
+    expect(parsed.kind).toBe('legacy');
+
+    if (parsed.kind !== 'legacy') {
+      throw new Error('Expected legacy backup');
+    }
+
+    expect(parsed.shifts).toHaveLength(2);
+    expect(parsed.shifts[0]).toMatchObject({
+      id: 'legacy-first',
+      date: '2026-07-27',
+      type: 'first',
+      detectionMode: 'manual',
+      plannedStartTime: '06:30',
+      plannedEndTime: '14:30',
+      baseHourlyRateSnapshot: 280,
+      hourlyRateSnapshot: 280,
+      gradeSnapshot: null,
+      workTickets: [],
+      coefficientMode: 'x1.5',
+      isAutoClosed: false
+    });
+    expect(new Date(parsed.shifts[0].startTime).getTime()).toBe(firstStartedAt);
+    expect(new Date(parsed.shifts[0].endTime!).getTime()).toBe(firstEndedAt);
+    expect(parsed.shifts[1]).toMatchObject({
+      id: 'legacy-second',
+      type: 'second',
+      plannedStartTime: '14:30',
+      plannedEndTime: '22:30',
+      baseHourlyRateSnapshot: 234.995,
+      coefficientMode: 'x2'
+    });
+  });
+
+  it('replaces only shifts from the old app and preserves other local data', async () => {
+    const currentSettings = makeSettings({
+      employeeFirstName: 'Артем',
+      employeeLastName: 'Чинні'
+    });
+    const currentShift = makeShift({
+      id: 'current-shift',
+      endTime: '2026-06-10T14:30:00.000Z'
+    });
+    const scheduleItem = makeScheduleItem();
+    const importedShift = makeShift({
+      id: 'legacy-imported',
+      date: '2026-07-27',
+      startTime: '2026-07-27T06:00:00.000+03:00',
+      endTime: '2026-07-27T14:30:00.000+03:00',
+      baseHourlyRateSnapshot: 280,
+      hourlyRateSnapshot: 280,
+      coefficientMode: 'x1'
+    });
+
+    await settingsRepository.saveSettings(currentSettings);
+    await shiftRepository.createShift(currentShift);
+    await enterpriseScheduleRepository.importItems([scheduleItem]);
+    await db.appMeta.put({
+      key: 'keep-me',
+      value: 'true',
+      updatedAt: '2026-07-27T12:00:00.000Z'
+    });
+
+    await replaceShiftsFromLegacyBackup(db, [importedShift]);
+
+    await expect(settingsRepository.getSettings()).resolves.toEqual(currentSettings);
+    await expect(db.shifts.toArray()).resolves.toEqual([importedShift]);
+    await expect(db.enterpriseSchedule.toArray()).resolves.toEqual([scheduleItem]);
+    await expect(db.appMeta.toArray()).resolves.toEqual([
+      {
+        key: 'keep-me',
+        value: 'true',
+        updatedAt: '2026-07-27T12:00:00.000Z'
+      }
+    ]);
+  });
+
+  it('rolls back the old history when writing imported shifts fails', async () => {
+    const currentShift = makeShift({
+      id: 'current-shift',
+      endTime: '2026-06-10T14:30:00.000Z'
+    });
+    const importedShift = makeShift({
+      id: 'legacy-imported',
+      date: '2026-07-27',
+      startTime: '2026-07-27T06:00:00.000+03:00',
+      endTime: '2026-07-27T14:30:00.000+03:00'
+    });
+
+    await shiftRepository.createShift(currentShift);
+    vi.spyOn(db.shifts, 'bulkPut').mockRejectedValueOnce(new Error('write failed'));
+
+    await expect(
+      replaceShiftsFromLegacyBackup(db, [importedShift])
+    ).rejects.toThrow('write failed');
+    await expect(db.shifts.toArray()).resolves.toEqual([currentShift]);
+  });
+
+  it('rejects invalid old shifts before replacing the current history', async () => {
+    const currentShift = makeShift({
+      id: 'current-shift',
+      endTime: '2026-06-10T14:30:00.000Z'
+    });
+    const startedAt = new Date('2026-07-27T06:00:00.000+03:00').getTime();
+    const invalidSource = JSON.stringify({
+      version: 1,
+      exportedAt: '2026-07-27T17:05:00.764Z',
+      shifts: [
+        {
+          id: 'invalid-legacy',
+          startedAt,
+          endedAt: startedAt + 60_000,
+          rate: 280,
+          shiftType: '1 зміна',
+          rateMultiplier: 3,
+          doubleRate: false
+        }
+      ]
+    });
+
+    await shiftRepository.createShift(currentShift);
+
+    expect(() => parseBackupImportJson(invalidSource)).toThrow(
+      'rateMultiplier старої зміни має дорівнювати 1, 1.5 або 2.'
+    );
+    await expect(db.shifts.toArray()).resolves.toEqual([currentShift]);
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   calculateSalaryBreakdown,
   calculateShiftTimeBreakdown,
+  getEffectiveCoefficient,
   getPlannedShiftWindow
 } from './calculations';
 import type { Shift } from './types';
@@ -113,6 +114,33 @@ describe('calculateShiftTimeBreakdown', () => {
       overtimeAfterShiftMinutes: 1,
       totalOvertimeMinutes: 1
     });
+  });
+});
+
+describe('getEffectiveCoefficient', () => {
+  it.each([
+    ['до планового початку', '2026-06-23T06:29:00.000+03:00', 1.5],
+    ['рівно на плановому початку', '2026-06-23T06:30:00.000+03:00', 1],
+    ['у межах планового часу', '2026-06-23T10:00:00.000+03:00', 1],
+    ['рівно на плановому завершенні', '2026-06-23T14:30:00.000+03:00', 1.5],
+    ['після планового завершення', '2026-06-23T14:31:00.000+03:00', 1.5]
+  ])('returns the auto coefficient %s', (_label, at, expected) => {
+    expect(getEffectiveCoefficient(createShift(), at)).toBe(expected);
+  });
+
+  it.each([
+    ['x1', 1],
+    ['x1.5', 1.5],
+    ['x2', 2]
+  ] as const)('keeps manual mode %s for the whole shift', (coefficientMode, expected) => {
+    expect(
+      getEffectiveCoefficient(
+        createShift({
+          coefficientMode
+        }),
+        '2026-06-23T23:00:00.000+03:00'
+      )
+    ).toBe(expected);
   });
 });
 

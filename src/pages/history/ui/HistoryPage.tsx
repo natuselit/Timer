@@ -1337,6 +1337,7 @@ export function HistoryPage({
                       type="text"
                       inputMode="numeric"
                       autoComplete="off"
+                      pattern="[0-9]{1,2}:?[0-9]{0,2}"
                       maxLength={5}
                       placeholder="00:00"
                       value={editor.values.startTime}
@@ -1354,6 +1355,7 @@ export function HistoryPage({
                           type="text"
                           inputMode="numeric"
                           autoComplete="off"
+                          pattern="[0-9]{1,2}:?[0-9]{0,2}"
                           maxLength={5}
                           placeholder="00:00"
                           value={editor.values.endTime}
@@ -1370,9 +1372,10 @@ export function HistoryPage({
                 <label className="history-page__rate-field">
                   <span>Ставка за місяць, ₴</span>
                   <input
-                    type="number"
-                    min="0"
+                    type="text"
                     inputMode="decimal"
+                    autoComplete="off"
+                    pattern="[0-9]*([.,][0-9]*)?"
                     value={settings.incognitoEnabled ? '' : editor.values.hourlyRateSnapshot}
                     placeholder={settings.incognitoEnabled ? INCOGNITO_FINANCIAL_MASK : undefined}
                     disabled={settings.incognitoEnabled}
@@ -1456,6 +1459,7 @@ export function HistoryPage({
                                   type="text"
                                   inputMode="numeric"
                                   autoComplete="off"
+                                  pattern="[0-9]{1,2}:?[0-9]{0,2}"
                                   maxLength={5}
                                   placeholder="00:00"
                                   value={ticket.startedAt}
@@ -1478,6 +1482,7 @@ export function HistoryPage({
                                   type="text"
                                   inputMode="numeric"
                                   autoComplete="off"
+                                  pattern="[0-9]{1,2}:?[0-9]{0,2}"
                                   maxLength={5}
                                   placeholder="Триває"
                                   value={ticket.endedAt}
@@ -1498,6 +1503,7 @@ export function HistoryPage({
                                 <input
                                   type="text"
                                   inputMode="numeric"
+                                  autoComplete="off"
                                   maxLength={3}
                                   pattern="[0-9]*"
                                   value={ticket.normPerEightHours}
@@ -1514,6 +1520,7 @@ export function HistoryPage({
                                 <input
                                   type="text"
                                   inputMode="numeric"
+                                  autoComplete="off"
                                   pattern="[0-9]*"
                                   value={ticket.actualQuantity}
                                   placeholder="Не внесено"
@@ -1534,6 +1541,7 @@ export function HistoryPage({
                                 <input
                                   type="text"
                                   inputMode="numeric"
+                                  autoComplete="off"
                                   pattern="[0-9]*"
                                   value={ticket.downtimeMinutes}
                                   onChange={(event) =>

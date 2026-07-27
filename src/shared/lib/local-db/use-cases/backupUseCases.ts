@@ -21,7 +21,11 @@ import type {
   ShiftType,
   WorkTicket
 } from '../../../../entities/shift';
-import { validateAndSortWorkTickets } from '../../../../entities/shift';
+import {
+  PLANNED_SHIFTS,
+  validateAndSortWorkTickets
+} from '../../../../entities/shift';
+import { toLocalIsoString } from '../../date-time';
 import type { ShifterDatabase } from '../database';
 import { normalizeSettingsRecord } from '../repositories/settingsRepository';
 import { normalizeShiftRecord } from '../repositories/shiftRepository';
@@ -51,6 +55,17 @@ export type ShifterBackup = {
   shifts: Shift[];
   enterpriseSchedule: EnterpriseScheduleItem[];
 };
+
+export type ParsedBackupImport =
+  | {
+      kind: 'shifter';
+      backup: ShifterBackup;
+    }
+  | {
+      kind: 'legacy';
+      exportedAt: string;
+      shifts: Shift[];
+    };
 
 export class BackupValidationError extends Error {
   constructor(message: string) {
@@ -191,6 +206,22 @@ const readBoolean = (record: Record<string, unknown>, key: string): boolean => {
   }
 
   return value;
+};
+
+const parseJsonRecord = (source: string): Record<string, unknown> => {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    throw new BackupValidationError('Файл не є валідним JSON.');
+  }
+
+  if (!isRecord(parsed)) {
+    throw new BackupValidationError('Backup має бути JSON-обʼєктом.');
+  }
+
+  return parsed;
 };
 
 const parseSettings = (
@@ -660,17 +691,7 @@ const validateDomainInvariants = (
 };
 
 export const parseBackupJson = (source: string): ShifterBackup => {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(source);
-  } catch {
-    throw new BackupValidationError('Файл не є валідним JSON.');
-  }
-
-  if (!isRecord(parsed)) {
-    throw new BackupValidationError('Backup має бути JSON-обʼєктом.');
-  }
+  const parsed = parseJsonRecord(source);
 
   const schemaVersion = parsed.schemaVersion;
 
@@ -705,6 +726,154 @@ export const parseBackupJson = (source: string): ShifterBackup => {
   validateDomainInvariants(backup.shifts, backup.enterpriseSchedule);
 
   return backup;
+};
+
+const parseLegacyTimestamp = (
+  value: unknown,
+  fieldName: 'startedAt' | 'endedAt'
+): string => {
+  if (!isFiniteNumber(value) || !Number.isSafeInteger(value) || value < 0) {
+    throw new BackupValidationError(`Поле ${fieldName} старої зміни має бути timestamp.`);
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new BackupValidationError(`Поле ${fieldName} старої зміни містить невалідний час.`);
+  }
+
+  return toLocalIsoString(date);
+};
+
+const parseLegacyCoefficientMode = (
+  value: unknown,
+  doubleRate: unknown
+): Exclude<CoefficientMode, 'auto'> => {
+  if (value === undefined) {
+    if (!isBoolean(doubleRate)) {
+      throw new BackupValidationError(
+        'Стара зміна має містити rateMultiplier або doubleRate.'
+      );
+    }
+
+    return doubleRate ? 'x2' : 'x1';
+  }
+
+  if (value === 1) {
+    return 'x1';
+  }
+
+  if (value === 1.5) {
+    return 'x1.5';
+  }
+
+  if (value === 2) {
+    return 'x2';
+  }
+
+  throw new BackupValidationError(
+    'rateMultiplier старої зміни має дорівнювати 1, 1.5 або 2.'
+  );
+};
+
+const parseLegacyShift = (
+  value: unknown,
+  exportedAt: string
+): Shift => {
+  if (!isRecord(value)) {
+    throw new BackupValidationError('Кожна стара зміна має бути обʼєктом.');
+  }
+
+  const id = readString(value, 'id');
+  const type: ShiftType =
+    value.shiftType === '1 зміна'
+      ? 'first'
+      : value.shiftType === '2 зміна'
+        ? 'second'
+        : (() => {
+            throw new BackupValidationError(
+              'shiftType старої зміни має бути «1 зміна» або «2 зміна».'
+            );
+          })();
+  const startTime = parseLegacyTimestamp(value.startedAt, 'startedAt');
+  const endTime =
+    value.endedAt === null
+      ? null
+      : parseLegacyTimestamp(value.endedAt, 'endedAt');
+  const baseHourlyRateSnapshot = readNonNegativeNumber(value, 'rate');
+  const coefficientMode = parseLegacyCoefficientMode(
+    value.rateMultiplier,
+    value.doubleRate
+  );
+
+  if (id.trim() === '') {
+    throw new BackupValidationError('ID старої зміни не може бути порожнім.');
+  }
+
+  if (
+    endTime !== null &&
+    new Date(endTime).getTime() < new Date(startTime).getTime()
+  ) {
+    throw new BackupValidationError(
+      'Стара зміна не може завершуватись раніше приходу.'
+    );
+  }
+
+  const shift: Shift = {
+    id,
+    date: startTime.slice(0, 10),
+    type,
+    detectionMode: 'manual',
+    plannedStartTime: PLANNED_SHIFTS[type].start,
+    plannedEndTime: PLANNED_SHIFTS[type].end,
+    startTime,
+    endTime,
+    baseHourlyRateSnapshot,
+    hourlyRateSnapshot: baseHourlyRateSnapshot,
+    gradeSnapshot: null,
+    workTickets: [],
+    coefficientMode,
+    isAutoClosed: false,
+    createdAt: startTime,
+    updatedAt: endTime ?? exportedAt
+  };
+
+  return normalizeShiftRecord(shift);
+};
+
+export const parseBackupImportJson = (source: string): ParsedBackupImport => {
+  const parsed = parseJsonRecord(source);
+
+  if (Object.hasOwn(parsed, 'schemaVersion')) {
+    return {
+      kind: 'shifter',
+      backup: parseBackupJson(source)
+    };
+  }
+
+  if (parsed.version !== 1) {
+    throw new BackupValidationError('Версія backup несумісна з цією версією додатку.');
+  }
+
+  if (!isIsoLikeDateTime(parsed.exportedAt)) {
+    throw new BackupValidationError('exportedAt старого backup має бути валідною датою.');
+  }
+
+  if (!Array.isArray(parsed.shifts)) {
+    throw new BackupValidationError('shifts старого backup має бути масивом.');
+  }
+
+  const shifts = parsed.shifts.map((shift) =>
+    parseLegacyShift(shift, parsed.exportedAt as string)
+  );
+
+  validateDomainInvariants(shifts, []);
+
+  return {
+    kind: 'legacy',
+    exportedAt: parsed.exportedAt,
+    shifts
+  };
 };
 
 export const createBackup = async (
@@ -770,4 +939,23 @@ export const restoreBackup = async (
   );
 
   return backup.settings;
+};
+
+export const replaceShiftsFromLegacyBackup = async (
+  db: ShifterDatabase,
+  shifts: Shift[]
+): Promise<Shift[]> => {
+  const normalizedShifts = shifts.map(normalizeShiftRecord);
+
+  validateDomainInvariants(normalizedShifts, []);
+
+  await db.transaction('rw', db.shifts, async () => {
+    await db.shifts.clear();
+
+    if (normalizedShifts.length > 0) {
+      await db.shifts.bulkPut(normalizedShifts);
+    }
+  });
+
+  return normalizedShifts;
 };

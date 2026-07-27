@@ -309,7 +309,10 @@ export function OnboardingPage({ onComplete }: OnboardingPageProps) {
               <label className="onboarding-page__field">
                 <span>Ставка за місяць, ₴</span>
                 <input
+                  type="text"
                   inputMode="decimal"
+                  autoComplete="off"
+                  pattern="[0-9]*([.,][0-9]*)?"
                   aria-invalid={errors.monthlySalary ? 'true' : 'false'}
                   aria-describedby={errors.monthlySalary ? 'monthlySalary-error' : undefined}
                   value={values.monthlySalary}
@@ -324,7 +327,10 @@ export function OnboardingPage({ onComplete }: OnboardingPageProps) {
               <label className="onboarding-page__field">
                 <span>Премія за місяць, ₴</span>
                 <input
+                  type="text"
                   inputMode="decimal"
+                  autoComplete="off"
+                  pattern="[0-9]*([.,][0-9]*)?"
                   aria-invalid={errors.monthlyBonus ? 'true' : 'false'}
                   aria-describedby={errors.monthlyBonus ? 'monthlyBonus-error' : undefined}
                   value={values.monthlyBonus}
@@ -338,7 +344,10 @@ export function OnboardingPage({ onComplete }: OnboardingPageProps) {
               <label className="onboarding-page__field">
                 <span>Затримка кнопок, с</span>
                 <input
+                  type="text"
                   inputMode="decimal"
+                  autoComplete="off"
+                  pattern="[0-9]*([.,][0-9]*)?"
                   aria-invalid={errors.holdDelaySeconds ? 'true' : 'false'}
                   aria-describedby={errors.holdDelaySeconds ? 'holdDelaySeconds-error' : undefined}
                   value={values.holdDelaySeconds}

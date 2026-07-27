@@ -16,6 +16,7 @@ import { SettingsPage } from '../../settings';
 import {
   calculateSalaryBreakdown,
   calculateTicketProductionSummary,
+  getEffectiveCoefficient,
   type ISODateTimeString,
   type Shift,
   type WorkTicket
@@ -52,7 +53,11 @@ import {
   type CalendarDateRange,
   type CalendarRangePreset
 } from '../../../shared/lib/date-time';
-import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
+import {
+  INCOGNITO_FINANCIAL_MASK,
+  formatHourlyRate,
+  formatMoney
+} from '../../../shared/lib/format';
 import {
   copyTextToClipboard,
   formatShiftClipboardText
@@ -360,6 +365,9 @@ export function MainPage({
     });
   }, [latestCompletedShift]);
   const currentEarning = activeSalaryBreakdown?.totalAmount ?? 0;
+  const currentCoefficient = activeShift
+    ? getEffectiveCoefficient(activeShift, now)
+    : null;
   const activeWorkTicket = activeShift ? getActiveWorkTicket(activeShift) : null;
   const activeTicketTargets = useMemo(() => {
     if (!activeShift || !activeWorkTicket) {
@@ -883,6 +891,14 @@ export function MainPage({
                     : 'Без snapshot'}
                 </strong>
               </article>
+              <article className="main-page__metric main-page__metric--coefficient">
+                <span>Коефіцієнт зараз</span>
+                <strong>
+                  {settings.incognitoEnabled
+                    ? INCOGNITO_FINANCIAL_MASK
+                    : `x${currentCoefficient}`}
+                </strong>
+              </article>
             </div>
 
             {timerError ? (
@@ -905,7 +921,9 @@ export function MainPage({
                     <label>
                       <span>Норма, шт</span>
                       <input
+                        type="text"
                         inputMode="numeric"
+                        autoComplete="off"
                         maxLength={3}
                         pattern="[0-9]*"
                         value={ticketNormDraft}
@@ -964,7 +982,9 @@ export function MainPage({
                             <label>
                               <span>Норма, шт</span>
                               <input
+                                type="text"
                                 inputMode="numeric"
+                                autoComplete="off"
                                 maxLength={3}
                                 pattern="[0-9]*"
                                 value={ticketEditDraft.normPerEightHours}
@@ -979,8 +999,11 @@ export function MainPage({
                             <label>
                               <span>Взято</span>
                               <input
+                                type="text"
                                 inputMode="numeric"
+                                autoComplete="off"
                                 maxLength={5}
+                                pattern="[0-9]{1,2}:?[0-9]{0,2}"
                                 placeholder="06:30"
                                 value={ticketEditDraft.startedAt}
                                 onBlur={() => completeTicketTimeDraft('startedAt')}
@@ -995,8 +1018,11 @@ export function MainPage({
                             <label>
                               <span>Завершено</span>
                               <input
+                                type="text"
                                 inputMode="numeric"
+                                autoComplete="off"
                                 maxLength={5}
+                                pattern="[0-9]{1,2}:?[0-9]{0,2}"
                                 placeholder="Триває"
                                 disabled
                                 value={ticketEditDraft.endedAt}
@@ -1043,26 +1069,41 @@ export function MainPage({
                         ))}
                       </div>
                       <div className="main-page__ticket-downtime">
-                        <div className="main-page__ticket-downtime-summary">
-                          <span>Простій</span>
-                          <strong>{formatDurationMinutes(activeTicketTargets.downtimeMinutes)}</strong>
+                        <div className="main-page__ticket-downtime-header">
+                          <div>
+                            <span>Облік часу</span>
+                            <strong>Простій</strong>
+                          </div>
+                          <output
+                            aria-label={`Загальний простій: ${formatDurationMinutes(
+                              activeTicketTargets.downtimeMinutes
+                            )}`}
+                          >
+                            {formatDurationMinutes(activeTicketTargets.downtimeMinutes)}
+                          </output>
                         </div>
+                        <p>Додайте або відніміть цілу кількість хвилин.</p>
                         <div className="main-page__ticket-downtime-control">
                           <label>
                             <span>Коригування, хв</span>
-                            <input
-                              type="text"
-                              inputMode="text"
-                              pattern="[+-]?[0-9]*"
-                              value={downtimeAdjustmentDraft}
-                              placeholder="+15 або -5"
-                              onChange={(event) => {
-                                setDowntimeAdjustmentDraft(
-                                  normalizeSignedIntegerDraft(event.target.value)
-                                );
-                                setTicketError(null);
-                              }}
-                            />
+                            <span className="main-page__ticket-downtime-input">
+                              <input
+                                type="text"
+                                inputMode="text"
+                                autoComplete="off"
+                                pattern="[+-]?[0-9]*"
+                                aria-label="Коригування, хв"
+                                value={downtimeAdjustmentDraft}
+                                placeholder="+15 або -5"
+                                onChange={(event) => {
+                                  setDowntimeAdjustmentDraft(
+                                    normalizeSignedIntegerDraft(event.target.value)
+                                  );
+                                  setTicketError(null);
+                                }}
+                              />
+                              <span aria-hidden="true">хв</span>
+                            </span>
                           </label>
                           <button
                             type="button"
@@ -1077,7 +1118,9 @@ export function MainPage({
                         <label>
                           <span>Фактично зроблено, шт</span>
                           <input
+                            type="text"
                             inputMode="numeric"
+                            autoComplete="off"
                             pattern="[0-9]*"
                             value={ticketActualDraft}
                             placeholder="0"
@@ -1125,7 +1168,9 @@ export function MainPage({
                                     <label>
                                       <span>Норма, шт</span>
                                       <input
+                                        type="text"
                                         inputMode="numeric"
+                                        autoComplete="off"
                                         maxLength={3}
                                         pattern="[0-9]*"
                                         value={ticketEditDraft.normPerEightHours}
@@ -1140,8 +1185,11 @@ export function MainPage({
                                     <label>
                                       <span>Взято</span>
                                       <input
+                                        type="text"
                                         inputMode="numeric"
+                                        autoComplete="off"
                                         maxLength={5}
+                                        pattern="[0-9]{1,2}:?[0-9]{0,2}"
                                         value={ticketEditDraft.startedAt}
                                         onBlur={() => completeTicketTimeDraft('startedAt')}
                                         onChange={(event) =>
@@ -1155,8 +1203,11 @@ export function MainPage({
                                     <label>
                                       <span>Завершено</span>
                                       <input
+                                        type="text"
                                         inputMode="numeric"
+                                        autoComplete="off"
                                         maxLength={5}
+                                        pattern="[0-9]{1,2}:?[0-9]{0,2}"
                                         value={ticketEditDraft.endedAt}
                                         onBlur={() => completeTicketTimeDraft('endedAt')}
                                         onChange={(event) =>
@@ -1170,7 +1221,9 @@ export function MainPage({
                                     <label>
                                       <span>Факт, шт</span>
                                       <input
+                                        type="text"
                                         inputMode="numeric"
+                                        autoComplete="off"
                                         pattern="[0-9]*"
                                         value={ticketEditDraft.actualQuantity}
                                         placeholder="Не внесено"
@@ -1185,7 +1238,9 @@ export function MainPage({
                                     <label>
                                       <span>Простій, хв</span>
                                       <input
+                                        type="text"
                                         inputMode="numeric"
+                                        autoComplete="off"
                                         pattern="[0-9]*"
                                         value={ticketEditDraft.downtimeMinutes}
                                         onChange={(event) =>

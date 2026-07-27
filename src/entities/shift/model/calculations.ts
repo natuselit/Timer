@@ -40,6 +40,8 @@ export type SalaryBreakdown = {
   lines: SalaryBreakdownLine[];
 };
 
+export type EffectiveCoefficient = 1 | 1.5 | 2;
+
 const getTimeZoneSuffix = (dateTime: ISODateTimeString): string => {
   const match = dateTime.match(/(Z|[+-]\d{2}:\d{2})$/);
 
@@ -91,6 +93,29 @@ export const getPlannedShiftWindow = (
     plannedStart: toDateTime(date, plannedShift.start, timeZoneSuffix),
     plannedEnd: toDateTime(date, plannedShift.end, timeZoneSuffix)
   };
+};
+
+export const getEffectiveCoefficient = (
+  shift: Pick<Shift, 'date' | 'type' | 'startTime' | 'coefficientMode'>,
+  at: ISODateTimeString
+): EffectiveCoefficient => {
+  if (shift.coefficientMode !== 'auto') {
+    const coefficient = COEFFICIENT_VALUES[shift.coefficientMode];
+
+    if (coefficient !== 1 && coefficient !== 1.5 && coefficient !== 2) {
+      throw new Error(`Unsupported coefficient mode: ${shift.coefficientMode}`);
+    }
+
+    return coefficient;
+  }
+
+  const plannedWindow = getPlannedShiftWindow(shift.date, shift.type, shift.startTime);
+  const currentTime = toTime(at);
+
+  return currentTime < toTime(plannedWindow.plannedStart) ||
+    currentTime >= toTime(plannedWindow.plannedEnd)
+    ? 1.5
+    : 1;
 };
 
 export const calculateShiftTimeBreakdown = (
