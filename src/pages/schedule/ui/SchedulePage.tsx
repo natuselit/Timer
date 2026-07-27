@@ -33,6 +33,7 @@ import {
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
+import { calculateScheduleChartData } from '../../../shared/lib/shifts/scheduleChart';
 import {
   MonthCalendar,
   type CalendarDateRange,
@@ -66,10 +67,9 @@ type DiscrepancyModalState = {
   selectedDate: LocalDateString;
 };
 
-const shiftTypeLabels: Record<ShiftType, string> = {
-  first: '1 зміна',
-  second: '2 зміна'
-};
+const getShiftTypeLabel = (item: EnterpriseScheduleItem): string =>
+  item.templateNameSnapshot ??
+  (item.shiftType === 'first' ? '1 зміна' : item.shiftType === 'second' ? '2 зміна' : 'Власна зміна');
 
 const formatDurationDifference = (minutes: number): string => {
   const sign = minutes > 0 ? '+' : minutes < 0 ? '-' : '';
@@ -144,7 +144,7 @@ const getScheduleDurationMinutes = (item: EnterpriseScheduleItem): number => {
   const start = timeToMinutes(getScheduleStartTime(item));
   const end = timeToMinutes(getScheduleEndTime(item));
 
-  return Math.max(0, end - start);
+  return (end - start + 24 * 60) % (24 * 60);
 };
 
 const getActualShiftDurationMinutes = (shift: Shift): number => {
@@ -191,8 +191,12 @@ export function SchedulePage({
   const [discrepancyModal, setDiscrepancyModal] = useState<DiscrepancyModalState | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [chartMode, setChartMode] = useState<'hours' | 'money'>('hours');
 
-  const parseResult = useMemo(() => parseEnterpriseScheduleText(importText), [importText]);
+  const parseResult = useMemo(
+    () => parseEnterpriseScheduleText(importText, settings.shiftTemplates),
+    [importText, settings.shiftTemplates]
+  );
   const canImport = importText.trim().length > 0 && parseResult.items.length > 0 && !isImporting;
   const comparison = useMemo(
     () => calculateEnterpriseScheduleComparison(scheduleItems, shifts),
@@ -225,6 +229,43 @@ export function SchedulePage({
     () => calculateHourlyRateFromMonthlySalary(visibleMonthlySalary, getMonthDate(calendarMonth)),
     [calendarMonth, visibleMonthlySalary]
   );
+  const chartData = useMemo(
+    () =>
+      calculateScheduleChartData({
+        start: loadedDateRange.start,
+        end: loadedDateRange.end,
+        scheduleItems,
+        shifts,
+        now: toLocalIsoString(new Date()),
+        fallbackHourlyRate: visibleHourlyRate,
+        coefficientMode: settings.coefficientMode
+      }),
+    [
+      loadedDateRange,
+      scheduleItems,
+      shifts,
+      visibleHourlyRate,
+      settings.coefficientMode
+    ]
+  );
+  const chartMaximum = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...chartData.points.flatMap((point) =>
+          chartMode === 'hours'
+            ? [point.plannedHours, point.actualHours]
+            : [point.expectedMoney, point.actualMoney]
+        )
+      ),
+    [chartData, chartMode]
+  );
+
+  useEffect(() => {
+    if (settings.incognitoEnabled && chartMode === 'money') {
+      setChartMode('hours');
+    }
+  }, [chartMode, settings.incognitoEnabled]);
 
   const loadSchedule = useCallback(async () => {
     setIsLoading(true);
@@ -356,7 +397,7 @@ export function SchedulePage({
     }
 
     const confirmed = window.confirm(
-      `Зберегти ${parseResult.items.length} валідних записів графіка? Записи з тими самими датами буде оновлено, а відсутні зміни буде створено.`
+      `Зберегти ${parseResult.items.length} валідних записів графіка? Записи з тими самими датами буде оновлено. Фактичні зміни створяться лише для сьогоднішніх і минулих дат.`
     );
 
     if (!confirmed) {
@@ -475,6 +516,141 @@ export function SchedulePage({
         <strong>{formatHourlyRate(visibleHourlyRate, settings.incognitoEnabled)}</strong>
       </section>
 
+      <section className="schedule-page__chart" aria-labelledby="schedule-chart-title">
+        <div className="schedule-page__chart-header">
+          <div>
+            <p className="schedule-page__label">Аналітика</p>
+            <h2 id="schedule-chart-title">План і факт</h2>
+          </div>
+          <div className="schedule-page__chart-toggle" role="group" aria-label="Показник графіка">
+            <button
+              type="button"
+              aria-pressed={chartMode === 'hours'}
+              onClick={() => setChartMode('hours')}
+            >
+              Години
+            </button>
+            <button
+              type="button"
+              aria-pressed={chartMode === 'money'}
+              disabled={settings.incognitoEnabled}
+              title={settings.incognitoEnabled ? 'Недоступно в режимі інкогніто' : undefined}
+              onClick={() => setChartMode('money')}
+            >
+              Гроші
+            </button>
+          </div>
+        </div>
+
+        {chartData.points.length === 0 ? (
+          <p className="schedule-page__muted">Немає даних для графіка у вибраному періоді.</p>
+        ) : (
+          <>
+            <div className="schedule-page__chart-legend" aria-label="Легенда графіка">
+              <span data-series="planned">
+                <i aria-hidden="true" />
+                {chartMode === 'hours' ? 'План' : 'Очікується'}
+              </span>
+              <span data-series="actual">
+                <i aria-hidden="true" />
+                Факт
+              </span>
+            </div>
+            <div className="schedule-page__chart-scroll">
+              <svg
+                className="schedule-page__chart-svg"
+                viewBox="0 0 640 260"
+                role="img"
+                aria-label={`${chartMode === 'hours' ? 'Години' : 'Гроші'}: план і факт за ${
+                  chartData.granularity === 'day'
+                    ? 'днями'
+                    : chartData.granularity === 'week'
+                      ? 'тижнями'
+                      : 'місяцями'
+                }`}
+              >
+                <line x1="38" y1="220" x2="626" y2="220" className="schedule-page__chart-axis" />
+                {chartData.points.map((point, index) => {
+                  const slotWidth = 588 / chartData.points.length;
+                  const barWidth = Math.min(14, Math.max(3, slotWidth * 0.28));
+                  const center = 38 + slotWidth * index + slotWidth / 2;
+                  const plannedValue =
+                    chartMode === 'hours' ? point.plannedHours : point.expectedMoney;
+                  const actualValue =
+                    chartMode === 'hours' ? point.actualHours : point.actualMoney;
+                  const plannedHeight = (plannedValue / chartMaximum) * 176;
+                  const actualHeight = (actualValue / chartMaximum) * 176;
+                  const showLabel =
+                    index % Math.max(1, Math.ceil(chartData.points.length / 7)) === 0 ||
+                    index === chartData.points.length - 1;
+
+                  return (
+                    <g key={point.key}>
+                      <rect
+                        x={center - barWidth - 1}
+                        y={220 - plannedHeight}
+                        width={barWidth}
+                        height={plannedHeight}
+                        rx="2"
+                        className="schedule-page__chart-bar--planned"
+                        aria-label={`${point.label}, план: ${plannedValue.toFixed(1)}`}
+                      >
+                        <title>{`${point.label}: ${plannedValue.toFixed(1)}`}</title>
+                      </rect>
+                      <rect
+                        x={center + 1}
+                        y={220 - actualHeight}
+                        width={barWidth}
+                        height={actualHeight}
+                        rx="2"
+                        className="schedule-page__chart-bar--actual"
+                        aria-label={`${point.label}, факт: ${actualValue.toFixed(1)}`}
+                      >
+                        <title>{`${point.label}: ${actualValue.toFixed(1)}`}</title>
+                      </rect>
+                      {showLabel ? (
+                        <text x={center} y="242" textAnchor="middle">
+                          {point.label}
+                        </text>
+                      ) : null}
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+            <div className="schedule-page__chart-table-wrap">
+              <table className="schedule-page__chart-table">
+                <caption>Таблиця значень графіка</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Період</th>
+                    <th scope="col">{chartMode === 'hours' ? 'План, год' : 'Очікується'}</th>
+                    <th scope="col">{chartMode === 'hours' ? 'Факт, год' : 'Факт'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {chartData.points.map((point) => (
+                    <tr key={point.key}>
+                      <th scope="row">{point.label}</th>
+                      <td>
+                        {chartMode === 'hours'
+                          ? point.plannedHours.toFixed(1)
+                          : formatMoney(point.expectedMoney, false)}
+                      </td>
+                      <td>
+                        {chartMode === 'hours'
+                          ? point.actualHours.toFixed(1)
+                          : formatMoney(point.actualMoney, false)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+
       <section className="schedule-page__list" aria-labelledby="schedule-list-title">
         <div>
           <p className="schedule-page__label">Записи</p>
@@ -492,7 +668,7 @@ export function SchedulePage({
             {scheduleItems.map((item) => (
               <article className="schedule-page__item" key={item.id}>
                 <time dateTime={item.date}>{formatDate(item.date)}</time>
-                <span className="schedule-page__chip">{shiftTypeLabels[item.shiftType]}</span>
+                <span className="schedule-page__chip">{getShiftTypeLabel(item)}</span>
                 <strong>
                   {getScheduleStartTime(item)}-{getScheduleEndTime(item)}
                 </strong>

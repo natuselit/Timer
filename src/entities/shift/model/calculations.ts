@@ -1,4 +1,4 @@
-import { COEFFICIENT_VALUES, PLANNED_SHIFTS } from './constants';
+import { COEFFICIENT_VALUES, getBuiltInShiftTemplate } from './constants';
 import type { CoefficientMode, ISODateTimeString, LocalDateString, Shift, ShiftType } from './types';
 
 const MINUTE_IN_MS = 60_000;
@@ -52,6 +52,15 @@ const toDateTime = (
   timeZoneSuffix: string
 ): ISODateTimeString => `${date}T${time}:00.000${timeZoneSuffix}`;
 
+const addDays = (date: LocalDateString, days: number): LocalDateString => {
+  const [year, month, day] = date.split('-').map(Number);
+  const result = new Date(Date.UTC(year, month - 1, day + days));
+
+  return `${result.getUTCFullYear()}-${String(result.getUTCMonth() + 1).padStart(2, '0')}-${String(
+    result.getUTCDate()
+  ).padStart(2, '0')}`;
+};
+
 const toTime = (dateTime: ISODateTimeString): number => {
   const time = new Date(dateTime).getTime();
 
@@ -78,29 +87,51 @@ const calculateAmount = (hourlyRate: number, minutes: number, coefficient: numbe
 export const getPlannedShiftWindow = (
   date: LocalDateString,
   type: ShiftType,
-  timeZoneSource: ISODateTimeString
+  timeZoneSource: ISODateTimeString,
+  plannedTimes?: {
+    startTime: string;
+    endTime: string;
+  }
 ): PlannedShiftWindow => {
-  const plannedShift = PLANNED_SHIFTS[type];
+  const builtInTemplate = getBuiltInShiftTemplate(type);
+  const plannedShift = plannedTimes ?? (
+    builtInTemplate
+      ? { startTime: builtInTemplate.startTime, endTime: builtInTemplate.endTime }
+      : undefined
+  );
+
+  if (!plannedShift) {
+    throw new Error(`Немає snapshot планового часу для шаблону ${type}.`);
+  }
+
   const timeZoneSuffix = getTimeZoneSuffix(timeZoneSource);
+  const endDate =
+    plannedShift.endTime <= plannedShift.startTime ? addDays(date, 1) : date;
 
   return {
     type,
     date,
-    startTime: plannedShift.start,
-    endTime: plannedShift.end,
-    plannedStart: toDateTime(date, plannedShift.start, timeZoneSuffix),
-    plannedEnd: toDateTime(date, plannedShift.end, timeZoneSuffix)
+    startTime: plannedShift.startTime,
+    endTime: plannedShift.endTime,
+    plannedStart: toDateTime(date, plannedShift.startTime, timeZoneSuffix),
+    plannedEnd: toDateTime(endDate, plannedShift.endTime, timeZoneSuffix)
   };
 };
 
 export const calculateShiftTimeBreakdown = (
-  shift: Pick<Shift, 'date' | 'type' | 'startTime' | 'endTime'>
+  shift: Pick<
+    Shift,
+    'date' | 'type' | 'plannedStartTime' | 'plannedEndTime' | 'startTime' | 'endTime'
+  >
 ): ShiftTimeBreakdown => {
   if (!shift.endTime) {
     throw new Error('Cannot calculate completed shift breakdown without endTime');
   }
 
-  const plannedWindow = getPlannedShiftWindow(shift.date, shift.type, shift.startTime);
+  const plannedWindow = getPlannedShiftWindow(shift.date, shift.type, shift.startTime, {
+    startTime: shift.plannedStartTime,
+    endTime: shift.plannedEndTime
+  });
   const actualStart = toTime(shift.startTime);
   const actualEnd = toTime(shift.endTime);
   const plannedStart = toTime(plannedWindow.plannedStart);
@@ -142,6 +173,8 @@ export const calculateSalaryBreakdown = (
     | 'type'
     | 'startTime'
     | 'endTime'
+    | 'plannedStartTime'
+    | 'plannedEndTime'
     | 'baseHourlyRateSnapshot'
     | 'coefficientMode'
   >
@@ -206,4 +239,32 @@ export const calculateSalaryBreakdown = (
     totalAmount: lines.reduce((total, line) => total + line.amount, 0),
     lines
   };
+};
+
+export const getCurrentShiftCoefficient = (
+  shift: Pick<
+    Shift,
+    | 'date'
+    | 'type'
+    | 'plannedStartTime'
+    | 'plannedEndTime'
+    | 'startTime'
+    | 'coefficientMode'
+  >,
+  at: ISODateTimeString
+): number => {
+  if (shift.coefficientMode !== 'auto') {
+    return COEFFICIENT_VALUES[shift.coefficientMode] ?? 1;
+  }
+
+  const plannedWindow = getPlannedShiftWindow(shift.date, shift.type, shift.startTime, {
+    startTime: shift.plannedStartTime,
+    endTime: shift.plannedEndTime
+  });
+  const timestamp = toTime(at);
+
+  return timestamp >= toTime(plannedWindow.plannedStart) &&
+    timestamp < toTime(plannedWindow.plannedEnd)
+    ? 1
+    : 1.5;
 };

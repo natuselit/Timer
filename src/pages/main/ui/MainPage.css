@@ -180,10 +180,25 @@
 
 .main-page__timer-title-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: baseline;
   justify-content: space-between;
   padding: 4px 0 5px;
+}
+
+.main-page__coefficient-chip {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: 999px;
+  background: var(--color-primary-surface);
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-weight: 900;
 }
 
 .main-page__timer-subtitle {
@@ -477,32 +492,57 @@
 
 .main-page__ticket-downtime {
   display: grid;
-  gap: 6px;
-  padding: 7px 8px 8px;
+  gap: 12px;
+  padding: 14px;
   border: 1px solid var(--color-primary-border-muted);
   border-radius: var(--radius-compact);
   background: color-mix(in srgb, var(--color-background) 72%, var(--color-surface));
 }
 
 .main-page__ticket-downtime-summary {
-  display: flex;
+  display: grid;
   min-width: 0;
   align-items: center;
-  justify-content: space-between;
+  justify-content: stretch;
   gap: 8px;
 }
 
 .main-page__ticket-downtime-summary strong {
   color: var(--color-primary);
-  font-size: 0.9rem;
+  font-size: 1.65rem;
+  letter-spacing: -0.035em;
 }
 
 .main-page__ticket-downtime-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   min-width: 0;
   align-items: end;
   gap: 7px;
+}
+
+.main-page__ticket-downtime-sign {
+  display: grid;
+  grid-template-columns: repeat(2, 40px);
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-control);
+  background: var(--color-disabled);
+}
+
+.main-page__ticket-downtime-control .main-page__ticket-downtime-sign button {
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 1.2rem;
+}
+
+.main-page__ticket-downtime-control .main-page__ticket-downtime-sign button[aria-pressed='true'] {
+  border-color: var(--color-primary-border);
+  background: var(--color-surface);
+  color: var(--color-primary);
 }
 
 .main-page__ticket-downtime-control label {

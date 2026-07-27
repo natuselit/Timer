@@ -2,6 +2,7 @@ import type { EnterpriseScheduleItem } from '../../../../entities/enterprise-sch
 import {
   calculateHourlyRateFromMonthlySalary,
   createGradeSnapshot,
+  DEFAULT_SETTINGS,
   type Settings
 } from '../../../../entities/settings';
 import {
@@ -96,7 +97,7 @@ const getCoefficientMode = (index: number): CoefficientMode => {
 const createTickets = (
   date: LocalDateString,
   index: number,
-  type: ShiftType,
+  type: 'first' | 'second',
   createdAt: string
 ): WorkTicket[] => {
   const planned = PLANNED_SHIFTS[type];
@@ -135,6 +136,7 @@ export const createDemoDataSet = (
 ): DemoDataSet => {
   const range = getDemoRange(referenceDate);
   const settings: Settings = {
+    ...DEFAULT_SETTINGS,
     employeeFirstName: 'Демо',
     employeeLastName: 'Працівник',
     monthlySalary: 44_000,
@@ -160,7 +162,7 @@ export const createDemoDataSet = (
   const endOffsets = [5, 0, -12, 18, 0, 25, -5];
 
   workdays.forEach((date, index) => {
-    const type: ShiftType = Math.floor(index / 5) % 2 === 0 ? 'first' : 'second';
+    const type: 'first' | 'second' = Math.floor(index / 5) % 2 === 0 ? 'first' : 'second';
     const planned = PLANNED_SHIFTS[type];
     const startOffset = startOffsets[index % startOffsets.length];
     const endOffset = endOffsets[index % endOffsets.length];
@@ -176,6 +178,8 @@ export const createDemoDataSet = (
       id: `enterprise-schedule-${date}`,
       date,
       shiftType: type,
+      templateId: type,
+      templateNameSnapshot: type === 'first' ? '1 зміна' : '2 зміна',
       plannedStartTime: planned.start,
       plannedEndTime: planned.end,
       enterpriseStartTime: enterpriseStart,
@@ -200,6 +204,8 @@ export const createDemoDataSet = (
       id: `demo-shift-${date}`,
       date,
       type,
+      templateId: type,
+      templateNameSnapshot: type === 'first' ? '1 зміна' : '2 зміна',
       detectionMode: 'auto',
       plannedStartTime: planned.start,
       plannedEndTime: planned.end,
@@ -234,6 +240,10 @@ export const replaceLocalDataWithDemo = async (
     ...data.settings,
     id: 'default'
   };
+  const securityMetaRecords = await db.appMeta
+    .where('key')
+    .startsWith('security-')
+    .toArray();
 
   await db.transaction(
     'rw',
@@ -249,6 +259,9 @@ export const replaceLocalDataWithDemo = async (
       await db.settings.put(settingsRecord);
       await db.shifts.bulkPut(data.shifts);
       await db.enterpriseSchedule.bulkPut(data.enterpriseSchedule);
+      if (securityMetaRecords.length > 0) {
+        await db.appMeta.bulkPut(securityMetaRecords);
+      }
       await db.appMeta.put({
         key: 'demo-data-range',
         value: `${data.range.start}/${data.range.end}`,

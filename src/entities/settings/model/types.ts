@@ -1,10 +1,22 @@
-import type { CoefficientMode, ShiftDetectionMode } from '../../shift';
+import type { CoefficientMode, ShiftDetectionMode, ShiftTemplate } from '../../shift';
 
 export type Grade = 1 | 2 | 3 | 4;
 
 export type GradePercentSet = [number, number, number, number];
 
 export type ThemePreference = 'system' | 'light' | 'dark';
+
+export type NotificationPreferenceItem = {
+  enabled: boolean;
+  minutes: number;
+};
+
+export type NotificationPreferences = {
+  enabled: boolean;
+  shiftStart: NotificationPreferenceItem;
+  activeTicketEnd: NotificationPreferenceItem;
+  unfinishedShift: NotificationPreferenceItem;
+};
 
 export type Settings = {
   employeeFirstName: string;
@@ -20,6 +32,8 @@ export type Settings = {
   leaveHoldDelayMs: number;
   coefficientMode: CoefficientMode;
   shiftDetectionMode: ShiftDetectionMode;
+  shiftTemplates: ShiftTemplate[];
+  notificationPreferences: NotificationPreferences;
   themePreference: ThemePreference;
   incognitoEnabled: boolean;
   onboardingCompleted: boolean;

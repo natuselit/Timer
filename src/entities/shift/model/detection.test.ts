@@ -31,8 +31,8 @@ describe('detectShiftType', () => {
     expect(detectShiftType('2026-06-23T05:50:00.000+03:00')).toBe('first');
   });
 
-  it('detects second shift when arrival is after the second planned start', () => {
-    expect(detectShiftType('2026-06-23T22:30:00.000+03:00')).toBe('second');
+  it('uses template order on a cyclic-distance tie after the second shift', () => {
+    expect(detectShiftType('2026-06-23T22:30:00.000+03:00')).toBe('first');
   });
 
   it('throws for invalid date time values', () => {

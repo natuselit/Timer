@@ -1,5 +1,7 @@
 import {
-  detectShiftType,
+  BUILT_IN_SHIFT_TEMPLATES,
+  detectShiftTemplate,
+  getShiftTemplate,
   getPlannedShiftWindow,
   validateAndSortWorkTickets,
   type CoefficientMode,
@@ -7,6 +9,7 @@ import {
   type ISODateTimeString,
   type LocalDateString,
   type ShiftType,
+  type ShiftTemplate,
   type Shift,
   type WorkTicket
 } from '../../../../entities/shift';
@@ -22,6 +25,7 @@ export type CreateShiftInput = {
   coefficientMode?: CoefficientMode;
   id?: string;
   now?: ISODateTimeString;
+  shiftTemplates?: ShiftTemplate[];
 };
 
 export type CreateManualShiftInput = {
@@ -36,6 +40,10 @@ export type CreateManualShiftInput = {
   coefficientMode: CoefficientMode;
   id?: string;
   now?: ISODateTimeString;
+  shiftTemplates?: ShiftTemplate[];
+  templateNameSnapshot?: string;
+  plannedStartTime?: string;
+  plannedEndTime?: string;
 };
 
 type GradeSettings = Pick<
@@ -87,15 +95,27 @@ export const createShift = (
   repository: ShiftRepository,
   input: CreateShiftInput
 ): Promise<Shift> => {
-  const type = detectShiftType(input.startTime);
+  const templates = input.shiftTemplates ?? [...BUILT_IN_SHIFT_TEMPLATES];
+  const type = detectShiftTemplate(input.startTime, templates);
+  const template = getShiftTemplate(templates, type);
+
+  if (!template) {
+    throw new Error(`Шаблон зміни не знайдено: ${type}`);
+  }
+
   const date = getDateFromDateTime(input.startTime);
-  const plannedWindow = getPlannedShiftWindow(date, type, input.startTime);
+  const plannedWindow = getPlannedShiftWindow(date, type, input.startTime, {
+    startTime: template.startTime,
+    endTime: template.endTime
+  });
   const now = input.now ?? new Date().toISOString();
 
   return repository.createShift({
     id: input.id ?? createId(),
     date,
     type,
+    templateId: type,
+    templateNameSnapshot: template.name,
     detectionMode: 'auto',
     plannedStartTime: plannedWindow.startTime,
     plannedEndTime: plannedWindow.endTime,
@@ -116,13 +136,30 @@ export const createManualShift = (
   repository: ShiftRepository,
   input: CreateManualShiftInput
 ): Promise<Shift> => {
-  const plannedWindow = getPlannedShiftWindow(input.date, input.type, input.startTime);
+  const templates = input.shiftTemplates ?? [...BUILT_IN_SHIFT_TEMPLATES];
+  const template = getShiftTemplate(templates, input.type);
+  const plannedStartTime =
+    input.plannedStartTime ?? template?.startTime;
+  const plannedEndTime =
+    input.plannedEndTime ?? template?.endTime;
+
+  if (!plannedStartTime || !plannedEndTime) {
+    throw new Error(`Шаблон зміни не знайдено: ${input.type}`);
+  }
+
+  const plannedWindow = getPlannedShiftWindow(input.date, input.type, input.startTime, {
+    startTime: plannedStartTime,
+    endTime: plannedEndTime
+  });
   const now = input.now ?? new Date().toISOString();
 
   return repository.createShift({
     id: input.id ?? createId(),
     date: input.date,
     type: input.type,
+    templateId: input.type,
+    templateNameSnapshot:
+      input.templateNameSnapshot ?? template?.name ?? 'Власна зміна',
     detectionMode: 'manual',
     plannedStartTime: plannedWindow.startTime,
     plannedEndTime: plannedWindow.endTime,
@@ -172,6 +209,9 @@ export const getActiveShift = (repository: ShiftRepository): Promise<Shift | nul
 
 export const getLatestCompletedShift = (repository: ShiftRepository): Promise<Shift | null> =>
   repository.getLatestCompletedShift();
+
+export const getAllShifts = (repository: ShiftRepository): Promise<Shift[]> =>
+  repository.getAllShifts();
 
 export const addWorkTicketToActiveShift = async (
   repository: ShiftRepository,

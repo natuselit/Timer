@@ -3,13 +3,14 @@ import {
   createGradeSnapshot,
   type Settings
 } from '../../../../entities/settings';
-import type {
-  GradeSnapshot,
-  LocalDateString,
-  Shift,
-  WorkTicket
+import {
+  getBuiltInShiftTemplate,
+  validateAndSortWorkTickets,
+  type GradeSnapshot,
+  type LocalDateString,
+  type Shift,
+  type WorkTicket
 } from '../../../../entities/shift';
-import { validateAndSortWorkTickets } from '../../../../entities/shift';
 import type { ShifterDatabase } from '../database';
 
 export class ShiftConstraintError extends Error {
@@ -119,6 +120,11 @@ const normalizeGradeSnapshot = (value: unknown): GradeSnapshot | null => {
 
 export const normalizeShiftRecord = (record: LegacyShiftRecord): Shift => ({
   ...record,
+  templateId: record.templateId ?? record.type,
+  templateNameSnapshot:
+    record.templateNameSnapshot ??
+    getBuiltInShiftTemplate(record.templateId ?? record.type)?.name ??
+    'Власна зміна',
   baseHourlyRateSnapshot: isFiniteNumber(record.baseHourlyRateSnapshot)
     ? record.baseHourlyRateSnapshot
     : record.hourlyRateSnapshot,
@@ -290,6 +296,12 @@ export class ShiftRepository {
     });
 
     return completedShifts[0] ?? null;
+  }
+
+  async getAllShifts(): Promise<Shift[]> {
+    const shifts = await this.db.shifts.orderBy('date').toArray();
+
+    return shifts.map(normalizeShiftRecord);
   }
 
   async getShiftById(id: string): Promise<Shift | null> {

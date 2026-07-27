@@ -1,6 +1,22 @@
 import type { Grade, GradePercentSet } from '../../settings';
 
-export type ShiftType = 'first' | 'second';
+export type ShiftTemplateId = string;
+
+/**
+ * @deprecated Залишено як сумісний alias для старих backup і UI. Значенням є id шаблону.
+ */
+export type ShiftType = ShiftTemplateId;
+
+export type ShiftTemplate = {
+  id: ShiftTemplateId;
+  name: string;
+  startTime: LocalTimeString;
+  endTime: LocalTimeString;
+  isBuiltIn: boolean;
+  enabled: boolean;
+  createdAt: ISODateTimeString;
+  updatedAt: ISODateTimeString;
+};
 
 export type CoefficientMode = 'auto' | 'x1' | 'x1.5' | 'x2';
 
@@ -35,6 +51,8 @@ export type Shift = {
   id: string;
   date: LocalDateString;
   type: ShiftType;
+  templateId?: ShiftTemplateId;
+  templateNameSnapshot?: string;
   detectionMode: ShiftDetectionMode;
   plannedStartTime: LocalTimeString;
   plannedEndTime: LocalTimeString;

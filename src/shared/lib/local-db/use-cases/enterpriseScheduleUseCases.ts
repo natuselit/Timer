@@ -30,6 +30,7 @@ type EnterpriseScheduleImportOptions = {
     | 'desiredGrade'
     | 'gradeSalaryBonusPercents'
     | 'gradeNormPercents'
+    | 'shiftTemplates'
   >;
 };
 
@@ -40,6 +41,8 @@ const toScheduleItem = (
   id: `enterprise-schedule-${item.date}`,
   date: item.date,
   shiftType: item.shiftType,
+  templateId: item.shiftType,
+  templateNameSnapshot: item.templateNameSnapshot,
   plannedStartTime: item.plannedStartTime,
   plannedEndTime: item.plannedEndTime,
   enterpriseStartTime: item.inTime,
@@ -70,12 +73,24 @@ const createMissingShiftsFromSchedule = async (
       item.date
     );
 
+    const startTime = combineLocalDateAndTime(item.date, item.enterpriseStartTime);
+    const sameDateEndTime = combineLocalDateAndTime(item.date, item.enterpriseEndTime);
+    const endTime =
+      item.enterpriseEndTime <= item.enterpriseStartTime
+        ? toLocalIsoString(
+            new Date(new Date(sameDateEndTime).getTime() + 24 * 60 * 60_000)
+          )
+        : sameDateEndTime;
+
     await createManualShift(shiftRepository, {
       id: `shift-${item.id}`,
       date: item.date,
       type: item.shiftType,
-      startTime: combineLocalDateAndTime(item.date, item.enterpriseStartTime),
-      endTime: combineLocalDateAndTime(item.date, item.enterpriseEndTime),
+      templateNameSnapshot: item.templateNameSnapshot,
+      plannedStartTime: item.plannedStartTime,
+      plannedEndTime: item.plannedEndTime,
+      startTime,
+      endTime,
       baseHourlyRateSnapshot: baseHourlyRate,
       hourlyRateSnapshot: baseHourlyRate,
       gradeSnapshot: createGradeSnapshot(settings),
@@ -94,7 +109,7 @@ export const importEnterpriseScheduleText = async (
   now = toLocalIsoString(new Date()),
   options: EnterpriseScheduleImportOptions = {}
 ): Promise<EnterpriseScheduleImportResult> => {
-  const result = parseEnterpriseScheduleText(source);
+  const result = parseEnterpriseScheduleText(source, options.settings?.shiftTemplates);
   const items = result.items.map((item) => toScheduleItem(item, now));
   let createdShiftCount = 0;
 
@@ -102,10 +117,11 @@ export const importEnterpriseScheduleText = async (
     await repository.importItems(items);
 
     if (options.shiftRepository && options.settings) {
+      const today = now.slice(0, 10);
       createdShiftCount = await createMissingShiftsFromSchedule(
         options.shiftRepository,
         options.settings,
-        items,
+        items.filter((item) => item.date <= today),
         now
       );
     }
@@ -129,6 +145,12 @@ export const getEnterpriseScheduleBetween = (
   start: LocalDateString,
   end: LocalDateString
 ): Promise<EnterpriseScheduleItem[]> => repository.getItemsBetween(start, end);
+
+export const getUpcomingEnterpriseSchedule = (
+  repository: EnterpriseScheduleRepository,
+  start: LocalDateString,
+  limit = 60
+): Promise<EnterpriseScheduleItem[]> => repository.getUpcomingItems(start, limit);
 
 export const skipEnterpriseScheduleDiscrepancy = async (
   repository: EnterpriseScheduleRepository,

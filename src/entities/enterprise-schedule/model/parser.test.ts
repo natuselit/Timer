@@ -22,6 +22,7 @@ Total: 09:20`);
       {
         date: '2026-06-01',
         shiftType: 'first',
+        templateNameSnapshot: '1 зміна',
         plannedStartTime: '06:30',
         plannedEndTime: '14:30',
         inTime: '05:57',
@@ -32,6 +33,7 @@ Total: 09:20`);
       {
         date: '2026-06-02',
         shiftType: 'first',
+        templateNameSnapshot: '1 зміна',
         plannedStartTime: '06:30',
         plannedEndTime: '14:30',
         inTime: '06:30',
@@ -102,6 +104,7 @@ Total: :`);
     expect(result.items[0]).toEqual({
       date: '2026-07-01',
       shiftType: 'first',
+      templateNameSnapshot: '1 зміна',
       plannedStartTime: '06:30',
       plannedEndTime: '14:30',
       inTime: '06:01',

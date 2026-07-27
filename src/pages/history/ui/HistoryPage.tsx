@@ -12,6 +12,7 @@ import type {
 import {
   COEFFICIENT_MODES,
   calculateTicketProductionSummary,
+  getShiftTemplate,
   getPlannedShiftWindow,
   validateAndSortWorkTickets
 } from '../../../entities/shift';
@@ -51,6 +52,10 @@ import {
 import { INCOGNITO_FINANCIAL_MASK, formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import { calculateSalaryBreakdown } from '../../../entities/shift';
 import { calculateMonthShiftSummary } from '../../../shared/lib/shifts/monthSummary';
+import {
+  cancelActiveShiftNotification,
+  cancelActiveTicketNotification
+} from '../../../shared/lib/native/notifications';
 import {
   sortShifts,
   type ShiftSortCriterion,
@@ -117,9 +122,16 @@ type EditorState =
 
 const shiftRepository = new ShiftRepository(localDb);
 
-const shiftTypeBadgeLabels: Record<ShiftType, string> = {
-  first: '1 зміна',
-  second: '2 зміна'
+const combineShiftEndDateAndTime = (
+  date: LocalDateString,
+  startTime: LocalTimeString,
+  endTime: LocalTimeString
+): ISODateTimeString => {
+  const end = combineLocalDateAndTime(date, endTime);
+
+  return endTime < startTime
+    ? toLocalIsoString(new Date(new Date(end).getTime() + 24 * 60 * 60_000))
+    : end;
 };
 
 const coefficientLabels: Record<CoefficientMode, string> = {
@@ -214,6 +226,7 @@ const createWorkTicketsFromFormValues = (
   shiftEndTime: ISODateTimeString | null,
   updatedAt: ISODateTimeString
 ): WorkTicket[] => {
+  const shiftStartDraft = getTimeInputValue(shiftStartTime);
   const workTickets = tickets.map((ticket) => {
     const normPerEightHours = parseTicketNormValue(ticket.normPerEightHours);
 
@@ -221,9 +234,13 @@ const createWorkTicketsFromFormValues = (
       throw new Error('Вкажіть час взяття тікета.');
     }
 
-    const startedAt = combineLocalDateAndTime(date, normalizeTimeInput(ticket.startedAt));
-    const endedAt = ticket.endedAt.trim()
-      ? combineLocalDateAndTime(date, normalizeTimeInput(ticket.endedAt))
+    const startedTime = normalizeTimeInput(ticket.startedAt);
+    const startedAt = combineShiftEndDateAndTime(date, shiftStartDraft, startedTime);
+    const endedTime = ticket.endedAt.trim()
+      ? normalizeTimeInput(ticket.endedAt)
+      : null;
+    const endedAt = endedTime
+      ? combineShiftEndDateAndTime(date, shiftStartDraft, endedTime)
       : null;
     const actualQuantity = ticket.actualQuantity.trim() === ''
       ? null
@@ -367,11 +384,19 @@ const createDefaultFormValues = (
 
   const hourlyRateSnapshot = calculateHourlyRateFromMonthlySalary(settings.monthlySalary, date);
 
+  const defaultTemplate =
+    settings.shiftTemplates.find((template) => template.enabled) ??
+    settings.shiftTemplates[0];
+
+  if (!defaultTemplate) {
+    throw new Error('Немає доступних шаблонів змін.');
+  }
+
   return {
     date,
-    type: 'first',
-    startTime: '06:30',
-    endTime: '14:30',
+    type: defaultTemplate.id,
+    startTime: defaultTemplate.startTime,
+    endTime: defaultTemplate.endTime,
     hourlyRateSnapshot: getMonthlySalaryInputValue(settings.monthlySalary),
     hourlyRateSnapshotValue: hourlyRateSnapshot,
     hourlyRateSnapshotEdited: false,
@@ -437,8 +462,14 @@ const getMonthFromDate = (date: LocalDateString): CalendarMonth => {
   return { year, month };
 };
 
-const getShiftTypeLabel = (type: ShiftType): string =>
-  type === 'first' ? '1 зміна' : '2 зміна';
+const getShiftTypeLabel = (
+  type: ShiftType,
+  settings: Settings,
+  snapshotName?: string
+): string =>
+  snapshotName ??
+  getShiftTemplate(settings.shiftTemplates, type)?.name ??
+  (type === 'first' ? '1 зміна' : type === 'second' ? '2 зміна' : 'Власна зміна');
 
 const getSelectedRangeBounds = (
   range: CalendarDateRange
@@ -842,7 +873,11 @@ export function HistoryPage({
       const startTime = combineLocalDateAndTime(normalizedValues.date, normalizedValues.startTime);
       const endTime = isEditingActiveShift
         ? null
-        : combineLocalDateAndTime(normalizedValues.date, normalizedValues.endTime);
+        : combineShiftEndDateAndTime(
+            normalizedValues.date,
+            normalizedValues.startTime,
+            normalizedValues.endTime
+          );
       const monthlySalary = Number(normalizedValues.hourlyRateSnapshot);
       const savedAt = toLocalIsoString(new Date());
 
@@ -902,19 +937,45 @@ export function HistoryPage({
           gradeSnapshot: createGradeSnapshot(settings),
           workTickets,
           coefficientMode: normalizedValues.coefficientMode,
+          shiftTemplates: settings.shiftTemplates,
           now: savedAt
         });
       } else {
+        const template = getShiftTemplate(settings.shiftTemplates, normalizedValues.type);
+        const plannedStartTime =
+          template?.startTime ??
+          (normalizedValues.type === (editor.shift.templateId ?? editor.shift.type)
+            ? editor.shift.plannedStartTime
+            : undefined);
+        const plannedEndTime =
+          template?.endTime ??
+          (normalizedValues.type === (editor.shift.templateId ?? editor.shift.type)
+            ? editor.shift.plannedEndTime
+            : undefined);
+
+        if (!plannedStartTime || !plannedEndTime) {
+          throw new Error('Обраний шаблон зміни більше недоступний.');
+        }
+
         const plannedWindow = getPlannedShiftWindow(
           normalizedValues.date,
           normalizedValues.type,
-          startTime
+          startTime,
+          {
+            startTime: plannedStartTime,
+            endTime: plannedEndTime
+          }
         );
 
         await updateShift(shiftRepository, {
           ...editor.shift,
           date: normalizedValues.date,
           type: normalizedValues.type,
+          templateId: normalizedValues.type,
+          templateNameSnapshot:
+            template?.name ??
+            editor.shift.templateNameSnapshot ??
+            'Власна зміна',
           detectionMode: 'manual',
           plannedStartTime: plannedWindow.startTime,
           plannedEndTime: plannedWindow.endTime,
@@ -958,6 +1019,10 @@ export function HistoryPage({
 
     try {
       await deleteShift(shiftRepository, shift.id);
+      await cancelActiveShiftNotification(shift.id);
+      await Promise.all(
+        shift.workTickets.map((ticket) => cancelActiveTicketNotification(ticket.id))
+      );
       await loadShifts();
       onDataChange?.();
     } catch {
@@ -1067,7 +1132,11 @@ export function HistoryPage({
                       <time dateTime={shift.date}>{shiftDateLabel}</time>
                       <div className="history-page__badges" aria-label="Тип і стан зміни">
                         <span className="history-page__badge history-page__badge--shift">
-                          {shiftTypeBadgeLabels[shift.type]}
+                          {getShiftTypeLabel(
+                            shift.templateId ?? shift.type,
+                            settings,
+                            shift.templateNameSnapshot
+                          )}
                         </span>
                         <span
                           className={
@@ -1317,14 +1386,36 @@ export function HistoryPage({
                 <div className="history-page__form-field history-page__form-field--full history-page__shift-type-field">
                   <span>Тип зміни</span>
                   <div className="history-page__segmented" role="group" aria-label="Тип зміни">
-                    {(['first', 'second'] as ShiftType[]).map((type) => (
+                    {[
+                      ...settings.shiftTemplates.filter((template) => template.enabled),
+                      ...(editor.mode === 'edit' &&
+                      !settings.shiftTemplates.some(
+                        (template) =>
+                          template.id === (editor.shift.templateId ?? editor.shift.type)
+                      )
+                        ? [
+                            {
+                              id: editor.shift.templateId ?? editor.shift.type,
+                              name: editor.shift.templateNameSnapshot ?? 'Власна зміна',
+                              startTime: editor.shift.plannedStartTime,
+                              endTime: editor.shift.plannedEndTime
+                            }
+                          ]
+                        : [])
+                    ].map((template) => (
                       <button
                         type="button"
-                        aria-pressed={editor.values.type === type}
-                        key={type}
-                        onClick={() => changeEditorValue('type', type)}
+                        aria-pressed={editor.values.type === template.id}
+                        key={template.id}
+                        onClick={() => {
+                          changeEditorValue('type', template.id);
+                          if (editor.mode === 'create') {
+                            changeEditorValue('startTime', template.startTime);
+                            changeEditorValue('endTime', template.endTime);
+                          }
+                        }}
                       >
-                        {getShiftTypeLabel(type)}
+                        {template.name}
                       </button>
                     ))}
                   </div>

@@ -1,5 +1,6 @@
 import {
   calculateMonthlySalaryFromHourlyRate,
+  DEFAULT_NOTIFICATION_PREFERENCES,
   DEFAULT_SETTINGS,
   GRADE_VALUES,
   isThemePreference,
@@ -7,6 +8,10 @@ import {
   type GradePercentSet,
   type Settings
 } from '../../../../entities/settings';
+import {
+  normalizeShiftTemplates,
+  type ShiftTemplate
+} from '../../../../entities/shift';
 import type { ShifterDatabase } from '../database';
 import type { SettingsRecord } from '../types';
 
@@ -39,8 +44,58 @@ const normalizePercentSet = (
 
 const toLocalDateString = (date: Date): string =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
-    date.getDate()
+  date.getDate()
   ).padStart(2, '0')}`;
+
+const normalizeNotificationItem = (
+  value: unknown,
+  fallback: Settings['notificationPreferences']['shiftStart']
+): Settings['notificationPreferences']['shiftStart'] => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ...fallback };
+  }
+
+  const candidate = value as Partial<Settings['notificationPreferences']['shiftStart']>;
+
+  return {
+    enabled:
+      typeof candidate.enabled === 'boolean' ? candidate.enabled : fallback.enabled,
+    minutes:
+      Number.isSafeInteger(candidate.minutes) &&
+      candidate.minutes! >= 1 &&
+      candidate.minutes! <= 180
+        ? candidate.minutes!
+        : fallback.minutes
+  };
+};
+
+const normalizeNotificationPreferences = (
+  value: unknown
+): Settings['notificationPreferences'] => {
+  const candidate =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Partial<Settings['notificationPreferences']>)
+      : {};
+
+  return {
+    enabled:
+      typeof candidate.enabled === 'boolean'
+        ? candidate.enabled
+        : DEFAULT_NOTIFICATION_PREFERENCES.enabled,
+    shiftStart: normalizeNotificationItem(
+      candidate.shiftStart,
+      DEFAULT_NOTIFICATION_PREFERENCES.shiftStart
+    ),
+    activeTicketEnd: normalizeNotificationItem(
+      candidate.activeTicketEnd,
+      DEFAULT_NOTIFICATION_PREFERENCES.activeTicketEnd
+    ),
+    unfinishedShift: normalizeNotificationItem(
+      candidate.unfinishedShift,
+      DEFAULT_NOTIFICATION_PREFERENCES.unfinishedShift
+    )
+  };
+};
 
 export const normalizeSettingsRecord = (
   record: LegacySettingsRecord,
@@ -72,6 +127,12 @@ export const normalizeSettingsRecord = (
     gradeNormPercents: normalizePercentSet(
       storedSettings.gradeNormPercents,
       DEFAULT_SETTINGS.gradeNormPercents
+    ),
+    shiftTemplates: normalizeShiftTemplates(
+      storedSettings.shiftTemplates as ShiftTemplate[] | undefined
+    ),
+    notificationPreferences: normalizeNotificationPreferences(
+      storedSettings.notificationPreferences
     ),
     themePreference: isThemePreference(storedSettings.themePreference)
       ? storedSettings.themePreference

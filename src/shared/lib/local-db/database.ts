@@ -1,7 +1,16 @@
 import Dexie, { type Table } from 'dexie';
 import type { AppMetaRecord, SettingsRecord } from './types';
 import type { EnterpriseScheduleItem } from '../../../entities/enterprise-schedule';
-import type { Shift, WorkTicket } from '../../../entities/shift';
+import {
+  BUILT_IN_SHIFT_TEMPLATES,
+  getBuiltInShiftTemplate,
+  type Shift,
+  type WorkTicket
+} from '../../../entities/shift';
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  type Settings
+} from '../../../entities/settings';
 
 type LegacyDowntimeInterval = {
   id: string;
@@ -124,6 +133,57 @@ export class ShifterDatabase extends Dexie {
                   };
                 })
               : [];
+          });
+      });
+
+    this.version(4)
+      .stores({
+        settings: '&id',
+        shifts: '&id,&date,updatedAt,createdAt',
+        enterpriseSchedule: '&id,&date,createdAt',
+        appMeta: '&key'
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table<Shift, string>('shifts')
+          .toCollection()
+          .modify((shift) => {
+            const templateId = shift.templateId ?? shift.type;
+            const builtIn = getBuiltInShiftTemplate(templateId);
+
+            shift.type = templateId;
+            shift.templateId = templateId;
+            shift.templateNameSnapshot =
+              shift.templateNameSnapshot ?? builtIn?.name ?? 'Власна зміна';
+          });
+
+        await transaction
+          .table<EnterpriseScheduleItem, string>('enterpriseSchedule')
+          .toCollection()
+          .modify((item) => {
+            const templateId = item.templateId ?? item.shiftType;
+            const builtIn = getBuiltInShiftTemplate(templateId);
+
+            item.shiftType = templateId;
+            item.templateId = templateId;
+            item.templateNameSnapshot =
+              item.templateNameSnapshot ?? builtIn?.name ?? 'Власна зміна';
+          });
+
+        await transaction
+          .table<Settings & { id: 'default' }, 'default'>('settings')
+          .toCollection()
+          .modify((settings) => {
+            settings.shiftTemplates = Array.isArray(settings.shiftTemplates)
+              ? settings.shiftTemplates
+              : BUILT_IN_SHIFT_TEMPLATES.map((template) => ({ ...template }));
+            settings.notificationPreferences =
+              settings.notificationPreferences ?? {
+                ...DEFAULT_NOTIFICATION_PREFERENCES,
+                shiftStart: { ...DEFAULT_NOTIFICATION_PREFERENCES.shiftStart },
+                activeTicketEnd: { ...DEFAULT_NOTIFICATION_PREFERENCES.activeTicketEnd },
+                unfinishedShift: { ...DEFAULT_NOTIFICATION_PREFERENCES.unfinishedShift }
+              };
           });
       });
   }
