@@ -1,17 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import {
-  Bell,
-  Download,
-  Edit3,
-  Eraser,
-  FileUp,
-  FlaskConical,
-  Plus,
-  RotateCcw,
-  Save,
-  Shield,
-  Trash2
-} from 'lucide-react';
+import { Download, Eraser, FileUp, FlaskConical, RotateCcw, Save, Shield } from 'lucide-react';
 import appPackage from '../../../../package.json';
 import {
   DEFAULT_SETTINGS,
@@ -27,11 +15,6 @@ import {
   type Settings,
   type ThemePreference
 } from '../../../entities/settings';
-import {
-  getShiftTemplateDurationMinutes,
-  validateShiftTemplates,
-  type ShiftTemplate
-} from '../../../entities/shift';
 import { INCOGNITO_FINANCIAL_MASK, formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import {
   BackupValidationError,
@@ -45,19 +28,6 @@ import {
   serializeBackup
 } from '../../../shared/lib/local-db';
 import { toLocalIsoString } from '../../../shared/lib/date-time';
-import {
-  clearAllNotifications,
-  isNativePlatform,
-  requestNotificationPermission
-} from '../../../shared/lib/native/notifications';
-import {
-  createPin,
-  deletePinSecurity,
-  getPinSecurityStatus,
-  setBiometricEnabled,
-  verifyPin,
-  type PinSecurityStatus
-} from '../../../shared/lib/security/pinSecurity';
 import './SettingsPage.css';
 
 type SettingsPageProps = {
@@ -65,7 +35,6 @@ type SettingsPageProps = {
   onSettingsChange: (settings: Settings) => Promise<void>;
   onLocalDataReplace: (settings: Settings) => void;
   onLocalDataChange?: () => void;
-  onSecurityChange: () => Promise<unknown>;
 };
 
 type FormValues = {
@@ -84,20 +53,6 @@ type FormErrors = Partial<Record<keyof FormValues, string>>;
 type Notice = {
   tone: 'success' | 'error' | 'info';
   text: string;
-};
-
-type ShiftTemplateDraft = {
-  id: string | null;
-  name: string;
-  startTime: string;
-  endTime: string;
-};
-
-const EMPTY_TEMPLATE_DRAFT: ShiftTemplateDraft = {
-  id: null,
-  name: '',
-  startTime: '08:00',
-  endTime: '16:00'
 };
 
 const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
@@ -208,8 +163,7 @@ export function SettingsPage({
   settings,
   onSettingsChange,
   onLocalDataReplace,
-  onLocalDataChange,
-  onSecurityChange
+  onLocalDataChange
 }: SettingsPageProps) {
   const [values, setValues] = useState<FormValues>(() => toFormValues(settings));
   const [errors, setErrors] = useState<FormErrors>({});
@@ -218,26 +172,11 @@ export function SettingsPage({
   const [isApplyingRate, setIsApplyingRate] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
-  const [templateDraft, setTemplateDraft] = useState<ShiftTemplateDraft | null>(null);
-  const [pinStatus, setPinStatus] = useState<PinSecurityStatus | null>(null);
-  const [currentPin, setCurrentPin] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setValues(toFormValues(settings));
   }, [settings]);
-
-  const refreshPinStatus = async () => {
-    const nextStatus = await getPinSecurityStatus();
-    setPinStatus(nextStatus);
-    await onSecurityChange();
-  };
-
-  useEffect(() => {
-    void getPinSecurityStatus().then(setPinStatus);
-  }, []);
 
   const updateField =
     (field: keyof FormValues) => (event: ChangeEvent<HTMLInputElement>) => {
@@ -473,194 +412,6 @@ export function SettingsPage({
     }
   };
 
-  const saveShiftTemplate = async () => {
-    if (!templateDraft) {
-      return;
-    }
-
-    const now = toLocalIsoString(new Date());
-    const name = templateDraft.name.trim();
-    const existing = templateDraft.id
-      ? settings.shiftTemplates.find((template) => template.id === templateDraft.id)
-      : undefined;
-    const template: ShiftTemplate = {
-      id:
-        existing?.id ??
-        (typeof crypto !== 'undefined' && 'randomUUID' in crypto
-          ? `custom-${crypto.randomUUID()}`
-          : `custom-${Date.now()}`),
-      name,
-      startTime: templateDraft.startTime,
-      endTime: templateDraft.endTime,
-      isBuiltIn: false,
-      enabled: existing?.enabled ?? true,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now
-    };
-    const nextTemplates = existing
-      ? settings.shiftTemplates.map((item) => (item.id === existing.id ? template : item))
-      : [...settings.shiftTemplates, template];
-
-    try {
-      validateShiftTemplates(nextTemplates);
-      await onSettingsChange({
-        ...settings,
-        shiftTemplates: nextTemplates,
-        updatedAt: now
-      });
-      setTemplateDraft(null);
-      setNotice({ tone: 'success', text: 'Шаблон зміни збережено.' });
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        text: error instanceof Error ? error.message : 'Не вдалося зберегти шаблон.'
-      });
-    }
-  };
-
-  const toggleShiftTemplate = async (template: ShiftTemplate) => {
-    if (template.isBuiltIn) {
-      return;
-    }
-
-    const nextTemplates = settings.shiftTemplates.map((item) =>
-      item.id === template.id
-        ? { ...item, enabled: !item.enabled, updatedAt: toLocalIsoString(new Date()) }
-        : item
-    );
-
-    try {
-      validateShiftTemplates(nextTemplates);
-      await onSettingsChange({
-        ...settings,
-        shiftTemplates: nextTemplates,
-        updatedAt: toLocalIsoString(new Date())
-      });
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        text: error instanceof Error ? error.message : 'Не вдалося змінити шаблон.'
-      });
-    }
-  };
-
-  const deleteShiftTemplate = async (template: ShiftTemplate) => {
-    if (
-      template.isBuiltIn ||
-      !window.confirm(
-        `Видалити шаблон «${template.name}»? Історичні зміни й імпортовані записи не зміняться.`
-      )
-    ) {
-      return;
-    }
-
-    await onSettingsChange({
-      ...settings,
-      shiftTemplates: settings.shiftTemplates.filter((item) => item.id !== template.id),
-      updatedAt: toLocalIsoString(new Date())
-    });
-    setTemplateDraft((current) => (current?.id === template.id ? null : current));
-  };
-
-  const updateNotificationPreferences = async (
-    updater: (current: Settings['notificationPreferences']) => Settings['notificationPreferences']
-  ) => {
-    const nextPreferences = updater(settings.notificationPreferences);
-
-    if (nextPreferences.enabled && !settings.notificationPreferences.enabled) {
-      const granted = await requestNotificationPermission();
-
-      if (!granted) {
-        setNotice({
-          tone: 'error',
-          text: isNativePlatform()
-            ? 'Дозвіл на сповіщення не надано.'
-            : 'Надійні локальні сповіщення доступні лише в Android/iOS збірці.'
-        });
-        return;
-      }
-    }
-
-    await onSettingsChange({
-      ...settings,
-      notificationPreferences: nextPreferences,
-      updatedAt: toLocalIsoString(new Date())
-    });
-    setNotice({ tone: 'success', text: 'Налаштування сповіщень оновлено.' });
-  };
-
-  const savePin = async () => {
-    if (!/^\d{4}$/.test(newPin) || newPin !== confirmPin) {
-      setNotice({
-        tone: 'error',
-        text:
-          newPin !== confirmPin
-            ? 'PIN і підтвердження не збігаються.'
-            : 'PIN має містити рівно 4 цифри.'
-      });
-      return;
-    }
-
-    if (pinStatus?.enabled) {
-      const verification = await verifyPin(currentPin);
-
-      if (!verification.ok) {
-        setNotice({ tone: 'error', text: 'Поточний PIN невірний.' });
-        return;
-      }
-    }
-
-    try {
-      await createPin(newPin);
-      setCurrentPin('');
-      setNewPin('');
-      setConfirmPin('');
-      await refreshPinStatus();
-      setNotice({ tone: 'success', text: pinStatus?.enabled ? 'PIN змінено.' : 'PIN створено.' });
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        text: error instanceof Error ? error.message : 'Не вдалося зберегти PIN.'
-      });
-    }
-  };
-
-  const disablePin = async () => {
-    const verification = await verifyPin(currentPin);
-
-    if (!verification.ok) {
-      setNotice({ tone: 'error', text: 'Поточний PIN невірний.' });
-      return;
-    }
-
-    await deletePinSecurity();
-    setCurrentPin('');
-    setNewPin('');
-    setConfirmPin('');
-    await refreshPinStatus();
-    setNotice({ tone: 'success', text: 'Екранний замок вимкнено.' });
-  };
-
-  const toggleBiometrics = async () => {
-    if (!pinStatus) {
-      return;
-    }
-
-    try {
-      await setBiometricEnabled(!pinStatus.biometricEnabled);
-      await refreshPinStatus();
-      setNotice({
-        tone: 'success',
-        text: pinStatus.biometricEnabled ? 'Біометрію вимкнено.' : 'Біометрію увімкнено.'
-      });
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        text: error instanceof Error ? error.message : 'Не вдалося змінити біометрію.'
-      });
-    }
-  };
-
   const exportBackup = async () => {
     setIsBackupBusy(true);
     setNotice(null);
@@ -734,7 +485,6 @@ export function SettingsPage({
 
     try {
       await localDb.shifts.clear();
-      await clearAllNotifications();
       onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'Зміни очищено.' });
     } catch {
@@ -757,8 +507,6 @@ export function SettingsPage({
     setNotice(null);
 
     try {
-      await clearAllNotifications();
-      await deletePinSecurity();
       const resetSettings: Settings = {
         ...DEFAULT_SETTINGS,
         updatedAt: toLocalIsoString(new Date())
@@ -778,7 +526,6 @@ export function SettingsPage({
         }
       );
       await onSettingsChange(resetSettings);
-      await refreshPinStatus();
       onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'Локальні дані очищено.' });
     } catch {
@@ -801,7 +548,6 @@ export function SettingsPage({
     setNotice(null);
 
     try {
-      await clearAllNotifications();
       const now = toLocalIsoString(new Date());
       const demoData = await replaceLocalDataWithDemo(localDb, now.slice(0, 10), now);
 
@@ -1037,227 +783,6 @@ export function SettingsPage({
               <small id="holdDelaySeconds-error">{errors.holdDelaySeconds}</small>
             ) : null}
           </label>
-          <label className="settings-page__field">
-            <span>Коефіцієнт</span>
-            <select
-              value={settings.coefficientMode}
-              onChange={(event) =>
-                void onSettingsChange({
-                  ...settings,
-                  coefficientMode: event.target.value as Settings['coefficientMode'],
-                  updatedAt: toLocalIsoString(new Date())
-                })
-              }
-            >
-              <option value="auto">Авто: x1 у плані, x1.5 поза планом</option>
-              <option value="x1">x1</option>
-              <option value="x1.5">x1.5</option>
-              <option value="x2">x2</option>
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <section className="settings-page__section" aria-labelledby="shift-templates-title">
-        <div className="settings-page__section-heading">
-          <div>
-            <h2 id="shift-templates-title">Шаблони змін</h2>
-            <p>Нічна зміна належить даті початку. Стандартні шаблони незмінні.</p>
-          </div>
-          <button
-            className="settings-page__compact-action"
-            type="button"
-            onClick={() => setTemplateDraft({ ...EMPTY_TEMPLATE_DRAFT })}
-          >
-            <Plus size={17} aria-hidden="true" />
-            Додати
-          </button>
-        </div>
-
-        <div className="settings-page__template-list">
-          {settings.shiftTemplates.map((template) => (
-            <article className="settings-page__template" key={template.id}>
-              <div>
-                <strong>{template.name}</strong>
-                <span>
-                  {template.startTime}–{template.endTime} ·{' '}
-                  {getShiftTemplateDurationMinutes(template)} хв
-                </span>
-              </div>
-              <span className="settings-page__template-state">
-                {template.enabled ? 'Активний' : 'Вимкнений'}
-              </span>
-              {template.isBuiltIn ? (
-                <small>Стандартний</small>
-              ) : (
-                <div className="settings-page__template-actions">
-                  <button
-                    type="button"
-                    aria-label={`Редагувати ${template.name}`}
-                    onClick={() =>
-                      setTemplateDraft({
-                        id: template.id,
-                        name: template.name,
-                        startTime: template.startTime,
-                        endTime: template.endTime
-                      })
-                    }
-                  >
-                    <Edit3 size={16} aria-hidden="true" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void toggleShiftTemplate(template)}
-                  >
-                    {template.enabled ? 'Вимкнути' : 'Увімкнути'}
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-page__danger-icon"
-                    aria-label={`Видалити ${template.name}`}
-                    onClick={() => void deleteShiftTemplate(template)}
-                  >
-                    <Trash2 size={16} aria-hidden="true" />
-                  </button>
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
-
-        {templateDraft ? (
-          <div className="settings-page__template-editor" role="group" aria-label="Редактор шаблону зміни">
-            <label className="settings-page__field">
-              <span>Назва</span>
-              <input
-                maxLength={40}
-                value={templateDraft.name}
-                onChange={(event) =>
-                  setTemplateDraft((current) =>
-                    current ? { ...current, name: event.target.value } : current
-                  )
-                }
-              />
-            </label>
-            <label className="settings-page__field">
-              <span>Початок</span>
-              <input
-                type="time"
-                value={templateDraft.startTime}
-                onChange={(event) =>
-                  setTemplateDraft((current) =>
-                    current ? { ...current, startTime: event.target.value } : current
-                  )
-                }
-              />
-            </label>
-            <label className="settings-page__field">
-              <span>Кінець</span>
-              <input
-                type="time"
-                value={templateDraft.endTime}
-                onChange={(event) =>
-                  setTemplateDraft((current) =>
-                    current ? { ...current, endTime: event.target.value } : current
-                  )
-                }
-              />
-            </label>
-            <div className="settings-page__template-editor-actions">
-              <button type="button" onClick={() => setTemplateDraft(null)}>
-                Скасувати
-              </button>
-              <button type="button" onClick={() => void saveShiftTemplate()}>
-                Зберегти шаблон
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="settings-page__section" aria-labelledby="notification-settings-title">
-        <h2 id="notification-settings-title">Сповіщення</h2>
-        <button
-          className="settings-page__toggle"
-          type="button"
-          aria-pressed={settings.notificationPreferences.enabled}
-          onClick={() =>
-            void updateNotificationPreferences((current) => ({
-              ...current,
-              enabled: !current.enabled
-            }))
-          }
-        >
-          <span className="settings-page__toggle-icon">
-            <Bell size={20} aria-hidden="true" />
-          </span>
-          <span className="settings-page__toggle-copy">
-            <strong>Робочі нагадування</strong>
-            <small>
-              {isNativePlatform()
-                ? 'Локально на цьому пристрої.'
-                : 'У PWA недоступні; потрібна Android/iOS збірка.'}
-            </small>
-          </span>
-          <span className="settings-page__switch" aria-hidden="true" />
-        </button>
-
-        <div className="settings-page__notification-list">
-          {(
-            [
-              ['shiftStart', 'Початок зміни', 'до початку'],
-              ['activeTicketEnd', 'Активний тікет', 'до планового завершення'],
-              ['unfinishedShift', 'Незавершена зміна', 'після планового завершення']
-            ] as const
-          ).map(([key, label, suffix]) => {
-            const preference = settings.notificationPreferences[key];
-
-            return (
-              <div className="settings-page__notification-row" key={key}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={preference.enabled}
-                    disabled={!settings.notificationPreferences.enabled}
-                    onChange={(event) =>
-                      void updateNotificationPreferences((current) => ({
-                        ...current,
-                        [key]: {
-                          ...current[key],
-                          enabled: event.target.checked
-                        }
-                      }))
-                    }
-                  />
-                  <span>{label}</span>
-                </label>
-                <label className="settings-page__notification-minutes">
-                  <input
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    max={180}
-                    value={preference.minutes}
-                    disabled={!settings.notificationPreferences.enabled}
-                    onChange={(event) => {
-                      const minutes = Number(event.target.value);
-
-                      if (Number.isSafeInteger(minutes) && minutes >= 1 && minutes <= 180) {
-                        void updateNotificationPreferences((current) => ({
-                          ...current,
-                          [key]: {
-                            ...current[key],
-                            minutes
-                          }
-                        }));
-                      }
-                    }}
-                  />
-                  <span>хв {suffix}</span>
-                </label>
-              </div>
-            );
-          })}
         </div>
       </section>
 
@@ -1298,91 +823,6 @@ export function SettingsPage({
               {settings.incognitoEnabled
                 ? 'Фінанси приховано.'
                 : `Ставка: ${formatMoney(settings.monthlySalary, false)}/міс, грейд ${settings.currentGrade}`}
-            </small>
-          </span>
-          <span className="settings-page__switch" aria-hidden="true" />
-        </button>
-
-        <div className="settings-page__pin-panel">
-          <div>
-            <strong>Екранний замок</strong>
-            <span>{pinStatus?.enabled ? 'PIN увімкнено' : 'PIN не створено'}</span>
-          </div>
-          {pinStatus?.enabled ? (
-            <label className="settings-page__field">
-              <span>Поточний PIN</span>
-              <input
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={4}
-                autoComplete="off"
-                value={currentPin}
-                onChange={(event) => setCurrentPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
-              />
-            </label>
-          ) : null}
-          <div className="settings-page__pin-grid">
-            <label className="settings-page__field">
-              <span>{pinStatus?.enabled ? 'Новий PIN' : 'PIN'}</span>
-              <input
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={4}
-                autoComplete="new-password"
-                value={newPin}
-                onChange={(event) => setNewPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
-              />
-            </label>
-            <label className="settings-page__field">
-              <span>Підтвердження</span>
-              <input
-                type="password"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                maxLength={4}
-                autoComplete="new-password"
-                value={confirmPin}
-                onChange={(event) => setConfirmPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
-              />
-            </label>
-          </div>
-          <div className="settings-page__pin-actions">
-            <button type="button" onClick={() => void savePin()}>
-              {pinStatus?.enabled ? 'Змінити PIN' : 'Створити PIN'}
-            </button>
-            {pinStatus?.enabled ? (
-              <button
-                type="button"
-                className="settings-page__danger"
-                onClick={() => void disablePin()}
-              >
-                Вимкнути PIN
-              </button>
-            ) : null}
-          </div>
-          <small>PIN не експортується та не шифрує локальну базу чи backup.</small>
-        </div>
-
-        <button
-          className="settings-page__toggle"
-          type="button"
-          aria-pressed={pinStatus?.biometricEnabled === true}
-          disabled={!pinStatus?.enabled || !pinStatus.native || !pinStatus.biometricAvailable}
-          onClick={() => void toggleBiometrics()}
-        >
-          <span className="settings-page__toggle-icon">
-            <Shield size={20} aria-hidden="true" />
-          </span>
-          <span className="settings-page__toggle-copy">
-            <strong>Біометрія</strong>
-            <small>
-              {!pinStatus?.native
-                ? 'Доступна лише в Android/iOS збірці.'
-                : !pinStatus.biometricAvailable
-                  ? 'Не налаштована на цьому пристрої.'
-                  : 'Розблокування та заміна забутого PIN.'}
             </small>
           </span>
           <span className="settings-page__switch" aria-hidden="true" />
@@ -1468,27 +908,6 @@ export function SettingsPage({
           <span>Дата останнього оновлення</span>
           <strong>{formatDateTime(settings.updatedAt)}</strong>
         </div>
-      </section>
-
-      <section className="settings-page__section settings-page__faq" aria-labelledby="faq-settings-title">
-        <h2 id="faq-settings-title">Навчальні матеріали</h2>
-        {[
-          ['Як працює таймер?', 'Утримуйте «Прийшов» і «Пішов», щоб уникнути випадкових натискань. Одночасно може бути лише одна активна зміна.'],
-          ['Тікети й простій', 'Додайте тікет, внесіть норму й факт. Простій коригується окремим знаком і кількістю хвилин.'],
-          ['Коефіцієнти', 'В авто-режимі плановий час оплачується x1, а час до або після плану — x1.5. Ручний режим застосовує один коефіцієнт до всієї зміни.'],
-          ['Власні шаблони', 'Створюйте денні й нічні шаблони. Стандартні 06:30–14:30 та 14:30–22:30 завжди активні.'],
-          ['Графік та імпорт', 'Вставте текст графіка підприємства. Майбутні записи є планом; фактичні зміни створюються лише для сьогоднішніх і минулих дат.'],
-          ['Прогноз зарплати', 'Після 31 завершеної зміни аналітика прогнозує поточний місяць за імпортованим графіком або робочими днями 5/2.'],
-          ['Інкогніто', 'Режим інкогніто показує •••• замість фінансів і блокує редагування грошових полів.'],
-          ['Backup', 'Експорт та імпорт працюють через JSON. PIN і біометрія до backup не входять.'],
-          ['PIN і біометрія', 'PIN блокує екран, але не шифрує IndexedDB або JSON backup. Біометрія доступна лише в нативній збірці.'],
-          ['Сповіщення', 'Надійні локальні нагадування працюють у нативній Android/iOS збірці після надання дозволу.']
-        ].map(([title, body]) => (
-          <details key={title}>
-            <summary>{title}</summary>
-            <p>{body}</p>
-          </details>
-        ))}
       </section>
 
       {notice ? (

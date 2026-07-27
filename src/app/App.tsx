@@ -1,18 +1,10 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
-import { App as CapacitorApp } from '@capacitor/app';
 import { MainPage } from '../pages/main';
 import { OnboardingPage, type OnboardingValues } from '../pages/onboarding';
-import { DEFAULT_SETTINGS, type Settings } from '../entities/settings';
+import type { Settings } from '../entities/settings';
 import { localDb, SettingsRepository } from '../shared/lib/local-db';
 import { synchronizeTheme } from '../shared/lib/theme';
 import { AppSplash } from './AppSplash';
-import { LockScreen } from '../shared/ui/lock-screen';
-import {
-  deletePinSecurity,
-  getPinSecurityStatus,
-  type PinSecurityStatus
-} from '../shared/lib/security/pinSecurity';
-import { clearAllNotifications } from '../shared/lib/native/notifications';
 
 const settingsRepository = new SettingsRepository(localDb);
 
@@ -20,8 +12,6 @@ export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
-  const [securityStatus, setSecurityStatus] = useState<PinSecurityStatus | null>(null);
-  const [isLocked, setIsLocked] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -43,68 +33,6 @@ export function App() {
       isMounted = false;
     };
   }, []);
-
-  const refreshSecurityStatus = async () => {
-    const nextStatus = await getPinSecurityStatus();
-    setSecurityStatus(nextStatus);
-    return nextStatus;
-  };
-
-  useEffect(() => {
-    void refreshSecurityStatus().then((status) => {
-      if (status.enabled) {
-        setIsLocked(true);
-      }
-    }).catch(() => {
-      setSecurityStatus({
-        enabled: false,
-        native: false,
-        biometricAvailable: false,
-        biometricEnabled: false,
-        failedAttempts: 0,
-        lockoutUntil: 0
-      });
-    });
-  }, []);
-
-  useEffect(() => {
-    let backgroundStartedAt: number | null = null;
-    let appListener: { remove: () => Promise<void> } | null = null;
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'hidden') {
-        backgroundStartedAt = Date.now();
-      } else if (
-        backgroundStartedAt !== null &&
-        Date.now() - backgroundStartedAt >= 60_000 &&
-        securityStatus?.enabled
-      ) {
-        setIsLocked(true);
-        backgroundStartedAt = null;
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibility);
-    void CapacitorApp.addListener('appStateChange', ({ isActive }) => {
-      if (!isActive) {
-        backgroundStartedAt = Date.now();
-      } else if (
-        backgroundStartedAt !== null &&
-        Date.now() - backgroundStartedAt >= 60_000 &&
-        securityStatus?.enabled
-      ) {
-        setIsLocked(true);
-        backgroundStartedAt = null;
-      }
-    }).then((listener) => {
-      appListener = listener;
-    });
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
-      void appListener?.remove();
-    };
-  }, [securityStatus?.enabled]);
 
   useLayoutEffect(() => {
     if (!settings) {
@@ -149,33 +77,6 @@ export function App() {
     setDataRefreshKey((current) => current + 1);
   };
 
-  const resetAllLocalData = async () => {
-    await clearAllNotifications();
-    await deletePinSecurity();
-    await localDb.transaction(
-      'rw',
-      localDb.settings,
-      localDb.shifts,
-      localDb.enterpriseSchedule,
-      localDb.appMeta,
-      async () => {
-        await localDb.settings.clear();
-        await localDb.shifts.clear();
-        await localDb.enterpriseSchedule.clear();
-        await localDb.appMeta.clear();
-      }
-    );
-    const nextSettings: Settings = {
-      ...DEFAULT_SETTINGS,
-      updatedAt: new Date().toISOString()
-    };
-    await settingsRepository.saveSettings(nextSettings);
-    setSettings(nextSettings);
-    setSecurityStatus(await getPinSecurityStatus());
-    setIsLocked(false);
-    setDataRefreshKey((current) => current + 1);
-  };
-
   if (loadError) {
     return (
       <main className="app-status" role="alert">
@@ -184,18 +85,8 @@ export function App() {
     );
   }
 
-  if (!settings || !securityStatus) {
+  if (!settings) {
     return <AppSplash />;
-  }
-
-  if (isLocked && securityStatus.enabled) {
-    return (
-      <LockScreen
-        status={securityStatus}
-        onUnlock={() => setIsLocked(false)}
-        onFullReset={resetAllLocalData}
-      />
-    );
   }
 
   if (!settings.onboardingCompleted) {
@@ -208,7 +99,6 @@ export function App() {
       dataVersion={dataRefreshKey}
       onSettingsChange={updateSettings}
       onLocalDataReplace={replaceLocalData}
-      onSecurityChange={refreshSecurityStatus}
     />
   );
 }

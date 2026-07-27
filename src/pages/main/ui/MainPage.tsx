@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Check, Edit3, Eye, EyeOff, Trash2, X } from 'lucide-react';
-import { App } from '@capacitor/app';
 import { BottomNavigation } from '../../../widgets/bottom-navigation';
 import { AppShell } from '../../../shared/ui/app-shell';
 import {
@@ -17,7 +16,6 @@ import { SettingsPage } from '../../settings';
 import {
   calculateSalaryBreakdown,
   calculateTicketProductionSummary,
-  getCurrentShiftCoefficient,
   type ISODateTimeString,
   type Shift,
   type WorkTicket
@@ -31,7 +29,6 @@ import {
   EnterpriseScheduleRepository,
   getActiveShift,
   getLatestCompletedShift,
-  getUpcomingEnterpriseSchedule,
   getLocalDataDateBounds,
   localDb,
   ShiftConstraintError,
@@ -61,14 +58,6 @@ import {
   formatShiftClipboardText
 } from '../../../shared/lib/clipboard/shiftClipboard';
 import type { NavigationItem } from '../../../shared/config/navigation';
-import {
-  cancelActiveShiftNotification,
-  cancelActiveTicketNotification,
-  listenForWorkNotificationNavigation,
-  rebuildScheduleNotifications,
-  scheduleActiveShiftNotification,
-  scheduleActiveTicketNotification
-} from '../../../shared/lib/native/notifications';
 import './MainPage.css';
 
 type MainPageProps = {
@@ -76,7 +65,6 @@ type MainPageProps = {
   dataVersion: number;
   onSettingsChange: (settings: Settings) => Promise<void>;
   onLocalDataReplace: (settings: Settings) => void;
-  onSecurityChange: () => Promise<unknown>;
 };
 
 type HoldButtonProps = {
@@ -111,9 +99,7 @@ const createEmptyTicketEditDraft = (): TicketEditDraft => ({
 const shiftRepository = new ShiftRepository(localDb);
 const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
 
-const getShiftTitle = (shift: Shift): string =>
-  shift.templateNameSnapshot ??
-  (shift.type === 'first' ? '1 зміна' : shift.type === 'second' ? '2 зміна' : 'Власна зміна');
+const getShiftTitle = (shift: Shift): string => (shift.type === 'first' ? '1 зміна' : '2 зміна');
 
 const getTimerErrorMessage = (error: unknown): string => {
   if (error instanceof ShiftConstraintError) {
@@ -149,7 +135,13 @@ const normalizeTicketNormDraft = (value: string): string => {
   return digits === '' ? '' : String(Math.min(Number(digits), 999));
 };
 
-const normalizeIntegerDraft = (value: string): string => value.replace(/\D/g, '');
+const normalizeSignedIntegerDraft = (value: string): string => {
+  const trimmed = value.trim();
+  const sign = trimmed.startsWith('-') ? '-' : trimmed.startsWith('+') ? '+' : '';
+  const digits = trimmed.replace(/\D/g, '');
+
+  return `${sign}${digits}`;
+};
 
 const getTicketErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message ? error.message : 'Не вдалося оновити тікет.';
@@ -236,8 +228,7 @@ export function MainPage({
   settings,
   dataVersion,
   onSettingsChange,
-  onLocalDataReplace,
-  onSecurityChange
+  onLocalDataReplace
 }: MainPageProps) {
   const [activePage, setActivePage] = useState<NavigationItem['id']>('timer');
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
@@ -255,7 +246,6 @@ export function MainPage({
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
   const [ticketActualDraft, setTicketActualDraft] = useState('');
   const [downtimeAdjustmentDraft, setDowntimeAdjustmentDraft] = useState('');
-  const [downtimeAdjustmentSign, setDowntimeAdjustmentSign] = useState<1 | -1>(1);
   const [isCompletingTicket, setIsCompletingTicket] = useState(false);
   const [clipboardNotice, setClipboardNotice] = useState<{
     tone: 'success' | 'warning';
@@ -349,45 +339,6 @@ export function MainPage({
     return () => window.clearInterval(intervalId);
   }, [activeShift]);
 
-  const rebuildNotifications = useCallback(async () => {
-    const today = toLocalIsoString(new Date()).slice(0, 10);
-    const schedule = await getUpcomingEnterpriseSchedule(
-      enterpriseScheduleRepository,
-      today,
-      120
-    );
-
-    await rebuildScheduleNotifications({
-      items: schedule,
-      preferences: settings.notificationPreferences
-    });
-  }, [settings.notificationPreferences]);
-
-  useEffect(() => {
-    void rebuildNotifications().catch(() => undefined);
-  }, [dataVersion, localDataRefreshKey, rebuildNotifications]);
-
-  useEffect(() => {
-    let navigationListener: { remove: () => Promise<void> } | null = null;
-    let appListener: { remove: () => Promise<void> } | null = null;
-
-    void listenForWorkNotificationNavigation(() => setActivePage('timer')).then((listener) => {
-      navigationListener = listener;
-    });
-    void App.addListener('appStateChange', ({ isActive }) => {
-      if (isActive) {
-        void rebuildNotifications().catch(() => undefined);
-      }
-    }).then((listener) => {
-      appListener = listener;
-    });
-
-    return () => {
-      void navigationListener?.remove();
-      void appListener?.remove();
-    };
-  }, [rebuildNotifications]);
-
   const activeSalaryBreakdown = useMemo(() => {
     if (!activeShift) {
       return null;
@@ -409,9 +360,6 @@ export function MainPage({
     });
   }, [latestCompletedShift]);
   const currentEarning = activeSalaryBreakdown?.totalAmount ?? 0;
-  const currentCoefficient = activeShift
-    ? getCurrentShiftCoefficient(activeShift, now)
-    : null;
   const activeWorkTicket = activeShift ? getActiveWorkTicket(activeShift) : null;
   const activeTicketTargets = useMemo(() => {
     if (!activeShift || !activeWorkTicket) {
@@ -437,7 +385,6 @@ export function MainPage({
   useEffect(() => {
     setTicketActualDraft('');
     setDowntimeAdjustmentDraft('');
-    setDowntimeAdjustmentSign(1);
   }, [activeWorkTicket?.id]);
 
   const toggleIncognito = async () => {
@@ -474,7 +421,6 @@ export function MainPage({
         hourlyRateSnapshot: baseHourlyRate,
         gradeSnapshot: createGradeSnapshot(settings),
         coefficientMode: settings.coefficientMode,
-        shiftTemplates: settings.shiftTemplates,
         now: startedAt
       });
 
@@ -482,10 +428,6 @@ export function MainPage({
       setActiveShift(createdShift);
       setTicketNormDraft('');
       setTicketError(null);
-      await scheduleActiveShiftNotification(
-        createdShift,
-        settings.notificationPreferences
-      );
     } catch (error) {
       setTimerError(getTimerErrorMessage(error));
     }
@@ -516,7 +458,6 @@ export function MainPage({
       setLatestCompletedShift(completedShift.endTime ? completedShift : latestCompletedShift);
       setTicketNormDraft('');
       setTicketError(null);
-      await cancelActiveShiftNotification(completedShift.id);
       notifyLocalDataChange();
 
       if (completedShift.endTime !== null) {
@@ -580,16 +521,6 @@ export function MainPage({
       setNow(startedAt);
       setActiveShift(updatedShift);
       setTicketNormDraft('');
-      const addedTicket = updatedShift.workTickets.find(
-        (ticket) => ticket.endedAt === null
-      );
-      if (addedTicket) {
-        await scheduleActiveTicketNotification(
-          updatedShift,
-          addedTicket,
-          settings.notificationPreferences
-        );
-      }
       notifyLocalDataChange();
     } catch (error) {
       setTicketError(getTicketErrorMessage(error));
@@ -603,10 +534,10 @@ export function MainPage({
       return;
     }
 
-    const deltaMinutes = Number(downtimeAdjustmentDraft) * downtimeAdjustmentSign;
+    const deltaMinutes = Number(downtimeAdjustmentDraft);
 
     if (!Number.isSafeInteger(deltaMinutes) || deltaMinutes === 0) {
-      setTicketError('Вкажіть цілу ненульову кількість хвилин.');
+      setTicketError('Вкажіть цілу ненульову кількість хвилин, наприклад +15 або -5.');
       return;
     }
 
@@ -662,7 +593,6 @@ export function MainPage({
 
       setNow(endedAt);
       setActiveShift(updatedShift);
-      await cancelActiveTicketNotification(activeWorkTicket.id);
       notifyLocalDataChange();
     } catch (error) {
       setTicketError(getTicketErrorMessage(error));
@@ -789,7 +719,6 @@ export function MainPage({
 
       setNow(updatedAt);
       setActiveShift(updatedShift);
-      await cancelActiveTicketNotification(ticket.id);
 
       if (editingTicketId === ticket.id) {
         setEditingTicketId(null);
@@ -900,7 +829,6 @@ export function MainPage({
           onSettingsChange={onSettingsChange}
           onLocalDataReplace={onLocalDataReplace}
           onLocalDataChange={notifyLocalDataChange}
-          onSecurityChange={onSecurityChange}
         />
       ) : isLoadingShift ? (
         <section className="main-page__summary main-page__timer-screen">
@@ -927,12 +855,6 @@ export function MainPage({
                 <p className="main-page__timer-subtitle">
                   {activeShift.plannedStartTime}-{activeShift.plannedEndTime}
                 </p>
-                <span
-                  className="main-page__coefficient-chip"
-                  aria-label={`Поточний коефіцієнт x${currentCoefficient}`}
-                >
-                  x{currentCoefficient}
-                </span>
               </div>
             </div>
 
@@ -1126,37 +1048,17 @@ export function MainPage({
                           <strong>{formatDurationMinutes(activeTicketTargets.downtimeMinutes)}</strong>
                         </div>
                         <div className="main-page__ticket-downtime-control">
-                          <div
-                            className="main-page__ticket-downtime-sign"
-                            role="group"
-                            aria-label="Знак коригування простою"
-                          >
-                            <button
-                              type="button"
-                              aria-pressed={downtimeAdjustmentSign === 1}
-                              onClick={() => setDowntimeAdjustmentSign(1)}
-                            >
-                              +
-                            </button>
-                            <button
-                              type="button"
-                              aria-pressed={downtimeAdjustmentSign === -1}
-                              onClick={() => setDowntimeAdjustmentSign(-1)}
-                            >
-                              −
-                            </button>
-                          </div>
                           <label>
-                            <span>Хвилини</span>
+                            <span>Коригування, хв</span>
                             <input
                               type="text"
-                              inputMode="numeric"
-                              pattern="[0-9]*"
+                              inputMode="text"
+                              pattern="[+-]?[0-9]*"
                               value={downtimeAdjustmentDraft}
-                              placeholder="15"
+                              placeholder="+15 або -5"
                               onChange={(event) => {
                                 setDowntimeAdjustmentDraft(
-                                  normalizeIntegerDraft(event.target.value)
+                                  normalizeSignedIntegerDraft(event.target.value)
                                 );
                                 setTicketError(null);
                               }}

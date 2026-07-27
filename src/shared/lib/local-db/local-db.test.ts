@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_SETTINGS, type Settings } from '../../../entities/settings';
+import type { Settings } from '../../../entities/settings';
 import {
   calculateEnterpriseScheduleComparison,
   type EnterpriseScheduleItem
@@ -54,8 +54,6 @@ const makeShift = (overrides: Partial<Shift> = {}): Shift => ({
   id: 'shift-1',
   date: '2026-06-10',
   type: 'first',
-  templateId: 'first',
-  templateNameSnapshot: '1 зміна',
   detectionMode: 'auto',
   plannedStartTime: '06:30',
   plannedEndTime: '14:30',
@@ -73,7 +71,6 @@ const makeShift = (overrides: Partial<Shift> = {}): Shift => ({
 });
 
 const makeSettings = (overrides: Partial<Settings> = {}): Settings => ({
-  ...DEFAULT_SETTINGS,
   employeeFirstName: 'Олег',
   employeeLastName: 'Мельник',
   monthlySalary: 31_680,
@@ -100,8 +97,6 @@ const makeScheduleItem = (
   id: 'enterprise-schedule-2026-06-10',
   date: '2026-06-10',
   shiftType: 'first',
-  templateId: 'first',
-  templateNameSnapshot: '1 зміна',
   plannedStartTime: '06:30',
   plannedEndTime: '14:30',
   enterpriseStartTime: '06:20',
@@ -241,7 +236,6 @@ describe('database migrations', () => {
 describe('settings repository use-cases', () => {
   it('returns default settings before first save', async () => {
     await expect(getSettings(settingsRepository)).resolves.toEqual({
-      ...DEFAULT_SETTINGS,
       employeeFirstName: '',
       employeeLastName: '',
       monthlySalary: 0,
@@ -264,7 +258,6 @@ describe('settings repository use-cases', () => {
 
   it('saves and reads settings', async () => {
     const settings: Settings = {
-      ...DEFAULT_SETTINGS,
       employeeFirstName: 'Олег',
       employeeLastName: 'Мельник',
       monthlySalary: 31_680,
@@ -340,11 +333,6 @@ describe('demo data use-cases', () => {
     await settingsRepository.saveSettings(makeSettings({ employeeFirstName: 'Старі' }));
     await shiftRepository.createShift(oldShift);
     await enterpriseScheduleRepository.importItems([oldSchedule]);
-    await db.appMeta.put({
-      key: 'security-pin-config',
-      value: '{"version":1}',
-      updatedAt: '2026-05-29T12:00:00.000+03:00'
-    });
 
     const demoData = await replaceLocalDataWithDemo(
       db,
@@ -385,9 +373,6 @@ describe('demo data use-cases', () => {
     await expect(enterpriseScheduleRepository.getItemById('old-schedule')).resolves.toBeNull();
     await expect(db.appMeta.get('demo-data-range')).resolves.toMatchObject({
       value: '2026-06-01/2026-07-12'
-    });
-    await expect(db.appMeta.get('security-pin-config')).resolves.toMatchObject({
-      value: '{"version":1}'
     });
   });
 });
@@ -1163,8 +1148,6 @@ Total: 09:10`,
         id: 'enterprise-schedule-2026-06-01',
         date: '2026-06-01',
         shiftType: 'first',
-        templateId: 'first',
-        templateNameSnapshot: '1 зміна',
         plannedStartTime: '06:30',
         plannedEndTime: '14:30',
         enterpriseStartTime: '05:57',

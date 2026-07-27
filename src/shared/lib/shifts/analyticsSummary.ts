@@ -6,6 +6,7 @@ import {
   type ISODateTimeString,
   type LocalDateString,
   type Shift,
+  type ShiftType
 } from '../../../entities/shift';
 import {
   calculateGradeMonthlyBonus,
@@ -13,8 +14,6 @@ import {
 } from '../../../entities/settings';
 
 export type ShiftTypeAnalytics = {
-  templateId: string;
-  templateName: string;
   shiftCount: number;
   salaryAmount: number;
   totalMinutes: number;
@@ -54,10 +53,7 @@ export type AnalyticsSummary = {
     lateArrivalMinutes: number;
     earlyExitMinutes: number;
   }>;
-  byTemplate: ShiftTypeAnalytics[];
-  /** @deprecated Сумісність зі старими споживачами. */
   firstShift: ShiftTypeAnalytics;
-  /** @deprecated Сумісність зі старими споживачами. */
   secondShift: ShiftTypeAnalytics;
   production: {
     ticketCount: number;
@@ -91,12 +87,7 @@ const toLocalDateString = (date: Date): LocalDateString =>
     date.getDate()
   ).padStart(2, '0')}`;
 
-const createShiftTypeAnalytics = (
-  templateId: string,
-  templateName: string
-): ShiftTypeAnalytics => ({
-  templateId,
-  templateName,
+const createShiftTypeAnalytics = (): ShiftTypeAnalytics => ({
   shiftCount: 0,
   salaryAmount: 0,
   totalMinutes: 0,
@@ -142,7 +133,8 @@ export const calculateAnalyticsSummary = ({
       endTime: shift.endTime ?? now
     }));
 
-  const byTemplate = new Map<string, ShiftTypeAnalytics>();
+  const firstShift = createShiftTypeAnalytics();
+  const secondShift = createShiftTypeAnalytics();
 
   let workSalary = 0;
   let totalMinutes = 0;
@@ -176,15 +168,7 @@ export const calculateAnalyticsSummary = ({
   completedShifts.forEach((shift) => {
     const salary = calculateSalaryBreakdown(shift);
     const time = calculateShiftTimeBreakdown(shift);
-    const templateId = shift.templateId ?? shift.type;
-    const typeSummary =
-      byTemplate.get(templateId) ??
-      createShiftTypeAnalytics(
-        templateId,
-        shift.templateNameSnapshot ??
-          (templateId === 'first' ? '1 зміна' : templateId === 'second' ? '2 зміна' : 'Власна зміна')
-      );
-    byTemplate.set(templateId, typeSummary);
+    const typeSummary = shift.type === 'first' ? firstShift : secondShift;
 
     workSalary += salary.totalAmount;
     totalMinutes += time.actualDurationMinutes;
@@ -340,11 +324,8 @@ export const calculateAnalyticsSummary = ({
       (left, right) => left.coefficient - right.coefficient
     ),
     deviations,
-    byTemplate: [...byTemplate.values()],
-    firstShift:
-      byTemplate.get('first') ?? createShiftTypeAnalytics('first', '1 зміна'),
-    secondShift:
-      byTemplate.get('second') ?? createShiftTypeAnalytics('second', '2 зміна'),
+    firstShift,
+    secondShift,
     production
   };
 };

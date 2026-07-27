@@ -52,21 +52,6 @@ const combineLocalDateAndTime = (date: string, time: string): ISODateTimeString 
   return toLocalIsoString(new Date(year, month - 1, day, hours, minutes, 0, 0));
 };
 
-const combineScheduleEnd = (
-  date: string,
-  startTime: string,
-  endTime: string
-): ISODateTimeString => {
-  const start = combineLocalDateAndTime(date, startTime);
-  const end = combineLocalDateAndTime(date, endTime);
-
-  if (endTime <= startTime) {
-    return toLocalIsoString(new Date(new Date(end).getTime() + 24 * 60 * 60_000));
-  }
-
-  return end;
-};
-
 const getDurationMinutes = (startTime: ISODateTimeString, endTime: ISODateTimeString): number =>
   Math.max(0, Math.floor((new Date(endTime).getTime() - new Date(startTime).getTime()) / MINUTE_IN_MS));
 
@@ -78,23 +63,13 @@ const getEnterpriseEndTime = (scheduleItem: EnterpriseScheduleItem): string =>
 
 const createEnterpriseShift = (scheduleItem: EnterpriseScheduleItem, shift: Shift): Shift => {
   const startTime = combineLocalDateAndTime(scheduleItem.date, getEnterpriseStartTime(scheduleItem));
-  const endTime = combineScheduleEnd(
-    scheduleItem.date,
-    getEnterpriseStartTime(scheduleItem),
-    getEnterpriseEndTime(scheduleItem)
-  );
-  const plannedWindow = getPlannedShiftWindow(scheduleItem.date, scheduleItem.shiftType, startTime, {
-    startTime: scheduleItem.plannedStartTime,
-    endTime: scheduleItem.plannedEndTime
-  });
+  const endTime = combineLocalDateAndTime(scheduleItem.date, getEnterpriseEndTime(scheduleItem));
+  const plannedWindow = getPlannedShiftWindow(scheduleItem.date, scheduleItem.shiftType, startTime);
 
   return {
     ...shift,
     date: scheduleItem.date,
     type: scheduleItem.shiftType,
-    templateId: scheduleItem.templateId ?? scheduleItem.shiftType,
-    templateNameSnapshot:
-      scheduleItem.templateNameSnapshot ?? shift.templateNameSnapshot,
     plannedStartTime: plannedWindow.startTime,
     plannedEndTime: plannedWindow.endTime,
     startTime,

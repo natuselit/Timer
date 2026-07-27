@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">Shifter</string>
-    <string name="title_activity_main">Shifter</string>
-    <string name="package_name">com.shifter.worktime</string>
-    <string name="custom_url_scheme">com.shifter.worktime</string>
-</resources>

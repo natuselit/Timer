@@ -1,6 +1,5 @@
 import {
   DEFAULT_SETTINGS,
-  DEFAULT_NOTIFICATION_PREFERENCES,
   FORECAST_DAYS_MAX,
   FORECAST_DAYS_MIN,
   GRADE_VALUES,
@@ -10,24 +9,19 @@ import {
   isThemePreference,
   type Grade,
   type GradePercentSet,
-  type NotificationPreferences,
   type Settings
 } from '../../../../entities/settings';
 import type { EnterpriseScheduleItem } from '../../../../entities/enterprise-schedule';
-import {
-  getBuiltInShiftTemplate,
-  normalizeShiftTemplates,
-  validateAndSortWorkTickets,
-  validateShiftTemplates,
-  type CoefficientMode,
-  type GradeSnapshot,
-  type LocalDateString,
-  type Shift,
-  type ShiftDetectionMode,
-  type ShiftTemplate,
-  type ShiftType,
-  type WorkTicket
+import type {
+  CoefficientMode,
+  GradeSnapshot,
+  LocalDateString,
+  Shift,
+  ShiftDetectionMode,
+  ShiftType,
+  WorkTicket
 } from '../../../../entities/shift';
+import { validateAndSortWorkTickets } from '../../../../entities/shift';
 import type { ShifterDatabase } from '../database';
 import { normalizeSettingsRecord } from '../repositories/settingsRepository';
 import { normalizeShiftRecord } from '../repositories/shiftRepository';
@@ -38,16 +32,14 @@ const GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION = 3;
 const THEME_BACKUP_SCHEMA_VERSION = 4;
 const TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION = 5;
 const MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION = 6;
-const SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION = 7;
-export const BACKUP_SCHEMA_VERSION = SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION;
+export const BACKUP_SCHEMA_VERSION = MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION;
 const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   LEGACY_BACKUP_SCHEMA_VERSION,
   2,
   GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION,
   THEME_BACKUP_SCHEMA_VERSION,
   TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION,
-  MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION,
-  SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION
+  BACKUP_SCHEMA_VERSION
 ]);
 
 type BackupSchemaVersion = typeof BACKUP_SCHEMA_VERSION;
@@ -201,87 +193,6 @@ const readBoolean = (record: Record<string, unknown>, key: string): boolean => {
   return value;
 };
 
-const parseNotificationPreferenceItem = (
-  value: unknown,
-  field: string
-): NotificationPreferences['shiftStart'] => {
-  if (!isRecord(value)) {
-    throw new BackupValidationError(`${field} має бути обʼєктом.`);
-  }
-
-  return {
-    enabled: readBoolean(value, 'enabled'),
-    minutes: readIntegerInRange(value, 'minutes', 1, 180)
-  };
-};
-
-const parseNotificationPreferences = (value: unknown): NotificationPreferences => {
-  if (!isRecord(value)) {
-    throw new BackupValidationError('settings.notificationPreferences має бути обʼєктом.');
-  }
-
-  return {
-    enabled: readBoolean(value, 'enabled'),
-    shiftStart: parseNotificationPreferenceItem(
-      value.shiftStart,
-      'settings.notificationPreferences.shiftStart'
-    ),
-    activeTicketEnd: parseNotificationPreferenceItem(
-      value.activeTicketEnd,
-      'settings.notificationPreferences.activeTicketEnd'
-    ),
-    unfinishedShift: parseNotificationPreferenceItem(
-      value.unfinishedShift,
-      'settings.notificationPreferences.unfinishedShift'
-    )
-  };
-};
-
-const parseShiftTemplates = (value: unknown): ShiftTemplate[] => {
-  if (!Array.isArray(value)) {
-    throw new BackupValidationError('settings.shiftTemplates має бути масивом.');
-  }
-
-  const templates = value.map((item) => {
-    if (!isRecord(item)) {
-      throw new BackupValidationError('Кожен шаблон зміни має бути обʼєктом.');
-    }
-
-    const template: ShiftTemplate = {
-      id: readString(item, 'id'),
-      name: readString(item, 'name'),
-      startTime: readString(item, 'startTime'),
-      endTime: readString(item, 'endTime'),
-      isBuiltIn: readBoolean(item, 'isBuiltIn'),
-      enabled: readBoolean(item, 'enabled'),
-      createdAt: readString(item, 'createdAt'),
-      updatedAt: readString(item, 'updatedAt')
-    };
-
-    if (
-      !isLocalTime(template.startTime) ||
-      !isLocalTime(template.endTime) ||
-      !isIsoLikeDateTime(template.createdAt) ||
-      !isIsoLikeDateTime(template.updatedAt)
-    ) {
-      throw new BackupValidationError('Шаблон зміни містить невалідний час.');
-    }
-
-    return template;
-  });
-
-  try {
-    validateShiftTemplates(templates);
-    const normalized = normalizeShiftTemplates(templates);
-    validateShiftTemplates(normalized);
-    return normalized;
-  } catch (error) {
-    throw new BackupValidationError(
-      error instanceof Error ? error.message : 'Шаблони змін невалідні.'
-    );
-  }
-};
-
 const parseSettings = (
   value: unknown,
   schemaVersion: number,
@@ -366,19 +277,6 @@ const parseSettings = (
     ),
     coefficientMode: coefficientMode as CoefficientMode,
     shiftDetectionMode: shiftDetectionMode as ShiftDetectionMode,
-    shiftTemplates:
-      schemaVersion >= SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION
-        ? parseShiftTemplates(value.shiftTemplates)
-        : DEFAULT_SETTINGS.shiftTemplates.map((template) => ({ ...template })),
-    notificationPreferences:
-      schemaVersion >= SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION
-        ? parseNotificationPreferences(value.notificationPreferences)
-        : {
-            ...DEFAULT_NOTIFICATION_PREFERENCES,
-            shiftStart: { ...DEFAULT_NOTIFICATION_PREFERENCES.shiftStart },
-            activeTicketEnd: { ...DEFAULT_NOTIFICATION_PREFERENCES.activeTicketEnd },
-            unfinishedShift: { ...DEFAULT_NOTIFICATION_PREFERENCES.unfinishedShift }
-          },
     themePreference:
       schemaVersion >= THEME_BACKUP_SCHEMA_VERSION
         ? (themePreference as Settings['themePreference'])
@@ -571,11 +469,7 @@ const parseShift = (
   const coefficientMode = value.coefficientMode;
   const endTime = value.endTime;
 
-  if (
-    !isString(type) ||
-    (schemaVersion < SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION &&
-      !SHIFT_TYPES.has(type as ShiftType))
-  ) {
+  if (!SHIFT_TYPES.has(type as ShiftType)) {
     throw new BackupValidationError('shift.type має несумісне значення.');
   }
 
@@ -599,16 +493,6 @@ const parseShift = (
     id: readString(value, 'id'),
     date: readString(value, 'date'),
     type: type as ShiftType,
-    templateId:
-      schemaVersion >= SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION &&
-      isString(value.templateId)
-        ? readString(value, 'templateId')
-        : (type as ShiftType),
-    templateNameSnapshot:
-      schemaVersion >= SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION &&
-      isString(value.templateNameSnapshot)
-        ? readString(value, 'templateNameSnapshot')
-        : getBuiltInShiftTemplate(type as ShiftType)?.name ?? 'Власна зміна',
     detectionMode: detectionMode as ShiftDetectionMode,
     plannedStartTime: readString(value, 'plannedStartTime'),
     plannedEndTime: readString(value, 'plannedEndTime'),
@@ -668,21 +552,14 @@ const parseShift = (
   return normalizeShiftRecord(shift);
 };
 
-const parseEnterpriseScheduleItem = (
-  value: unknown,
-  schemaVersion: number
-): EnterpriseScheduleItem => {
+const parseEnterpriseScheduleItem = (value: unknown): EnterpriseScheduleItem => {
   if (!isRecord(value)) {
     throw new BackupValidationError('Кожен запис графіка має бути обʼєктом.');
   }
 
   const shiftType = value.shiftType;
 
-  if (
-    !isString(shiftType) ||
-    (schemaVersion < SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION &&
-      !SHIFT_TYPES.has(shiftType as ShiftType))
-  ) {
+  if (!SHIFT_TYPES.has(shiftType as ShiftType)) {
     throw new BackupValidationError('enterpriseSchedule.shiftType має несумісне значення.');
   }
 
@@ -690,16 +567,6 @@ const parseEnterpriseScheduleItem = (
     id: readString(value, 'id'),
     date: readString(value, 'date'),
     shiftType: shiftType as ShiftType,
-    templateId:
-      schemaVersion >= SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION &&
-      isString(value.templateId)
-        ? readString(value, 'templateId')
-        : (shiftType as ShiftType),
-    templateNameSnapshot:
-      schemaVersion >= SHIFT_TEMPLATES_BACKUP_SCHEMA_VERSION &&
-      isString(value.templateNameSnapshot)
-        ? readString(value, 'templateNameSnapshot')
-        : getBuiltInShiftTemplate(shiftType as ShiftType)?.name ?? 'Власна зміна',
     plannedStartTime: readString(value, 'plannedStartTime'),
     plannedEndTime: readString(value, 'plannedEndTime'),
     enterpriseStartTime: readString(value, 'enterpriseStartTime'),
@@ -832,9 +699,7 @@ export const parseBackupJson = (source: string): ShifterBackup => {
     shifts: parsed.shifts.map((shift) =>
       parseShift(shift, sourceSchemaVersion, parsed.exportedAt as string)
     ),
-    enterpriseSchedule: parsed.enterpriseSchedule.map((item) =>
-      parseEnterpriseScheduleItem(item, sourceSchemaVersion)
-    )
+    enterpriseSchedule: parsed.enterpriseSchedule.map(parseEnterpriseScheduleItem)
   };
 
   validateDomainInvariants(backup.shifts, backup.enterpriseSchedule);
@@ -880,9 +745,6 @@ export const restoreBackup = async (
     ...backup.settings,
     id: SETTINGS_ID
   };
-  const securityMetaRecords = (
-    await db.appMeta.where('key').startsWith('security-').toArray()
-  );
 
   await db.transaction(
     'rw',
@@ -896,10 +758,6 @@ export const restoreBackup = async (
       await db.enterpriseSchedule.clear();
       await db.appMeta.clear();
       await db.settings.put(settingsRecord);
-
-      if (securityMetaRecords.length > 0) {
-        await db.appMeta.bulkPut(securityMetaRecords);
-      }
 
       if (normalizedShifts.length > 0) {
         await db.shifts.bulkPut(normalizedShifts);

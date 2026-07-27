@@ -9,15 +9,8 @@ import {
   type LucideIcon
 } from 'lucide-react';
 import type { Settings } from '../../../entities/settings';
-import type { LocalDateString, Shift } from '../../../entities/shift';
-import {
-  EnterpriseScheduleRepository,
-  getAllShifts,
-  getEnterpriseScheduleBetween,
-  getShiftsBetween,
-  localDb,
-  ShiftRepository
-} from '../../../shared/lib/local-db';
+import type { LocalDateString, Shift, ShiftType } from '../../../entities/shift';
+import { getShiftsBetween, localDb, ShiftRepository } from '../../../shared/lib/local-db';
 import {
   formatDurationMinutes,
   formatShortMinuteDuration,
@@ -25,9 +18,10 @@ import {
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
-import { calculateAnalyticsSummary } from '../../../shared/lib/shifts/analyticsSummary';
-import { calculateSalaryForecast } from '../../../shared/lib/shifts/salaryForecast';
-import type { EnterpriseScheduleItem } from '../../../entities/enterprise-schedule';
+import {
+  calculateAnalyticsSummary,
+  type ShiftTypeAnalytics
+} from '../../../shared/lib/shifts/analyticsSummary';
 import {
   MonthCalendar,
   type CalendarDateRange,
@@ -52,7 +46,6 @@ type CalendarMonth = {
 };
 
 const shiftRepository = new ShiftRepository(localDb);
-const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
 
 const toLocalDateString = (date: Date): LocalDateString =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
@@ -188,6 +181,26 @@ const getNextSelectedRange = (
   };
 };
 
+const shiftTypeRows: Array<{
+  key: ShiftType;
+  label: string;
+  icon: LucideIcon;
+  getSummary: (summary: ReturnType<typeof calculateAnalyticsSummary>) => ShiftTypeAnalytics;
+}> = [
+  {
+    key: 'first',
+    label: 'Перша зміна',
+    icon: SunMedium,
+    getSummary: (summary) => summary.firstShift
+  },
+  {
+    key: 'second',
+    label: 'Друга зміна',
+    icon: MoonStar,
+    getSummary: (summary) => summary.secondShift
+  }
+];
+
 export function AnalyticsPage({
   settings,
   calendarMonth,
@@ -200,8 +213,6 @@ export function AnalyticsPage({
 }: AnalyticsPageProps) {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [calendarShifts, setCalendarShifts] = useState<Shift[]>([]);
-  const [allShifts, setAllShifts] = useState<Shift[]>([]);
-  const [currentMonthSchedule, setCurrentMonthSchedule] = useState<EnterpriseScheduleItem[]>([]);
   const [now, setNow] = useState(() => toLocalIsoString(new Date()));
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -225,30 +236,13 @@ export function AnalyticsPage({
       const currentDate = new Date();
 
       setNow(toLocalIsoString(currentDate));
-      const currentMonth = getMonthRange(
-        currentDate.getFullYear(),
-        currentDate.getMonth() + 1
-      );
-      const [
-        nextShifts,
-        nextCalendarShifts,
-        nextAllShifts,
-        nextCurrentMonthSchedule
-      ] = await Promise.all([
+      const [nextShifts, nextCalendarShifts] = await Promise.all([
         getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
-        getShiftsBetween(shiftRepository, calendarMonthRange.start, calendarMonthRange.end),
-        getAllShifts(shiftRepository),
-        getEnterpriseScheduleBetween(
-          enterpriseScheduleRepository,
-          currentMonth.start,
-          currentMonth.end
-        )
+        getShiftsBetween(shiftRepository, calendarMonthRange.start, calendarMonthRange.end)
       ]);
 
       setShifts(nextShifts);
       setCalendarShifts(nextCalendarShifts);
-      setAllShifts(nextAllShifts);
-      setCurrentMonthSchedule(nextCurrentMonthSchedule);
     } catch {
       setError('Не вдалося завантажити аналітику.');
     } finally {
@@ -279,16 +273,6 @@ export function AnalyticsPage({
         includeMonthlyBonus: isFullMonthRange(loadedDateRange)
       }),
     [shifts, now, loadedDateRange, settings.monthlyBonus]
-  );
-  const forecast = useMemo(
-    () =>
-      calculateSalaryForecast({
-        shifts: allShifts,
-        enterpriseSchedule: currentMonthSchedule,
-        settings,
-        now
-      }),
-    [allShifts, currentMonthSchedule, settings, now]
   );
   const moveMonth = (direction: -1 | 1) => {
     const next = new Date(calendarMonth.year, calendarMonth.month - 1 + direction, 1);
@@ -338,62 +322,6 @@ export function AnalyticsPage({
         <p className="analytics-page__error" role="alert">
           {error}
         </p>
-      ) : null}
-
-      {!isLoading ? (
-        <section className="analytics-page__panel" aria-labelledby="salary-forecast-title">
-          <header className="analytics-page__panel-header">
-            <div>
-              <p className="analytics-page__eyebrow">Поточний місяць</p>
-              <h3 id="salary-forecast-title">Прогноз зарплати</h3>
-            </div>
-            <Coins aria-hidden="true" size={24} />
-          </header>
-
-          {forecast.eligible ? (
-            <div className="analytics-page__money-grid" aria-label="Прогноз зарплати">
-              <article className="analytics-page__money-card analytics-page__money-card--primary">
-                <span>Очікується за місяць</span>
-                <strong>{formatMoney(forecast.totalAmount ?? 0, settings.incognitoEnabled)}</strong>
-              </article>
-              <article className="analytics-page__money-card">
-                <span>Факт + активна зміна</span>
-                <strong>
-                  {formatMoney(
-                    forecast.earnedThisMonth + forecast.activeShiftAmount,
-                    settings.incognitoEnabled
-                  )}
-                </strong>
-              </article>
-              <article className="analytics-page__money-card">
-                <span>Майбутніх змін</span>
-                <strong>{forecast.futureShiftCount}</strong>
-                <small>
-                  {forecast.futureSource === 'enterprise-schedule'
-                    ? 'за імпортованим графіком'
-                    : 'за робочими днями 5/2'}
-                </small>
-              </article>
-              <article className="analytics-page__money-card">
-                <span>Середнє останніх 31</span>
-                <strong>{formatMoney(forecast.historicalAverage, settings.incognitoEnabled)}</strong>
-              </article>
-            </div>
-          ) : (
-            <div className="analytics-page__forecast-progress">
-              <strong>
-                {Math.min(forecast.completedShiftCount, forecast.requiredShiftCount)}/
-                {forecast.requiredShiftCount} завершених змін
-              </strong>
-              <progress
-                max={forecast.requiredShiftCount}
-                value={Math.min(forecast.completedShiftCount, forecast.requiredShiftCount)}
-                aria-label="Прогрес до прогнозу зарплати"
-              />
-              <p>Прогноз зʼявиться, коли буде достатньо історії для розрахунку.</p>
-            </div>
-          )}
-        </section>
       ) : null}
 
       {isLoading ? (
@@ -570,23 +498,24 @@ export function AnalyticsPage({
             </header>
 
             <div className="analytics-page__shift-types">
-              {summary.byTemplate.map((item, index) => {
-                const ShiftIcon: LucideIcon = index % 2 === 0 ? SunMedium : MoonStar;
+              {shiftTypeRows.map((row) => {
+                const item = row.getSummary(summary);
+                const ShiftIcon = row.icon;
                 const countLabel = formatShiftCountWithLabel(item.shiftCount);
 
                 return (
                   <article
                     className="analytics-page__shift-type"
-                    data-shift-type={item.templateId}
-                    aria-label={`${item.templateName}, ${countLabel}`}
-                    key={item.templateId}
+                    data-shift-type={row.key}
+                    aria-label={`${row.label}, ${countLabel}`}
+                    key={row.key}
                   >
                     <div className="analytics-page__shift-type-header">
                       <div className="analytics-page__shift-type-identity">
                         <span className="analytics-page__shift-type-icon" aria-hidden="true">
                           <ShiftIcon size={18} />
                         </span>
-                        <strong>{item.templateName}</strong>
+                        <strong>{row.label}</strong>
                       </div>
                       <span className="analytics-page__shift-type-count">{countLabel}</span>
                     </div>

@@ -1,11 +1,8 @@
 import {
-  BUILT_IN_SHIFT_TEMPLATES,
-  detectShiftTemplate,
-  getShiftTemplate,
+  detectShiftType,
   getPlannedShiftWindow,
   type LocalDateString,
   type LocalTimeString,
-  type ShiftTemplate,
   type ShiftType
 } from '../../shift';
 
@@ -28,7 +25,6 @@ type RawScheduleBlock = {
 export type ParsedEnterpriseScheduleItem = {
   date: LocalDateString;
   shiftType: ShiftType;
-  templateNameSnapshot: string;
   plannedStartTime: LocalTimeString;
   plannedEndTime: LocalTimeString;
   inTime: LocalTimeString;
@@ -108,11 +104,11 @@ const getDurationMinutes = (startTime: LocalTimeString, endTime: LocalTimeString
   const start = toMinutes(startTime);
   const end = toMinutes(endTime);
 
-  if (start === null || end === null) {
+  if (start === null || end === null || end < start) {
     return null;
   }
 
-  return (end - start + MINUTES_IN_DAY) % MINUTES_IN_DAY;
+  return end - start;
 };
 
 const splitBlocks = (source: string): {
@@ -210,8 +206,7 @@ const splitBlocks = (source: string): {
 };
 
 const parseBlock = (
-  block: RawScheduleBlock,
-  templates: readonly ShiftTemplate[]
+  block: RawScheduleBlock
 ): ParsedEnterpriseScheduleItem | EnterpriseScheduleParseError | null => {
   const fields: Partial<Record<ScheduleField, LocalTimeString | undefined>> = {};
   const presentFields = new Set<ScheduleField>();
@@ -293,26 +288,12 @@ const parseBlock = (
   }
 
   const startDateTime = `${block.date}T${fields.inTime}:00.000`;
-  const shiftType = detectShiftTemplate(startDateTime, templates);
-  const template = getShiftTemplate(templates, shiftType);
-
-  if (!template) {
-    return {
-      line: block.line,
-      message: `Не знайдено активний шаблон для ${block.date}.`,
-      sourceText
-    };
-  }
-
-  const plannedWindow = getPlannedShiftWindow(block.date, shiftType, startDateTime, {
-    startTime: template.startTime,
-    endTime: template.endTime
-  });
+  const shiftType = detectShiftType(startDateTime);
+  const plannedWindow = getPlannedShiftWindow(block.date, shiftType, startDateTime);
 
   return {
     date: block.date,
     shiftType,
-    templateNameSnapshot: template.name,
     plannedStartTime: plannedWindow.startTime,
     plannedEndTime: plannedWindow.endTime,
     inTime: fields.inTime,
@@ -322,10 +303,7 @@ const parseBlock = (
   };
 };
 
-export const parseEnterpriseScheduleText = (
-  source: string,
-  templates: readonly ShiftTemplate[] = BUILT_IN_SHIFT_TEMPLATES
-): EnterpriseScheduleParseResult => {
+export const parseEnterpriseScheduleText = (source: string): EnterpriseScheduleParseResult => {
   const { blocks, errors } = splitBlocks(source);
   const items: ParsedEnterpriseScheduleItem[] = [];
   const seenDates = new Set<LocalDateString>();
@@ -340,7 +318,7 @@ export const parseEnterpriseScheduleText = (
       continue;
     }
 
-    const parsed = parseBlock(block, templates);
+    const parsed = parseBlock(block);
 
     if (parsed === null) {
       seenDates.add(block.date);

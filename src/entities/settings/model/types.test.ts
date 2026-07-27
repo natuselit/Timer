@@ -10,12 +10,10 @@ import {
   WORK_HOURS_PER_DAY
 } from './salary';
 import type { Settings } from './types';
-import { DEFAULT_SETTINGS } from './constants';
 
 describe('settings domain types', () => {
   it('accepts salary, coefficient, detection and incognito settings', () => {
     const settings = {
-      ...DEFAULT_SETTINGS,
       employeeFirstName: 'Тарас',
       employeeLastName: 'Шевченко',
       monthlySalary: 17_600,
