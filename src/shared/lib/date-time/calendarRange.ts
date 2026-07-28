@@ -45,7 +45,7 @@ export const getCalendarPresetSelection = ({
   if (preset === 'month') {
     return {
       calendarMonth,
-      selectedRange: null
+      selectedRange: getCalendarMonthRange(calendarMonth)
     };
   }
 

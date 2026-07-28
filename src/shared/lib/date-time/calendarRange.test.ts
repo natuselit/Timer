@@ -25,7 +25,7 @@ describe('calendar range presets', () => {
     });
   });
 
-  it('keeps the visible month and clears a custom range for the month preset', () => {
+  it('selects and highlights the complete visible month for the month preset', () => {
     expect(
       getCalendarPresetSelection({
         preset: 'month',
@@ -34,7 +34,7 @@ describe('calendar range presets', () => {
       })
     ).toEqual({
       calendarMonth: { year: 2026, month: 5 },
-      selectedRange: null
+      selectedRange: { start: '2026-05-01', end: '2026-05-31' }
     });
   });
 
