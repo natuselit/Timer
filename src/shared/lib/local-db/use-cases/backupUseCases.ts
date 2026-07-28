@@ -27,22 +27,32 @@ import {
 } from '../../../../entities/shift';
 import { toLocalIsoString } from '../../date-time';
 import type { ShifterDatabase } from '../database';
+import {
+  SCHEDULE_WARNING_REVIEW_PREFIX,
+  ScheduleWarningReviewRepository,
+  toScheduleWarningReviewRecord
+} from '../repositories/scheduleWarningReviewRepository';
 import { normalizeSettingsRecord } from '../repositories/settingsRepository';
 import { normalizeShiftRecord } from '../repositories/shiftRepository';
-import type { SettingsRecord } from '../types';
+import type {
+  ReviewedScheduleWarning,
+  SettingsRecord
+} from '../types';
 
 export const LEGACY_BACKUP_SCHEMA_VERSION = 1;
 const GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION = 3;
 const THEME_BACKUP_SCHEMA_VERSION = 4;
 const TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION = 5;
 const MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION = 6;
-export const BACKUP_SCHEMA_VERSION = MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION;
+const REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION = 7;
+export const BACKUP_SCHEMA_VERSION = REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION;
 const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   LEGACY_BACKUP_SCHEMA_VERSION,
   2,
   GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION,
   THEME_BACKUP_SCHEMA_VERSION,
   TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION,
+  MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION,
   BACKUP_SCHEMA_VERSION
 ]);
 
@@ -54,6 +64,7 @@ export type ShifterBackup = {
   settings: Settings;
   shifts: Shift[];
   enterpriseSchedule: EnterpriseScheduleItem[];
+  reviewedScheduleWarnings: ReviewedScheduleWarning[];
 };
 
 export type ParsedBackupImport =
@@ -623,9 +634,40 @@ const parseEnterpriseScheduleItem = (value: unknown): EnterpriseScheduleItem => 
   return item;
 };
 
+const parseReviewedScheduleWarning = (
+  value: unknown
+): ReviewedScheduleWarning => {
+  if (!isRecord(value)) {
+    throw new BackupValidationError(
+      'Кожна позначка переглянутого попередження має бути обʼєктом.'
+    );
+  }
+
+  const review: ReviewedScheduleWarning = {
+    shiftId: readString(value, 'shiftId'),
+    fingerprint: readString(value, 'fingerprint'),
+    reviewedAt: readString(value, 'reviewedAt')
+  };
+
+  if (review.shiftId.trim() === '' || review.fingerprint.trim() === '') {
+    throw new BackupValidationError(
+      'Переглянуте попередження має містити shiftId і fingerprint.'
+    );
+  }
+
+  if (!isIsoLikeDateTime(review.reviewedAt)) {
+    throw new BackupValidationError(
+      'reviewedScheduleWarnings.reviewedAt має бути валідною датою.'
+    );
+  }
+
+  return review;
+};
+
 const validateDomainInvariants = (
   shifts: Shift[],
-  enterpriseSchedule: EnterpriseScheduleItem[]
+  enterpriseSchedule: EnterpriseScheduleItem[],
+  reviewedScheduleWarnings: ReviewedScheduleWarning[] = []
 ): void => {
   const shiftDates = new Set<string>();
   const shiftIds = new Set<string>();
@@ -688,6 +730,24 @@ const validateDomainInvariants = (
 
     scheduleDates.add(item.date);
   }
+
+  const reviewedShiftIds = new Set<string>();
+
+  for (const review of reviewedScheduleWarnings) {
+    if (!shiftIds.has(review.shiftId)) {
+      throw new BackupValidationError(
+        `Переглянуте попередження посилається на відсутню зміну ${review.shiftId}.`
+      );
+    }
+
+    if (reviewedShiftIds.has(review.shiftId)) {
+      throw new BackupValidationError(
+        `Backup містить дві позначки попередження для зміни ${review.shiftId}.`
+      );
+    }
+
+    reviewedShiftIds.add(review.shiftId);
+  }
 };
 
 export const parseBackupJson = (source: string): ShifterBackup => {
@@ -713,6 +773,15 @@ export const parseBackupJson = (source: string): ShifterBackup => {
     throw new BackupValidationError('enterpriseSchedule має бути масивом.');
   }
 
+  if (
+    sourceSchemaVersion >= REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION &&
+    !Array.isArray(parsed.reviewedScheduleWarnings)
+  ) {
+    throw new BackupValidationError(
+      'reviewedScheduleWarnings має бути масивом.'
+    );
+  }
+
   const backup: ShifterBackup = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: parsed.exportedAt,
@@ -720,10 +789,20 @@ export const parseBackupJson = (source: string): ShifterBackup => {
     shifts: parsed.shifts.map((shift) =>
       parseShift(shift, sourceSchemaVersion, parsed.exportedAt as string)
     ),
-    enterpriseSchedule: parsed.enterpriseSchedule.map(parseEnterpriseScheduleItem)
+    enterpriseSchedule: parsed.enterpriseSchedule.map(parseEnterpriseScheduleItem),
+    reviewedScheduleWarnings:
+      sourceSchemaVersion >= REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION
+        ? (parsed.reviewedScheduleWarnings as unknown[]).map(
+            parseReviewedScheduleWarning
+          )
+        : []
   };
 
-  validateDomainInvariants(backup.shifts, backup.enterpriseSchedule);
+  validateDomainInvariants(
+    backup.shifts,
+    backup.enterpriseSchedule,
+    backup.reviewedScheduleWarnings
+  );
 
   return backup;
 };
@@ -880,11 +959,14 @@ export const createBackup = async (
   db: ShifterDatabase,
   exportedAt = new Date().toISOString()
 ): Promise<ShifterBackup> => {
-  const [settingsRecord, shifts, enterpriseSchedule] = await Promise.all([
-    db.settings.get(SETTINGS_ID),
-    db.shifts.toArray(),
-    db.enterpriseSchedule.toArray()
-  ]);
+  const reviewRepository = new ScheduleWarningReviewRepository(db);
+  const [settingsRecord, shifts, enterpriseSchedule, reviewedScheduleWarnings] =
+    await Promise.all([
+      db.settings.get(SETTINGS_ID),
+      db.shifts.toArray(),
+      db.enterpriseSchedule.toArray(),
+      reviewRepository.getAll()
+    ]);
 
   const settings = settingsRecord
     ? normalizeSettingsRecord(settingsRecord, new Date(exportedAt))
@@ -895,12 +977,20 @@ export const createBackup = async (
     exportedAt,
     settings,
     shifts: shifts.map(normalizeShiftRecord),
-    enterpriseSchedule
+    enterpriseSchedule,
+    reviewedScheduleWarnings
   };
 };
 
 export const serializeBackup = (backup: ShifterBackup): string =>
-  `${JSON.stringify(backup, null, 2)}\n`;
+  `${JSON.stringify(
+    {
+      ...backup,
+      reviewedScheduleWarnings: backup.reviewedScheduleWarnings
+    },
+    null,
+    2
+  )}\n`;
 
 export const restoreBackup = async (
   db: ShifterDatabase,
@@ -908,7 +998,11 @@ export const restoreBackup = async (
 ): Promise<Settings> => {
   const normalizedShifts = backup.shifts.map(normalizeShiftRecord);
 
-  validateDomainInvariants(normalizedShifts, backup.enterpriseSchedule);
+  validateDomainInvariants(
+    normalizedShifts,
+    backup.enterpriseSchedule,
+    backup.reviewedScheduleWarnings
+  );
 
   const settingsRecord: SettingsRecord = {
     ...backup.settings,
@@ -935,6 +1029,12 @@ export const restoreBackup = async (
       if (backup.enterpriseSchedule.length > 0) {
         await db.enterpriseSchedule.bulkPut(backup.enterpriseSchedule);
       }
+
+      if (backup.reviewedScheduleWarnings.length > 0) {
+        await db.appMeta.bulkPut(
+          backup.reviewedScheduleWarnings.map(toScheduleWarningReviewRecord)
+        );
+      }
     }
   );
 
@@ -949,8 +1049,12 @@ export const replaceShiftsFromLegacyBackup = async (
 
   validateDomainInvariants(normalizedShifts, []);
 
-  await db.transaction('rw', db.shifts, async () => {
+  await db.transaction('rw', db.shifts, db.appMeta, async () => {
     await db.shifts.clear();
+    await db.appMeta
+      .where('key')
+      .startsWith(SCHEDULE_WARNING_REVIEW_PREFIX)
+      .delete();
 
     if (normalizedShifts.length > 0) {
       await db.shifts.bulkPut(normalizedShifts);

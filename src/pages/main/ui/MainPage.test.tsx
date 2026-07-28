@@ -84,8 +84,12 @@ describe('MainPage active shift', () => {
       />
     );
 
-    expect(await screen.findByText('Коефіцієнт зараз')).toBeTruthy();
-    expect(screen.getByText('x2')).toBeTruthy();
+    expect(await screen.findByLabelText('Поточний коефіцієнт: x2')).toBeTruthy();
+    expect(screen.queryByText('Коефіцієнт зараз')).toBeNull();
+    expect(screen.queryByText('Потрібно для G1')).toBeNull();
+    expect(screen.queryByText(/Додайте або відніміть/)).toBeNull();
+    expect(screen.getByLabelText('Редагувати активний тікет')).toBeTruthy();
+    expect(screen.getByLabelText('Видалити активний тікет')).toBeTruthy();
     expect(screen.getByLabelText('Загальний простій: 0:05')).toBeTruthy();
 
     const downtimeAdjustment = screen.getByLabelText(
@@ -99,5 +103,19 @@ describe('MainPage active shift', () => {
     expect(downtimeAdjustment.pattern).toBe('[+-]?[0-9]*');
     expect(actualQuantity.inputMode).toBe('numeric');
     expect(actualQuantity.pattern).toBe('[0-9]*');
+  });
+
+  it('masks the compact coefficient badge in incognito mode', async () => {
+    render(
+      <MainPage
+        settings={{ ...settings, incognitoEnabled: true }}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByLabelText('Поточний коефіцієнт: ••••')).toBeTruthy();
+    expect(screen.queryByLabelText('Поточний коефіцієнт: x2')).toBeNull();
   });
 });

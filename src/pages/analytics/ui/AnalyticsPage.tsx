@@ -11,12 +11,7 @@ import {
 import type { Settings } from '../../../entities/settings';
 import type { LocalDateString, Shift, ShiftType } from '../../../entities/shift';
 import { getShiftsBetween, localDb, ShiftRepository } from '../../../shared/lib/local-db';
-import {
-  formatDurationMinutes,
-  formatShortMinuteDuration,
-  formatShortNumericDate,
-  toLocalIsoString
-} from '../../../shared/lib/date-time';
+import { formatDurationMinutes, toLocalIsoString } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import {
   calculateAnalyticsSummary,
@@ -100,25 +95,6 @@ const getShiftCountLabel = (value: number): string => {
 
 const formatShiftCountWithLabel = (value: number): string => `${value} ${getShiftCountLabel(value)}`;
 
-const getDayCountLabel = (value: number): string => {
-  const lastTwoDigits = value % 100;
-  const lastDigit = value % 10;
-
-  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) {
-    return 'днів';
-  }
-
-  if (lastDigit === 1) {
-    return 'день';
-  }
-
-  if (lastDigit >= 2 && lastDigit <= 4) {
-    return 'дні';
-  }
-
-  return 'днів';
-};
-
 const formatPercent = (value: number | null): string =>
   value === null ? '—' : `${Math.round(value)}%`;
 
@@ -129,33 +105,6 @@ const formatDecimal = (value: number | null, suffix = ''): string =>
         minimumFractionDigits: 1,
         maximumFractionDigits: 1
       })}${suffix}`;
-
-const getDeviationFacts = ({
-  lateArrivalMinutes,
-  earlyExitMinutes
-}: {
-  lateArrivalMinutes: number;
-  earlyExitMinutes: number;
-}): Array<{ key: 'late' | 'early'; label: string; value: string }> => [
-  ...(lateArrivalMinutes > 0
-    ? [
-        {
-          key: 'late' as const,
-          label: 'Запізнення',
-          value: formatShortMinuteDuration(lateArrivalMinutes)
-        }
-      ]
-    : []),
-  ...(earlyExitMinutes > 0
-    ? [
-        {
-          key: 'early' as const,
-          label: 'Ранній вихід',
-          value: formatShortMinuteDuration(earlyExitMinutes)
-        }
-      ]
-    : [])
-];
 
 const getNextSelectedRange = (
   current: CalendarDateRange | null,
@@ -383,7 +332,7 @@ export function AnalyticsPage({
             </header>
 
             <dl className="analytics-page__detail-list" aria-label="Показники часу">
-              <div className="analytics-page__detail-item--featured">
+              <div className="analytics-page__detail-item--featured analytics-page__detail-item--time-total">
                 <dt>Загалом</dt>
                 <dd>{formatDurationMinutes(summary.totalMinutes)}</dd>
               </div>
@@ -410,7 +359,7 @@ export function AnalyticsPage({
                 <h4>По коефіцієнтах</h4>
                 <dl>
                   {visibleCoefficientBreakdown.map((item) => (
-                    <div key={item.coefficient}>
+                    <div data-coefficient={item.coefficient} key={item.coefficient}>
                       <dt>x{item.coefficient}</dt>
                       <dd>
                         <span>{formatDurationMinutes(item.minutes)}</span>
@@ -539,77 +488,6 @@ export function AnalyticsPage({
                 );
               })}
             </div>
-          </section>
-
-          <section
-            className="analytics-page__panel analytics-page__deviations"
-            aria-labelledby="analytics-deviations-title"
-          >
-            <header className="analytics-page__deviation-header">
-              <div className="analytics-page__deviation-title-row">
-                <span className="analytics-page__deviation-icon" aria-hidden="true">
-                  <AlertTriangle size={20} />
-                </span>
-                <div>
-                  <p className="analytics-page__eyebrow">Контроль графіка</p>
-                  <h3 id="analytics-deviations-title">Відхилення</h3>
-                </div>
-                <strong className="analytics-page__deviation-count">
-                  {summary.deviations.length} {getDayCountLabel(summary.deviations.length)}
-                </strong>
-              </div>
-
-              <div className="analytics-page__deviation-totals" aria-label="Підсумок відхилень">
-                <article data-tone="success">
-                  <span>Без відхилень</span>
-                  <strong>
-                    {summary.onScheduleShiftCount}/{summary.shiftCount} ·{' '}
-                    {formatPercent(summary.scheduleAdherencePercent)}
-                  </strong>
-                </article>
-                <article data-tone="late">
-                  <span>Запізнення</span>
-                  <strong>{formatShortMinuteDuration(summary.lateArrivalMinutes)}</strong>
-                  <small>
-                    Сер. {formatShortMinuteDuration(Math.round(summary.averageLateArrivalMinutes))}
-                  </small>
-                </article>
-                <article data-tone="early">
-                  <span>Ранній вихід</span>
-                  <strong>{formatShortMinuteDuration(summary.earlyExitMinutes)}</strong>
-                  <small>
-                    Сер. {formatShortMinuteDuration(Math.round(summary.averageEarlyExitMinutes))}
-                  </small>
-                </article>
-              </div>
-            </header>
-
-            {summary.deviations.length > 0 ? (
-              <div className="analytics-page__deviation-list">
-                {summary.deviations.map((item) => {
-                  const facts = getDeviationFacts(item);
-
-                  return (
-                    <article className="analytics-page__deviation" key={item.date}>
-                      <time dateTime={item.date}>{formatShortNumericDate(item.date)}</time>
-                      <div className="analytics-page__deviation-facts">
-                        {facts.map((fact) => (
-                          <span
-                            className="analytics-page__deviation-fact"
-                            data-tone={fact.key}
-                            aria-label={`${fact.label}: ${fact.value}`}
-                            key={fact.key}
-                          >
-                            <small>{fact.label}</small>
-                            <strong>{fact.value}</strong>
-                          </span>
-                        ))}
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : null}
           </section>
 
           {settings.incognitoEnabled ? (

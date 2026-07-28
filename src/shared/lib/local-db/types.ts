@@ -12,10 +12,15 @@ export type AppMetaRecord = {
   updatedAt: string;
 };
 
+export type ReviewedScheduleWarning = {
+  shiftId: string;
+  fingerprint: string;
+  reviewedAt: string;
+};
+
 export type LocalDatabaseSchema = {
   settings: SettingsRecord;
   shifts: Shift;
   enterpriseSchedule: EnterpriseScheduleItem;
   appMeta: AppMetaRecord;
 };
-

@@ -169,6 +169,10 @@
   background: linear-gradient(135deg, var(--color-primary-surface), var(--color-primary-soft));
 }
 
+.analytics-page__detail-list .analytics-page__detail-item--time-total {
+  min-height: 50px;
+}
+
 .analytics-page__detail-list .analytics-page__detail-item--featured dt {
   font-size: 0.82rem;
   font-weight: 700;
@@ -246,6 +250,18 @@
   background: var(--color-primary-soft);
   color: var(--color-primary);
   font-weight: 850;
+}
+
+.analytics-page__coefficient-section [data-coefficient='1.5'] dt {
+  border: 1px solid var(--color-warning-border);
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
+}
+
+.analytics-page__coefficient-section [data-coefficient='2'] dt {
+  border: 1px solid var(--color-error-border);
+  background: var(--color-error-surface);
+  color: var(--color-error);
 }
 
 .analytics-page__coefficient-section dd {

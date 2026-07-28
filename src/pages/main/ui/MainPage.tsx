@@ -854,10 +854,25 @@ export function MainPage({
             aria-labelledby="timer-title"
           >
             <div className="main-page__timer-heading">
-              <p className="main-page__status main-page__status--active">
-                <span aria-hidden="true" />
-                Зміна активна
-              </p>
+              <div className="main-page__status-row">
+                <p className="main-page__status main-page__status--active">
+                  <span aria-hidden="true" />
+                  Зміна активна
+                </p>
+                <span
+                  className="main-page__coefficient-badge"
+                  data-coefficient={settings.incognitoEnabled ? 'masked' : currentCoefficient}
+                  aria-label={`Поточний коефіцієнт: ${
+                    settings.incognitoEnabled
+                      ? INCOGNITO_FINANCIAL_MASK
+                      : `x${currentCoefficient}`
+                  }`}
+                >
+                  {settings.incognitoEnabled
+                    ? INCOGNITO_FINANCIAL_MASK
+                    : `x${currentCoefficient}`}
+                </span>
+              </div>
               <div className="main-page__timer-title-row">
                 <h2 id="timer-title">{getShiftTitle(activeShift)}</h2>
                 <p className="main-page__timer-subtitle">
@@ -891,14 +906,6 @@ export function MainPage({
                     : 'Без snapshot'}
                 </strong>
               </article>
-              <article className="main-page__metric main-page__metric--coefficient">
-                <span>Коефіцієнт зараз</span>
-                <strong>
-                  {settings.incognitoEnabled
-                    ? INCOGNITO_FINANCIAL_MASK
-                    : `x${currentCoefficient}`}
-                </strong>
-              </article>
             </div>
 
             {timerError ? (
@@ -914,7 +921,31 @@ export function MainPage({
                       <p className="main-page__label">Виробіток</p>
                       <h3 id="active-ticket-title">Тікет зміни</h3>
                     </div>
-                    <span>{activeShift.workTickets.length} тік.</span>
+                    <div className="main-page__tasker-header-tools">
+                      <span>{activeShift.workTickets.length} тік.</span>
+                      {activeWorkTicket ? (
+                        <div className="main-page__ticket-actions" aria-label="Дії з активним тікетом">
+                          <button
+                            type="button"
+                            title="Редагувати тікет"
+                            aria-label="Редагувати активний тікет"
+                            disabled={pendingTicketId !== null}
+                            onClick={() => startTicketEdit(activeWorkTicket)}
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Видалити тікет"
+                            aria-label="Видалити активний тікет"
+                            disabled={pendingTicketId !== null}
+                            onClick={() => void removeTicket(activeWorkTicket)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
 
                   {!activeWorkTicket ? <div className="main-page__ticket-form">
@@ -941,37 +972,6 @@ export function MainPage({
 
                   {activeWorkTicket && activeTicketTargets ? (
                     <div className="main-page__ticket-current">
-                      <div className="main-page__ticket-current-card main-page__ticket-current-card--wide">
-                        <div className="main-page__ticket-current-main">
-                          <div>
-                            <span>Потрібно для G{activeTicketTargets.currentGrade}</span>
-                            <small>
-                              Продуктивно {formatDurationMinutes(activeTicketTargets.productiveMinutes)}
-                            </small>
-                          </div>
-                          <strong>{activeTicketTargets.currentTarget} шт</strong>
-                        </div>
-                        <div className="main-page__ticket-actions" aria-label="Дії з активним тікетом">
-                          <button
-                            type="button"
-                            title="Редагувати тікет"
-                            aria-label="Редагувати активний тікет"
-                            disabled={pendingTicketId !== null}
-                            onClick={() => startTicketEdit(activeWorkTicket)}
-                          >
-                            <Edit3 size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            title="Видалити тікет"
-                            aria-label="Видалити активний тікет"
-                            disabled={pendingTicketId !== null}
-                            onClick={() => void removeTicket(activeWorkTicket)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
                       {editingTicketId === activeWorkTicket.id ? (
                         <div className="main-page__ticket-edit-form">
                           <div className="main-page__ticket-edit-header">
@@ -1070,10 +1070,7 @@ export function MainPage({
                       </div>
                       <div className="main-page__ticket-downtime">
                         <div className="main-page__ticket-downtime-header">
-                          <div>
-                            <span>Облік часу</span>
-                            <strong>Простій</strong>
-                          </div>
+                          <strong>Простій</strong>
                           <output
                             aria-label={`Загальний простій: ${formatDurationMinutes(
                               activeTicketTargets.downtimeMinutes
@@ -1082,7 +1079,6 @@ export function MainPage({
                             {formatDurationMinutes(activeTicketTargets.downtimeMinutes)}
                           </output>
                         </div>
-                        <p>Додайте або відніміть цілу кількість хвилин.</p>
                         <div className="main-page__ticket-downtime-control">
                           <label>
                             <span>Коригування, хв</span>

@@ -9,6 +9,7 @@ import {
 import type { Shift } from '../../../entities/shift';
 import { ShifterDatabase } from './database';
 import { EnterpriseScheduleRepository } from './repositories/enterpriseScheduleRepository';
+import { ScheduleWarningReviewRepository } from './repositories/scheduleWarningReviewRepository';
 import { normalizeSettingsRecord, SettingsRepository } from './repositories/settingsRepository';
 import { ShiftConstraintError, ShiftRepository } from './repositories/shiftRepository';
 import {
@@ -49,6 +50,7 @@ let db: ShifterDatabase;
 let settingsRepository: SettingsRepository;
 let shiftRepository: ShiftRepository;
 let enterpriseScheduleRepository: EnterpriseScheduleRepository;
+let scheduleWarningReviewRepository: ScheduleWarningReviewRepository;
 
 const makeDbName = (): string => `shifter-test-${crypto.randomUUID()}`;
 
@@ -115,6 +117,7 @@ beforeEach(() => {
   settingsRepository = new SettingsRepository(db);
   shiftRepository = new ShiftRepository(db);
   enterpriseScheduleRepository = new EnterpriseScheduleRepository(db);
+  scheduleWarningReviewRepository = new ScheduleWarningReviewRepository(db);
 });
 
 afterEach(async () => {
@@ -1370,6 +1373,38 @@ describe('local data date bounds', () => {
   });
 });
 
+describe('schedule warning review repository', () => {
+  it('marks, reads, replaces and clears reviewed warnings', async () => {
+    const firstReview = {
+      shiftId: 'shift-1',
+      fingerprint: 'first-fingerprint',
+      reviewedAt: '2026-06-24T12:00:00.000Z'
+    };
+    const updatedReview = {
+      ...firstReview,
+      fingerprint: 'updated-fingerprint',
+      reviewedAt: '2026-06-24T12:30:00.000Z'
+    };
+
+    await scheduleWarningReviewRepository.markReviewed(firstReview);
+    await expect(
+      scheduleWarningReviewRepository.getByShiftIds(['shift-1', 'missing'])
+    ).resolves.toEqual([firstReview]);
+
+    await scheduleWarningReviewRepository.markReviewed(updatedReview);
+    await expect(scheduleWarningReviewRepository.getAll()).resolves.toEqual([
+      updatedReview
+    ]);
+
+    await scheduleWarningReviewRepository.deleteByShiftId('shift-1');
+    await expect(scheduleWarningReviewRepository.getAll()).resolves.toEqual([]);
+
+    await scheduleWarningReviewRepository.markReviewed(firstReview);
+    await scheduleWarningReviewRepository.clearAll();
+    await expect(scheduleWarningReviewRepository.getAll()).resolves.toEqual([]);
+  });
+});
+
 describe('backup use-cases', () => {
   it('creates and parses a valid backup', async () => {
     const settings = makeSettings({
@@ -1386,6 +1421,11 @@ describe('backup use-cases', () => {
     await settingsRepository.saveSettings(settings);
     await shiftRepository.createShift(shift);
     await enterpriseScheduleRepository.importItems([scheduleItem]);
+    await scheduleWarningReviewRepository.markReviewed({
+      shiftId: shift.id,
+      fingerprint: 'backup-fingerprint',
+      reviewedAt: '2026-06-24T11:00:00.000Z'
+    });
 
     const backup = await createBackup(db, '2026-06-24T12:00:00.000Z');
     const parsed = parseBackupJson(serializeBackup(backup));
@@ -1395,11 +1435,18 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings,
       shifts: [shift],
-      enterpriseSchedule: [scheduleItem]
+      enterpriseSchedule: [scheduleItem],
+      reviewedScheduleWarnings: [
+        {
+          shiftId: shift.id,
+          fingerprint: 'backup-fingerprint',
+          reviewedAt: '2026-06-24T11:00:00.000Z'
+        }
+      ]
     });
   });
 
-  it('round-trips schema v6 ticket fact and downtime data', () => {
+  it('round-trips schema v7 ticket fact, downtime and reviewed warnings', () => {
     const shift = makeShift({
       id: 'production-backup-shift',
       endTime: '2026-06-10T14:30:00.000Z',
@@ -1421,10 +1468,26 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: makeSettings(),
       shifts: [shift],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: [
+        {
+          shiftId: shift.id,
+          fingerprint: 'round-trip-fingerprint',
+          reviewedAt: '2026-06-24T11:00:00.000Z'
+        }
+      ]
     });
 
-    expect(parseBackupJson(source).shifts[0]).toEqual(shift);
+    expect(parseBackupJson(source)).toMatchObject({
+      shifts: [shift],
+      reviewedScheduleWarnings: [
+        {
+          shiftId: shift.id,
+          fingerprint: 'round-trip-fingerprint',
+          reviewedAt: '2026-06-24T11:00:00.000Z'
+        }
+      ]
+    });
   });
 
   it('converts an open downtime interval while importing schema v5', () => {
@@ -1462,10 +1525,12 @@ describe('backup use-cases', () => {
       enterpriseSchedule: []
     });
 
-    const parsedTicket = parseBackupJson(source).shifts[0].workTickets[0];
+    const parsed = parseBackupJson(source);
+    const parsedTicket = parsed.shifts[0].workTickets[0];
 
     expect(parsedTicket.downtimeMinutes).toBe(65);
     expect(parsedTicket).not.toHaveProperty('downtimeIntervals');
+    expect(parsed.reviewedScheduleWarnings).toEqual([]);
   });
 
   it('parses older backups without employee first name', () => {
@@ -1474,7 +1539,8 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: makeSettings(),
       shifts: [],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     }).replace('  "employeeFirstName": "Олег",\n', '');
 
     const parsed = parseBackupJson(source);
@@ -1515,6 +1581,7 @@ describe('backup use-cases', () => {
     expect(parsed.settings.monthlySalary).toBe(17_600);
     expect(parsed.settings.themePreference).toBe('system');
     expect(parsed.shifts[0].hourlyRateSnapshot).toBe(120);
+    expect(parsed.reviewedScheduleWarnings).toEqual([]);
   });
 
   it('migrates schema v2 backup to default grades and empty shift tickets', () => {
@@ -1570,6 +1637,7 @@ describe('backup use-cases', () => {
       gradeSnapshot: null,
       workTickets: []
     });
+    expect(parsed.reviewedScheduleWarnings).toEqual([]);
   });
 
   it('migrates schema v3 theme to system and keeps grade and ticket data', () => {
@@ -1605,6 +1673,87 @@ describe('backup use-cases', () => {
       gradeSnapshot: legacyShift.gradeSnapshot,
       workTickets: []
     });
+    expect(parsed.reviewedScheduleWarnings).toEqual([]);
+  });
+
+  it.each([4, 6])(
+    'imports schema v%s without reviewed warnings as an empty review list',
+    (schemaVersion) => {
+      const source = JSON.stringify({
+        schemaVersion,
+        exportedAt: '2026-06-24T12:00:00.000Z',
+        settings: makeSettings(),
+        shifts: [],
+        enterpriseSchedule: []
+      });
+
+      expect(parseBackupJson(source).reviewedScheduleWarnings).toEqual([]);
+    }
+  );
+
+  it('rejects missing, invalid, duplicate and orphaned schema v7 warning reviews', () => {
+    const shift = makeShift({
+      id: 'reviewed-shift',
+      endTime: '2026-06-10T14:30:00.000Z'
+    });
+    const baseBackup = {
+      schemaVersion: BACKUP_SCHEMA_VERSION,
+      exportedAt: '2026-06-24T12:00:00.000Z',
+      settings: makeSettings(),
+      shifts: [shift],
+      enterpriseSchedule: []
+    };
+
+    expect(() => parseBackupJson(JSON.stringify(baseBackup))).toThrow(
+      'reviewedScheduleWarnings має бути масивом.'
+    );
+    expect(() =>
+      parseBackupJson(
+        JSON.stringify({
+          ...baseBackup,
+          reviewedScheduleWarnings: [
+            {
+              shiftId: shift.id,
+              fingerprint: '',
+              reviewedAt: '2026-06-24T11:00:00.000Z'
+            }
+          ]
+        })
+      )
+    ).toThrow(BackupValidationError);
+    expect(() =>
+      parseBackupJson(
+        JSON.stringify({
+          ...baseBackup,
+          reviewedScheduleWarnings: [
+            {
+              shiftId: shift.id,
+              fingerprint: 'same',
+              reviewedAt: '2026-06-24T11:00:00.000Z'
+            },
+            {
+              shiftId: shift.id,
+              fingerprint: 'same',
+              reviewedAt: '2026-06-24T11:01:00.000Z'
+            }
+          ]
+        })
+      )
+    ).toThrow(`дві позначки попередження для зміни ${shift.id}`);
+    expect(() =>
+      parseBackupJson(
+        JSON.stringify({
+          ...baseBackup,
+          reviewedScheduleWarnings: [
+            {
+              shiftId: 'missing-shift',
+              fingerprint: 'orphan',
+              reviewedAt: '2026-06-24T11:00:00.000Z'
+            }
+          ]
+        })
+      )
+    ).toThrow('посилається на відсутню зміну missing-shift');
   });
 
   it('rejects an invalid backup and keeps current data untouched', async () => {
@@ -1625,7 +1774,8 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: makeSettings(),
       shifts: [],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     }).replace(`"schemaVersion": ${BACKUP_SCHEMA_VERSION}`, '"schemaVersion": 999');
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1638,7 +1788,8 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: makeSettings({ monthlySalary: -1 }),
       shifts: [],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     });
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1651,7 +1802,8 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: makeSettings(),
       shifts: [],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     }).replace('"themePreference": "system"', '"themePreference": "contrast"');
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1668,7 +1820,8 @@ describe('backup use-cases', () => {
         gradeSalaryBonusPercents: [10, -1, 10, 10]
       }),
       shifts: [],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     });
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1697,7 +1850,8 @@ describe('backup use-cases', () => {
           ]
         })
       ],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     });
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1730,7 +1884,8 @@ describe('backup use-cases', () => {
           ]
         })
       ],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     });
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1742,7 +1897,8 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: makeSettings(),
       shifts: [],
-      enterpriseSchedule: [makeScheduleItem({ date: '2026-02-30' })]
+      enterpriseSchedule: [makeScheduleItem({ date: '2026-02-30' })],
+      reviewedScheduleWarnings: []
     });
     const reversedShiftSource = serializeBackup({
       schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -1754,7 +1910,8 @@ describe('backup use-cases', () => {
           endTime: '2026-06-10T06:30:00.000Z'
         })
       ],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     });
 
     expect(() => parseBackupJson(invalidDateSource)).toThrow('невалідні дату або час');
@@ -1777,7 +1934,8 @@ describe('backup use-cases', () => {
           endTime: '2026-06-11T14:30:00.000Z'
         })
       ],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
     });
 
     expect(() => parseBackupJson(source)).toThrow('Backup містить дубль ID зміни duplicate-id.');
@@ -1829,7 +1987,14 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: restoredSettings,
       shifts: [restoredShift],
-      enterpriseSchedule: [restoredScheduleItem]
+      enterpriseSchedule: [restoredScheduleItem],
+      reviewedScheduleWarnings: [
+        {
+          shiftId: restoredShift.id,
+          fingerprint: 'restored-fingerprint',
+          reviewedAt: '2026-06-24T11:00:00.000Z'
+        }
+      ]
     });
 
     await expect(settingsRepository.getSettings()).resolves.toEqual(restoredSettings);
@@ -1837,7 +2002,13 @@ describe('backup use-cases', () => {
     await expect(getEnterpriseScheduleByMonth(enterpriseScheduleRepository, 2026, 6)).resolves.toEqual([
       restoredScheduleItem
     ]);
-    await expect(db.appMeta.toArray()).resolves.toEqual([]);
+    await expect(scheduleWarningReviewRepository.getAll()).resolves.toEqual([
+      {
+        shiftId: restoredShift.id,
+        fingerprint: 'restored-fingerprint',
+        reviewedAt: '2026-06-24T11:00:00.000Z'
+      }
+    ]);
 
     await expect(
       restoreBackup(db, {
@@ -1861,12 +2032,14 @@ describe('backup use-cases', () => {
             plannedEndTime: '22:30'
           })
         ],
-        enterpriseSchedule: []
+        enterpriseSchedule: [],
+        reviewedScheduleWarnings: []
       })
     ).rejects.toThrow();
 
     await expect(settingsRepository.getSettings()).resolves.toEqual(restoredSettings);
     await expect(getShiftsByMonth(shiftRepository, 2026, 6)).resolves.toEqual([restoredShift]);
+    await expect(scheduleWarningReviewRepository.getAll()).resolves.toHaveLength(1);
   });
 
   it('rejects direct restore with more than one active shift before replacing data', async () => {
@@ -1897,7 +2070,8 @@ describe('backup use-cases', () => {
             plannedEndTime: '22:30'
           })
         ],
-        enterpriseSchedule: []
+        enterpriseSchedule: [],
+        reviewedScheduleWarnings: []
       })
     ).rejects.toThrow('Backup містить більше однієї активної зміни.');
 
@@ -2003,6 +2177,11 @@ describe('backup use-cases', () => {
       key: 'keep-me',
       value: 'true',
       updatedAt: '2026-07-27T12:00:00.000Z'
+    });
+    await scheduleWarningReviewRepository.markReviewed({
+      shiftId: currentShift.id,
+      fingerprint: 'stale-review',
+      reviewedAt: '2026-07-27T12:00:00.000Z'
     });
 
     await replaceShiftsFromLegacyBackup(db, [importedShift]);

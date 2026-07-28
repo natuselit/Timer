@@ -12,6 +12,7 @@ import {
   calculateGradeMonthlyBonus,
   calculateMonthlySalaryFromHourlyRate
 } from '../../../entities/settings';
+import { calculateScheduleControlSummary } from './scheduleControl';
 
 export type ShiftTypeAnalytics = {
   shiftCount: number;
@@ -121,13 +122,14 @@ export const calculateAnalyticsSummary = ({
   const normalizedPeriodStart = periodStart <= periodEnd ? periodStart : periodEnd;
   const normalizedPeriodEnd = periodStart <= periodEnd ? periodEnd : periodStart;
 
-  const completedShifts = shifts
-    .filter(
-      (shift) =>
-        shift.date >= normalizedPeriodStart &&
-        shift.date <= normalizedPeriodEnd &&
-        shift.date <= today
-    )
+  const periodShifts = shifts.filter(
+    (shift) =>
+      shift.date >= normalizedPeriodStart &&
+      shift.date <= normalizedPeriodEnd &&
+      shift.date <= today
+  );
+  const scheduleControl = calculateScheduleControlSummary(periodShifts);
+  const completedShifts = periodShifts
     .map((shift) => ({
       ...shift,
       endTime: shift.endTime ?? now
@@ -141,13 +143,7 @@ export const calculateAnalyticsSummary = ({
   let overtimeMinutes = 0;
   let overtimeIncome = 0;
   let maxOvertimeMinutes = 0;
-  let lateArrivalMinutes = 0;
-  let earlyExitMinutes = 0;
-  let lateArrivalShiftCount = 0;
-  let earlyExitShiftCount = 0;
-  let onScheduleShiftCount = 0;
   const coefficientBreakdown = new Map<number, { coefficient: number; minutes: number; amount: number }>();
-  const deviations: AnalyticsSummary['deviations'] = [];
   const production: AnalyticsSummary['production'] = {
     ticketCount: 0,
     filledTicketCount: 0,
@@ -175,21 +171,6 @@ export const calculateAnalyticsSummary = ({
     overtimeMinutes += time.totalOvertimeMinutes;
     overtimeIncome += calculateOvertimeIncome(shift, time.totalOvertimeMinutes);
     maxOvertimeMinutes = Math.max(maxOvertimeMinutes, time.totalOvertimeMinutes);
-    lateArrivalMinutes += time.lateArrivalMinutes;
-    earlyExitMinutes += time.earlyExitMinutes;
-
-    if (time.lateArrivalMinutes > 0) {
-      lateArrivalShiftCount += 1;
-    }
-
-    if (time.earlyExitMinutes > 0) {
-      earlyExitShiftCount += 1;
-    }
-
-    if (time.lateArrivalMinutes === 0 && time.earlyExitMinutes === 0) {
-      onScheduleShiftCount += 1;
-    }
-
     salary.lines.forEach((line) => {
       if (line.minutes <= 0) {
         return;
@@ -205,14 +186,6 @@ export const calculateAnalyticsSummary = ({
       current.amount += line.amount;
       coefficientBreakdown.set(line.coefficient, current);
     });
-
-    if (time.lateArrivalMinutes > 0 || time.earlyExitMinutes > 0) {
-      deviations.push({
-        date: shift.date,
-        lateArrivalMinutes: time.lateArrivalMinutes,
-        earlyExitMinutes: time.earlyExitMinutes
-      });
-    }
 
     typeSummary.shiftCount += 1;
     typeSummary.salaryAmount += salary.totalAmount;
@@ -309,21 +282,22 @@ export const calculateAnalyticsSummary = ({
     averageOvertimeMinutes:
       completedShifts.length > 0 ? overtimeMinutes / completedShifts.length : 0,
     maxOvertimeMinutes,
-    lateArrivalMinutes,
-    earlyExitMinutes,
-    lateArrivalShiftCount,
-    earlyExitShiftCount,
-    onScheduleShiftCount,
-    averageLateArrivalMinutes:
-      lateArrivalShiftCount > 0 ? lateArrivalMinutes / lateArrivalShiftCount : 0,
-    averageEarlyExitMinutes:
-      earlyExitShiftCount > 0 ? earlyExitMinutes / earlyExitShiftCount : 0,
-    scheduleAdherencePercent:
-      shiftCount > 0 ? (onScheduleShiftCount / shiftCount) * 100 : null,
+    lateArrivalMinutes: scheduleControl.lateArrivalMinutes,
+    earlyExitMinutes: scheduleControl.earlyExitMinutes,
+    lateArrivalShiftCount: scheduleControl.lateArrivalShiftCount,
+    earlyExitShiftCount: scheduleControl.earlyExitShiftCount,
+    onScheduleShiftCount: scheduleControl.onScheduleShiftCount,
+    averageLateArrivalMinutes: scheduleControl.averageLateArrivalMinutes,
+    averageEarlyExitMinutes: scheduleControl.averageEarlyExitMinutes,
+    scheduleAdherencePercent: scheduleControl.scheduleAdherencePercent,
     coefficientBreakdown: [...coefficientBreakdown.values()].sort(
       (left, right) => left.coefficient - right.coefficient
     ),
-    deviations,
+    deviations: scheduleControl.warnings.map((warning) => ({
+      date: warning.date,
+      lateArrivalMinutes: warning.lateArrivalMinutes,
+      earlyExitMinutes: warning.earlyExitMinutes
+    })),
     firstShift,
     secondShift,
     production

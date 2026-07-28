@@ -155,6 +155,8 @@ describe('calculateAnalyticsSummary', () => {
     expect(summary.workSalary).toBe(120);
     expect(summary.currentSalary).toBe(120);
     expect(summary.totalMinutes).toBe(60);
+    expect(summary.deviations).toEqual([]);
+    expect(summary.scheduleAdherencePercent).toBeNull();
   });
 
   it('aggregates the selected period instead of the current month', () => {

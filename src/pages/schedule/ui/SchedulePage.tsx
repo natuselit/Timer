@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowRight, RefreshCw, SkipForward, Upload, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
+  RefreshCw,
+  SkipForward,
+  Upload,
+  X
+} from 'lucide-react';
 import {
   calculateEnterpriseScheduleComparison,
   parseEnterpriseScheduleText
@@ -20,19 +28,27 @@ import {
   getShiftsBetween,
   importEnterpriseScheduleText,
   localDb,
+  ScheduleWarningReviewRepository,
   ShiftRepository,
   skipEnterpriseScheduleDiscrepancy,
-  syncShiftWithEnterpriseSchedule
+  syncShiftWithEnterpriseSchedule,
+  type ReviewedScheduleWarning
 } from '../../../shared/lib/local-db';
 import {
   formatDate,
   formatDurationClock,
   formatDurationMinutes,
+  formatShortMinuteDuration,
+  formatShortNumericDate,
   formatTime,
   countWeekdaysInDateRange,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
+import {
+  calculateScheduleControlSummary,
+  type ScheduleControlWarning
+} from '../../../shared/lib/shifts/scheduleControl';
 import {
   MonthCalendar,
   type CalendarDateRange,
@@ -42,6 +58,7 @@ import './SchedulePage.css';
 
 const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
 const shiftRepository = new ShiftRepository(localDb);
+const scheduleWarningReviewRepository = new ScheduleWarningReviewRepository(localDb);
 
 type SchedulePageProps = {
   settings: Settings;
@@ -134,19 +151,6 @@ const getNextSelectedRange = (
   };
 };
 
-const timeToMinutes = (time: string): number => {
-  const [hours, minutes] = time.split(':').map(Number);
-
-  return hours * 60 + minutes;
-};
-
-const getScheduleDurationMinutes = (item: EnterpriseScheduleItem): number => {
-  const start = timeToMinutes(getScheduleStartTime(item));
-  const end = timeToMinutes(getScheduleEndTime(item));
-
-  return Math.max(0, end - start);
-};
-
 const getActualShiftDurationMinutes = (shift: Shift): number => {
   if (!shift.endTime) {
     return 0;
@@ -169,6 +173,33 @@ const getVisibleMonthlySalary = (settings: Settings, shifts: Shift[]): number =>
 const getMonthDate = ({ year, month }: CalendarMonth): LocalDateString =>
   `${year}-${String(month).padStart(2, '0')}-01`;
 
+const getWarningFacts = (
+  warning: ScheduleControlWarning
+): Array<{
+  key: 'late' | 'early';
+  label: string;
+  value: string;
+}> => [
+  ...(warning.lateArrivalMinutes > 0
+    ? [
+        {
+          key: 'late' as const,
+          label: 'Запізнення',
+          value: formatShortMinuteDuration(warning.lateArrivalMinutes)
+        }
+      ]
+    : []),
+  ...(warning.earlyExitMinutes > 0
+    ? [
+        {
+          key: 'early' as const,
+          label: 'Ранній вихід',
+          value: formatShortMinuteDuration(warning.earlyExitMinutes)
+        }
+      ]
+    : [])
+];
+
 export function SchedulePage({
   settings,
   calendarMonth,
@@ -185,6 +216,7 @@ export function SchedulePage({
   const [calendarScheduleItems, setCalendarScheduleItems] = useState<EnterpriseScheduleItem[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [calendarShifts, setCalendarShifts] = useState<Shift[]>([]);
+  const [reviewedWarnings, setReviewedWarnings] = useState<ReviewedScheduleWarning[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isImporting, setIsImporting] = useState(false);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
@@ -194,10 +226,6 @@ export function SchedulePage({
 
   const parseResult = useMemo(() => parseEnterpriseScheduleText(importText), [importText]);
   const canImport = importText.trim().length > 0 && parseResult.items.length > 0 && !isImporting;
-  const comparison = useMemo(
-    () => calculateEnterpriseScheduleComparison(scheduleItems, shifts),
-    [scheduleItems, shifts]
-  );
   const calendarMonthRange = useMemo(
     () => getMonthRange(calendarMonth.year, calendarMonth.month),
     [calendarMonth]
@@ -225,32 +253,54 @@ export function SchedulePage({
     () => calculateHourlyRateFromMonthlySalary(visibleMonthlySalary, getMonthDate(calendarMonth)),
     [calendarMonth, visibleMonthlySalary]
   );
+  const scheduleControl = useMemo(
+    () => calculateScheduleControlSummary(shifts),
+    [shifts]
+  );
+  const unreviewedWarnings = useMemo(() => {
+    const reviewedFingerprintByShiftId = new Map(
+      reviewedWarnings.map((review) => [review.shiftId, review.fingerprint])
+    );
+
+    return scheduleControl.warnings.filter(
+      (warning) =>
+        reviewedFingerprintByShiftId.get(warning.shiftId) !== warning.fingerprint
+    );
+  }, [reviewedWarnings, scheduleControl.warnings]);
 
   const loadSchedule = useCallback(async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const [nextScheduleItems, nextShifts, nextCalendarScheduleItems, nextCalendarShifts] =
+      const [
+        nextScheduleItems,
+        nextShifts,
+        nextCalendarScheduleItems,
+        nextCalendarShifts,
+        nextReviewedWarnings
+      ] =
         await Promise.all([
-        getEnterpriseScheduleBetween(
-          enterpriseScheduleRepository,
-          loadedDateRange.start,
-          loadedDateRange.end
-        ),
-        getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
-        getEnterpriseScheduleBetween(
-          enterpriseScheduleRepository,
-          calendarMonthRange.start,
-          calendarMonthRange.end
-        ),
-        getShiftsBetween(shiftRepository, calendarMonthRange.start, calendarMonthRange.end)
-      ]);
+          getEnterpriseScheduleBetween(
+            enterpriseScheduleRepository,
+            loadedDateRange.start,
+            loadedDateRange.end
+          ),
+          getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
+          getEnterpriseScheduleBetween(
+            enterpriseScheduleRepository,
+            calendarMonthRange.start,
+            calendarMonthRange.end
+          ),
+          getShiftsBetween(shiftRepository, calendarMonthRange.start, calendarMonthRange.end),
+          scheduleWarningReviewRepository.getAll()
+        ]);
 
       setScheduleItems(nextScheduleItems);
       setShifts(nextShifts);
       setCalendarScheduleItems(nextCalendarScheduleItems);
       setCalendarShifts(nextCalendarShifts);
+      setReviewedWarnings(nextReviewedWarnings);
     } catch {
       setError('Не вдалося завантажити графік.');
     } finally {
@@ -443,6 +493,30 @@ export function SchedulePage({
     }
   };
 
+  const markWarningReviewed = async (warning: ScheduleControlWarning) => {
+    setPendingActionId(warning.id);
+    setMessage(null);
+    setError(null);
+
+    try {
+      const review = await scheduleWarningReviewRepository.markReviewed({
+        shiftId: warning.shiftId,
+        fingerprint: warning.fingerprint,
+        reviewedAt: toLocalIsoString(new Date())
+      });
+
+      setReviewedWarnings((current) => [
+        ...current.filter((item) => item.shiftId !== review.shiftId),
+        review
+      ]);
+      setMessage('Попередження позначено як переглянуте.');
+    } catch {
+      setError('Не вдалося позначити попередження як переглянуте.');
+    } finally {
+      setPendingActionId(null);
+    }
+  };
+
   const selectedModalDiscrepancy = discrepancyModal
     ? discrepancyModal.discrepancies.find(
       (discrepancy) => discrepancy.date === discrepancyModal.selectedDate
@@ -470,128 +544,101 @@ export function SchedulePage({
         onRangePresetSelect={onRangePresetSelect}
       />
 
-      <section className="schedule-page__rate-card" aria-label="Ставка за видимий місяць">
-        <span>Ставка за видимий місяць</span>
+      <section className="schedule-page__rate-card" aria-label="Ставка за обраний місяць">
+        <span>Ставка за обраний місяць</span>
         <strong>{formatHourlyRate(visibleHourlyRate, settings.incognitoEnabled)}</strong>
       </section>
 
-      <section className="schedule-page__list" aria-labelledby="schedule-list-title">
-        <div>
-          <p className="schedule-page__label">Записи</p>
-          <h2 id="schedule-list-title">Графік підприємства</h2>
-        </div>
+      {unreviewedWarnings.length > 0 ? (
+        <section
+          className="schedule-page__control"
+          aria-labelledby="schedule-control-title"
+        >
+          <header className="schedule-page__control-header">
+            <span className="schedule-page__control-icon" aria-hidden="true">
+              <AlertTriangle size={19} />
+            </span>
+            <div>
+              <p className="schedule-page__label">Контроль графіка</p>
+              <h2 id="schedule-control-title">Попередження</h2>
+            </div>
+            <strong>{unreviewedWarnings.length}</strong>
+          </header>
 
-        {isLoading ? (
-          <p className="schedule-page__muted">Завантаження графіка...</p>
-        ) : scheduleItems.length === 0 ? (
-          <p className="schedule-page__muted">
-            {selectedRange ? 'У вибраному діапазоні записів немає.' : 'За цей місяць записів немає.'}
-          </p>
-        ) : (
+          <div className="schedule-page__warning-list">
+            {unreviewedWarnings.map((warning) => (
+              <article className="schedule-page__warning" key={warning.id}>
+                <time dateTime={warning.date}>
+                  {formatShortNumericDate(warning.date)}
+                </time>
+                <div className="schedule-page__warning-facts">
+                  {getWarningFacts(warning).map((fact) => (
+                    <span data-tone={fact.key} key={fact.key}>
+                      <small>{fact.label}</small>
+                      <strong>{fact.value}</strong>
+                    </span>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  disabled={pendingActionId === warning.id}
+                  onClick={() => void markWarningReviewed(warning)}
+                >
+                  <Check aria-hidden="true" size={17} />
+                  <span>
+                    {pendingActionId === warning.id
+                      ? 'Збереження...'
+                      : 'Переглянуто'}
+                  </span>
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {isLoading || scheduleItems.length === 0 ? (
+        <section className="schedule-page__list" aria-labelledby="schedule-list-title">
+          <div className="schedule-page__list-heading">
+            <div>
+              <p className="schedule-page__label">Записи</p>
+              <h2 id="schedule-list-title">Графік підприємства</h2>
+            </div>
+            <span>{scheduleItems.length}</span>
+          </div>
+          {isLoading ? (
+            <p className="schedule-page__muted">Завантаження графіка...</p>
+          ) : (
+            <p className="schedule-page__muted">
+              {selectedRange
+                ? 'У вибраному діапазоні записів немає.'
+                : 'За цей місяць записів немає.'}
+            </p>
+          )}
+        </section>
+      ) : (
+        <details className="schedule-page__list">
+          <summary className="schedule-page__list-heading">
+            <div>
+              <p className="schedule-page__label">Записи</p>
+              <h2>Графік підприємства</h2>
+            </div>
+            <span>{scheduleItems.length}</span>
+            <ChevronDown aria-hidden="true" size={19} />
+          </summary>
           <div className="schedule-page__items">
             {scheduleItems.map((item) => (
               <article className="schedule-page__item" key={item.id}>
-                <time dateTime={item.date}>{formatDate(item.date)}</time>
+                <time dateTime={item.date}>{formatShortNumericDate(item.date)}</time>
                 <span className="schedule-page__chip">{shiftTypeLabels[item.shiftType]}</span>
                 <strong>
                   {getScheduleStartTime(item)}-{getScheduleEndTime(item)}
                 </strong>
-                <small>{formatDurationMinutes(getScheduleDurationMinutes(item))}</small>
               </article>
             ))}
           </div>
-        )}
-      </section>
-
-      <section className="schedule-page__comparison" aria-labelledby="schedule-comparison-title">
-        <div className="schedule-page__comparison-heading">
-          <div>
-            <p className="schedule-page__label">Порівняння</p>
-            <h2 id="schedule-comparison-title">Розбіжності</h2>
-          </div>
-        </div>
-
-        {isLoading ? (
-          <p className="schedule-page__muted">Завантаження порівняння...</p>
-        ) : comparison.discrepancies.length === 0 ? (
-          <p className="schedule-page__muted">Немає розбіжностей із фактичними змінами.</p>
-        ) : (
-          <div className="schedule-page__discrepancies">
-            {comparison.discrepancies.map((discrepancy) => {
-              const isPending = pendingActionId === discrepancy.id;
-
-              return (
-                <article className="schedule-page__discrepancy" key={discrepancy.id}>
-                  <div className="schedule-page__discrepancy-title">
-                    <div>
-                      <small>Розбіжність</small>
-                      <strong>{formatDate(discrepancy.date)}</strong>
-                    </div>
-                    <span className="schedule-page__discrepancy-amount">
-                      <small>Різниця</small>
-                      <strong>
-                        {formatMoney(
-                          discrepancy.salaryDifferenceAmount,
-                          settings.incognitoEnabled
-                        )}
-                      </strong>
-                    </span>
-                  </div>
-
-                  <div className="schedule-page__time-comparison">
-                    <article data-source="actual">
-                      <span>Факт</span>
-                      <strong>
-                        {formatTime(discrepancy.actualStartTime)}-{formatTime(discrepancy.actualEndTime)}
-                      </strong>
-                    </article>
-                    <ArrowRight className="schedule-page__time-arrow" aria-hidden="true" size={18} />
-                    <article data-source="enterprise">
-                      <span>Підприємство</span>
-                      <strong>
-                        {formatTime(discrepancy.enterpriseStartTime)}-
-                        {formatTime(discrepancy.enterpriseEndTime)}
-                      </strong>
-                    </article>
-                  </div>
-
-                  <dl className="schedule-page__impact-grid">
-                    <div>
-                      <dt>Різниця тривалості</dt>
-                      <dd>{formatDurationDifference(discrepancy.durationDifferenceMinutes)}</dd>
-                    </div>
-                  </dl>
-
-                  <div className="schedule-page__actions">
-                    <button
-                      type="button"
-                      disabled={isPending}
-                      onClick={() =>
-                        void syncDiscrepancy(
-                          discrepancy.id,
-                          discrepancy.shiftId,
-                          discrepancy.scheduleId
-                        )
-                      }
-                    >
-                      <RefreshCw aria-hidden="true" size={18} />
-                      <span>{isPending ? 'Збереження...' : 'Синхронізувати'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={isPending}
-                      onClick={() => void skipDiscrepancy(discrepancy.id, discrepancy.scheduleId)}
-                    >
-                      <SkipForward aria-hidden="true" size={18} />
-                      <span>Пропустити</span>
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )}
-      </section>
+        </details>
+      )}
 
       <section className="schedule-page__import" aria-labelledby="schedule-import-title">
         <div>

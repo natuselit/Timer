@@ -242,8 +242,9 @@
 }
 
 .history-page__badge--active {
-  background: var(--color-primary-surface);
-  color: var(--color-primary);
+  border: 1px solid var(--color-warning-border);
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
 }
 
 .history-page__details {

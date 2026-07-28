@@ -32,6 +32,7 @@ import {
   deleteShift,
   getShiftsBetween,
   localDb,
+  ScheduleWarningReviewRepository,
   ShiftConstraintError,
   ShiftRepository,
   updateShift
@@ -116,6 +117,7 @@ type EditorState =
     };
 
 const shiftRepository = new ShiftRepository(localDb);
+const scheduleWarningReviewRepository = new ScheduleWarningReviewRepository(localDb);
 
 const shiftTypeBadgeLabels: Record<ShiftType, string> = {
   first: '1 зміна',
@@ -957,7 +959,10 @@ export function HistoryPage({
     setError(null);
 
     try {
-      await deleteShift(shiftRepository, shift.id);
+      await localDb.transaction('rw', localDb.shifts, localDb.appMeta, async () => {
+        await deleteShift(shiftRepository, shift.id);
+        await scheduleWarningReviewRepository.deleteByShiftId(shift.id);
+      });
       await loadShifts();
       onDataChange?.();
     } catch {
@@ -1125,14 +1130,19 @@ export function HistoryPage({
                     </div>
                   </dl>
 
-                  <ul className="history-page__coefficients" aria-label="Зароблено по коефіцієнтах">
-                    {coefficientEarnings.map((earning) => (
-                      <li data-coefficient={earning.coefficient} key={earning.coefficient}>
-                        <span>{formatCoefficientLabel(earning.coefficient)}</span>
-                        <strong>{formatMoney(earning.amount, settings.incognitoEnabled)}</strong>
-                      </li>
-                    ))}
-                  </ul>
+                  {coefficientEarnings.length > 1 ? (
+                    <ul
+                      className="history-page__coefficients"
+                      aria-label="Зароблено по коефіцієнтах"
+                    >
+                      {coefficientEarnings.map((earning) => (
+                        <li data-coefficient={earning.coefficient} key={earning.coefficient}>
+                          <span>{formatCoefficientLabel(earning.coefficient)}</span>
+                          <strong>{formatMoney(earning.amount, settings.incognitoEnabled)}</strong>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
 
                   {shift.workTickets.length > 0 ? (
                     <details

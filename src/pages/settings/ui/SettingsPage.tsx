@@ -25,6 +25,7 @@ import {
   replaceShiftsFromLegacyBackup,
   replaceLocalDataWithDemo,
   restoreBackup,
+  SCHEDULE_WARNING_REVIEW_PREFIX,
   ShiftRepository,
   serializeBackup
 } from '../../../shared/lib/local-db';
@@ -547,7 +548,13 @@ export function SettingsPage({
     setNotice(null);
 
     try {
-      await localDb.shifts.clear();
+      await localDb.transaction('rw', localDb.shifts, localDb.appMeta, async () => {
+        await localDb.shifts.clear();
+        await localDb.appMeta
+          .where('key')
+          .startsWith(SCHEDULE_WARNING_REVIEW_PREFIX)
+          .delete();
+      });
       onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'Зміни очищено.' });
     } catch {
