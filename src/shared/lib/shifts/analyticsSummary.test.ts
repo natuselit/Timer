@@ -386,7 +386,7 @@ describe('calculateAnalyticsSummary', () => {
         productiveMinutes: 160,
         downtimeMinutes: 20,
         currentGradeTarget: 22,
-        completionPercent: 25 / 22 * 100,
+        completionPercent: 25 / 20 * 100,
         averageActualPerTicket: 12.5,
         averageTicketsPerShift: 1.5,
         quantityPerProductiveHour: 25 * 60 / 160,

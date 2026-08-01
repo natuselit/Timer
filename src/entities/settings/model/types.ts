@@ -6,6 +6,8 @@ export type GradePercentSet = [number, number, number, number];
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
+export type BackupReminderIntervalDays = 7 | 14 | 30;
+
 export type Settings = {
   employeeFirstName: string;
   employeeLastName: string;
@@ -21,6 +23,7 @@ export type Settings = {
   coefficientMode: CoefficientMode;
   shiftDetectionMode: ShiftDetectionMode;
   themePreference: ThemePreference;
+  backupReminderIntervalDays: BackupReminderIntervalDays;
   incognitoEnabled: boolean;
   onboardingCompleted: boolean;
   updatedAt: string;

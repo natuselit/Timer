@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkTicket } from './types';
 import {
+  calculateShiftProductionSummary,
   calculateTicketProductionSummary,
   validateAndSortWorkTickets
 } from './workTickets';
@@ -240,6 +241,7 @@ describe('calculateTicketProductionSummary', () => {
     });
 
     expect(achieved.achievedGrade).toBe(3);
+    expect(achieved.completionPercent).toBe(9 / 7 * 100);
     expect(below.achievedGrade).toBeNull();
     expect(zeroFact).toMatchObject({ achievedGrade: null, completionPercent: 0 });
     expect(noProductiveTime).toMatchObject({
@@ -247,6 +249,74 @@ describe('calculateTicketProductionSummary', () => {
       currentTarget: 0,
       completionPercent: null,
       achievedGrade: null
+    });
+  });
+});
+
+describe('calculateShiftProductionSummary', () => {
+  it('aggregates filled tickets and keeps unfilled tickets out of numeric totals', () => {
+    const summary = calculateShiftProductionSummary({
+      shift: {
+        gradeSnapshot: {
+          currentGrade: 2,
+          desiredGrade: 3,
+          gradeSalaryBonusPercents: [10, 10, 15, 15],
+          gradeNormPercents: [100, 120, 140, 160],
+          cumulativeSalaryBonusPercent: 20
+        },
+        workTickets: [
+          makeTicket({ normPerEightHours: 80, actualQuantity: 10 }),
+          makeTicket({
+            id: 'ticket-2',
+            normPerEightHours: 80,
+            startedAt: '2026-06-10T08:00:00.000Z',
+            endedAt: '2026-06-10T10:00:00.000Z',
+            actualQuantity: 20,
+            downtimeMinutes: 30
+          }),
+          makeTicket({
+            id: 'ticket-3',
+            startedAt: '2026-06-10T10:00:00.000Z',
+            endedAt: '2026-06-10T11:00:00.000Z',
+            actualQuantity: null,
+            downtimeMinutes: 10
+          })
+        ]
+      },
+      fallbackCurrentGrade: 1,
+      fallbackGradeNormPercents: [100, 120, 140, 160]
+    });
+
+    expect(summary).toEqual({
+      ticketCount: 3,
+      filledTicketCount: 2,
+      unfilledTicketCount: 1,
+      actualQuantity: 30,
+      currentGradeTarget: 30,
+      completionPercent: 120,
+      productiveMinutes: 150,
+      downtimeMinutes: 30
+    });
+  });
+
+  it('uses fallback grade settings for legacy shifts and handles a zero target', () => {
+    const summary = calculateShiftProductionSummary({
+      shift: {
+        gradeSnapshot: null,
+        workTickets: [makeTicket({ actualQuantity: 0, downtimeMinutes: 60 })]
+      },
+      fallbackCurrentGrade: 3,
+      fallbackGradeNormPercents: [100, 120, 140, 160]
+    });
+
+    expect(summary).toMatchObject({
+      ticketCount: 1,
+      filledTicketCount: 1,
+      actualQuantity: 0,
+      currentGradeTarget: 0,
+      completionPercent: null,
+      productiveMinutes: 0,
+      downtimeMinutes: 60
     });
   });
 });

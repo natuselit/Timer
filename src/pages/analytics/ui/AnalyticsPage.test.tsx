@@ -23,6 +23,7 @@ const settings: Settings = {
   coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
+  backupReminderIntervalDays: 14,
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T06:00:00.000+03:00'

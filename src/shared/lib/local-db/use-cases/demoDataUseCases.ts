@@ -141,7 +141,7 @@ export const createDemoDataSet = (
     monthlyBonus: 3_500,
     currentGrade: 2,
     desiredGrade: 3,
-    gradeSalaryBonusPercents: [8, 10, 12, 15],
+    gradeSalaryBonusPercents: [10, 10, 15, 15],
     gradeNormPercents: [100, 120, 140, 160],
     forecastDays: 30,
     arriveHoldDelayMs: 900,
@@ -149,6 +149,7 @@ export const createDemoDataSet = (
     coefficientMode: 'auto',
     shiftDetectionMode: 'auto',
     themePreference: 'system',
+    backupReminderIntervalDays: 14,
     incognitoEnabled: false,
     onboardingCompleted: true,
     updatedAt

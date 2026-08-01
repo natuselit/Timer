@@ -42,7 +42,10 @@ export type EnterpriseScheduleParseError = {
 export type EnterpriseScheduleParseResult = {
   items: ParsedEnterpriseScheduleItem[];
   errors: EnterpriseScheduleParseError[];
+  skippedEmptyCount: number;
 };
+
+const SKIPPED_EMPTY_BLOCK = Symbol('skipped-empty-block');
 
 const toDate = (day: string, month: string, year: string): LocalDateString =>
   `${year}-${month}-${day}`;
@@ -207,7 +210,7 @@ const splitBlocks = (source: string): {
 
 const parseBlock = (
   block: RawScheduleBlock
-): ParsedEnterpriseScheduleItem | EnterpriseScheduleParseError | null => {
+): ParsedEnterpriseScheduleItem | EnterpriseScheduleParseError | typeof SKIPPED_EMPTY_BLOCK | null => {
   const fields: Partial<Record<ScheduleField, LocalTimeString | undefined>> = {};
   const presentFields = new Set<ScheduleField>();
   const sourceText = block.sourceLines.join('\n');
@@ -249,7 +252,7 @@ const parseBlock = (
     presentFields.has('total') &&
     isDayOffBlock(fields)
   ) {
-    return null;
+    return SKIPPED_EMPTY_BLOCK;
   }
 
   if (!fields.inTime || !fields.outTime || !fields.total) {
@@ -307,6 +310,7 @@ export const parseEnterpriseScheduleText = (source: string): EnterpriseScheduleP
   const { blocks, errors } = splitBlocks(source);
   const items: ParsedEnterpriseScheduleItem[] = [];
   const seenDates = new Set<LocalDateString>();
+  let skippedEmptyCount = 0;
 
   for (const block of blocks) {
     if (seenDates.has(block.date)) {
@@ -319,6 +323,12 @@ export const parseEnterpriseScheduleText = (source: string): EnterpriseScheduleP
     }
 
     const parsed = parseBlock(block);
+
+    if (parsed === SKIPPED_EMPTY_BLOCK) {
+      seenDates.add(block.date);
+      skippedEmptyCount += 1;
+      continue;
+    }
 
     if (parsed === null) {
       seenDates.add(block.date);
@@ -334,5 +344,5 @@ export const parseEnterpriseScheduleText = (source: string): EnterpriseScheduleP
     items.push(parsed);
   }
 
-  return { items, errors };
+  return { items, errors, skippedEmptyCount };
 };

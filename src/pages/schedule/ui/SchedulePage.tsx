@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
   ChevronDown,
+  FileText,
+  FileUp,
+  LoaderCircle,
   RefreshCw,
   SkipForward,
   Upload,
@@ -10,11 +13,12 @@ import {
 } from 'lucide-react';
 import {
   calculateEnterpriseScheduleComparison,
-  parseEnterpriseScheduleText
+  parseEnterpriseSchedulePdf
 } from '../../../entities/enterprise-schedule';
 import type {
   EnterpriseScheduleDiscrepancy,
-  EnterpriseScheduleItem
+  EnterpriseScheduleItem,
+  EnterpriseSchedulePdfParseResult
 } from '../../../entities/enterprise-schedule';
 import {
   calculateHourlyRateFromMonthlySalary,
@@ -26,7 +30,7 @@ import {
   EnterpriseScheduleRepository,
   getEnterpriseScheduleBetween,
   getShiftsBetween,
-  importEnterpriseScheduleText,
+  importParsedEnterpriseSchedule,
   localDb,
   ScheduleWarningReviewRepository,
   ShiftRepository,
@@ -54,6 +58,11 @@ import {
   type CalendarDateRange,
   type CalendarRangePreset
 } from '../../../shared/ui/month-calendar';
+import {
+  getImportedMonths,
+  getPrimaryImportedMonth,
+  type CalendarMonth
+} from '../model/importMonths';
 import './SchedulePage.css';
 
 const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
@@ -72,21 +81,50 @@ type SchedulePageProps = {
   onDataChange?: () => void;
 };
 
-type CalendarMonth = {
-  year: number;
-  month: number;
-};
-
 type DiscrepancyModalState = {
   month: CalendarMonth;
   discrepancies: EnterpriseScheduleDiscrepancy[];
   selectedDate: LocalDateString;
 };
 
+type DiscrepancyReviewBatch = Omit<DiscrepancyModalState, 'selectedDate'>;
+
 const shiftTypeLabels: Record<ShiftType, string> = {
   first: '1 зміна',
   second: '2 зміна'
 };
+
+const getCountForm = (
+  count: number,
+  forms: readonly [one: string, few: string, many: string]
+): string => {
+  const lastTwoDigits = count % 100;
+  const lastDigit = count % 10;
+
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) {
+    return forms[2];
+  }
+
+  if (lastDigit === 1) {
+    return forms[0];
+  }
+
+  if (lastDigit >= 2 && lastDigit <= 4) {
+    return forms[1];
+  }
+
+  return forms[2];
+};
+
+const formatImportShiftCount = (count: number): string =>
+  `${count} ${getCountForm(count, ['зміну', 'зміни', 'змін'])}`;
+
+const formatInvalidRecordCount = (count: number): string =>
+  `${count} ${getCountForm(count, [
+    'невалідний запис',
+    'невалідні записи',
+    'невалідних записів'
+  ])}`;
 
 const formatDurationDifference = (minutes: number): string => {
   const sign = minutes > 0 ? '+' : minutes < 0 ? '-' : '';
@@ -120,12 +158,6 @@ const getSelectedRangeBounds = (
   start: range.start,
   end: range.end ?? range.start
 });
-
-const getMonthFromDate = (date: LocalDateString): { year: number; month: number } => {
-  const [year, month] = date.split('-').map(Number);
-
-  return { year, month };
-};
 
 const getNextSelectedRange = (
   current: CalendarDateRange | null,
@@ -211,21 +243,30 @@ export function SchedulePage({
   onRangePresetSelect,
   onDataChange
 }: SchedulePageProps) {
-  const [importText, setImportText] = useState('');
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const pendingActionIdRef = useRef<string | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  const [pdfParseResult, setPdfParseResult] = useState<EnterpriseSchedulePdfParseResult | null>(null);
   const [scheduleItems, setScheduleItems] = useState<EnterpriseScheduleItem[]>([]);
   const [calendarScheduleItems, setCalendarScheduleItems] = useState<EnterpriseScheduleItem[]>([]);
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [calendarShifts, setCalendarShifts] = useState<Shift[]>([]);
   const [reviewedWarnings, setReviewedWarnings] = useState<ReviewedScheduleWarning[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isReadingPdf, setIsReadingPdf] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
   const [discrepancyModal, setDiscrepancyModal] = useState<DiscrepancyModalState | null>(null);
+  const [discrepancyReviewQueue, setDiscrepancyReviewQueue] = useState<DiscrepancyReviewBatch[]>([]);
+  const [pendingImportMessage, setPendingImportMessage] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const parseResult = useMemo(() => parseEnterpriseScheduleText(importText), [importText]);
-  const canImport = importText.trim().length > 0 && parseResult.items.length > 0 && !isImporting;
+  const canImport =
+    pdfParseResult !== null &&
+    pdfParseResult.items.length > 0 &&
+    !isReadingPdf &&
+    !isImporting;
   const calendarMonthRange = useMemo(
     () => getMonthRange(calendarMonth.year, calendarMonth.month),
     [calendarMonth]
@@ -376,12 +417,40 @@ export function SchedulePage({
     });
   };
 
+  const beginPendingAction = (actionId: string): boolean => {
+    if (pendingActionIdRef.current !== null) {
+      return false;
+    }
+
+    pendingActionIdRef.current = actionId;
+    setPendingActionId(actionId);
+    return true;
+  };
+
+  const finishPendingAction = (actionId: string) => {
+    if (pendingActionIdRef.current !== actionId) {
+      return;
+    }
+
+    pendingActionIdRef.current = null;
+    setPendingActionId(null);
+  };
+
   const refreshDiscrepancyModal = async (month: CalendarMonth) => {
     const nextComparison = await getComparisonForMonth(month);
 
     if (nextComparison.discrepancies.length === 0) {
+      const [nextBatch, ...remainingBatches] = discrepancyReviewQueue;
+
+      if (nextBatch) {
+        setDiscrepancyReviewQueue(remainingBatches);
+        openDiscrepancyModal(nextBatch.month, nextBatch.discrepancies);
+        return;
+      }
+
       setDiscrepancyModal(null);
-      setMessage('Усі розбіжності графіка опрацьовано.');
+      setMessage(pendingImportMessage ?? 'Усі розбіжності графіка опрацьовано.');
+      setPendingImportMessage(null);
       return;
     }
 
@@ -400,13 +469,64 @@ export function SchedulePage({
     });
   };
 
-  const importSchedule = async () => {
-    if (!canImport) {
+  const closeDiscrepancyModal = () => {
+    if (pendingActionIdRef.current !== null) {
       return;
     }
 
+    setDiscrepancyModal(null);
+    setDiscrepancyReviewQueue([]);
+
+    if (pendingImportMessage) {
+      setMessage(pendingImportMessage);
+      setPendingImportMessage(null);
+    }
+  };
+
+  const openImportPicker = () => {
+    if (!importInputRef.current || isReadingPdf || isImporting) {
+      return;
+    }
+
+    importInputRef.current.value = '';
+    importInputRef.current.click();
+  };
+
+  const readSchedulePdf = async (file: File | undefined) => {
+    if (!file) {
+      return;
+    }
+
+    setSelectedFileName(file.name);
+    setPdfParseResult(null);
+    setIsReadingPdf(true);
+    setMessage(null);
+    setError(null);
+
+    try {
+      setPdfParseResult(await parseEnterpriseSchedulePdf(file));
+    } catch (readError) {
+      setError(
+        readError instanceof Error
+          ? readError.message
+          : 'Не вдалося прочитати PDF. Оберіть інший файл.'
+      );
+    } finally {
+      setIsReadingPdf(false);
+    }
+  };
+
+  const importSchedule = async () => {
+    if (!canImport || !pdfParseResult) {
+      return;
+    }
+
+    const invalidRecordsWarning =
+      pdfParseResult.errors.length > 0
+        ? ` ${formatInvalidRecordCount(pdfParseResult.errors.length)} буде пропущено.`
+        : '';
     const confirmed = window.confirm(
-      `Зберегти ${parseResult.items.length} валідних записів графіка? Записи з тими самими датами буде оновлено, а відсутні зміни буде створено.`
+      `Імпортувати ${formatImportShiftCount(pdfParseResult.items.length)} із «${pdfParseResult.fileName}»?${invalidRecordsWarning} Відсутні зміни буде створено, а наявні не буде перезаписано без вашого рішення.`
     );
 
     if (!confirmed) {
@@ -418,30 +538,52 @@ export function SchedulePage({
     setError(null);
 
     try {
-      const result = await importEnterpriseScheduleText(
+      const result = await importParsedEnterpriseSchedule(
         enterpriseScheduleRepository,
-        importText,
+        pdfParseResult,
         toLocalIsoString(new Date()),
         {
           shiftRepository,
           settings
         }
       );
+      const importedMonths = getImportedMonths(result.items);
+      const primaryMonth = getPrimaryImportedMonth(result.items);
+      const comparisonBatches = await Promise.all(
+        importedMonths.map(async ({ year, month }) => {
+          const calendarMonth = { year, month };
+          const comparison = await getComparisonForMonth(calendarMonth);
 
-      const importedMonth = getMonthFromDate(result.items[0].date);
-      const importedComparison = await getComparisonForMonth(importedMonth);
+          return {
+            month: calendarMonth,
+            discrepancies: comparison.discrepancies
+          };
+        })
+      );
+      const reviewBatches = comparisonBatches.filter(
+        (batch) => batch.discrepancies.length > 0
+      );
+      const importMessage = `Збережено записів: ${result.savedCount}. Створено змін: ${result.createdShiftCount}. Пропущено порожніх днів: ${result.skippedEmptyCount}. Помилок: ${result.errors.length}.`;
 
-      if (importedComparison.discrepancies.length > 0) {
-        openDiscrepancyModal(importedMonth, importedComparison.discrepancies);
+      if (reviewBatches.length > 0) {
+        const [firstBatch, ...remainingBatches] = reviewBatches;
+        setPendingImportMessage(importMessage);
+        setDiscrepancyReviewQueue(remainingBatches);
+        openDiscrepancyModal(firstBatch.month, firstBatch.discrepancies);
       } else {
-        setMessage(
-          `Збережено записів: ${result.savedCount}. Створено змін: ${result.createdShiftCount}. Помилок: ${result.errors.length}.`
-        );
+        setMessage(importMessage);
       }
 
       onDataChange?.();
       onSelectedRangeChange(null);
-      onCalendarMonthChange(importedMonth);
+      if (primaryMonth) {
+        onCalendarMonthChange(primaryMonth);
+      }
+      setSelectedFileName(null);
+      setPdfParseResult(null);
+      if (importInputRef.current) {
+        importInputRef.current.value = '';
+      }
       await loadSchedule();
     } catch {
       setError('Не вдалося зберегти графік.');
@@ -451,7 +593,10 @@ export function SchedulePage({
   };
 
   const syncDiscrepancy = async (discrepancyId: string, shiftId: string, scheduleId: string) => {
-    setPendingActionId(discrepancyId);
+    if (!beginPendingAction(discrepancyId)) {
+      return;
+    }
+
     setMessage(null);
     setError(null);
 
@@ -470,12 +615,15 @@ export function SchedulePage({
     } catch {
       setError('Не вдалося синхронізувати зміну.');
     } finally {
-      setPendingActionId(null);
+      finishPendingAction(discrepancyId);
     }
   };
 
   const skipDiscrepancy = async (discrepancyId: string, scheduleId: string) => {
-    setPendingActionId(discrepancyId);
+    if (!beginPendingAction(discrepancyId)) {
+      return;
+    }
+
     setMessage(null);
     setError(null);
 
@@ -489,12 +637,15 @@ export function SchedulePage({
     } catch {
       setError('Не вдалося пропустити розбіжність.');
     } finally {
-      setPendingActionId(null);
+      finishPendingAction(discrepancyId);
     }
   };
 
   const markWarningReviewed = async (warning: ScheduleControlWarning) => {
-    setPendingActionId(warning.id);
+    if (!beginPendingAction(warning.id)) {
+      return;
+    }
+
     setMessage(null);
     setError(null);
 
@@ -513,7 +664,7 @@ export function SchedulePage({
     } catch {
       setError('Не вдалося позначити попередження як переглянуте.');
     } finally {
-      setPendingActionId(null);
+      finishPendingAction(warning.id);
     }
   };
 
@@ -643,34 +794,75 @@ export function SchedulePage({
       <section className="schedule-page__import" aria-labelledby="schedule-import-title">
         <div>
           <p className="schedule-page__label">Імпорт</p>
-          <h2 id="schedule-import-title">Графік підприємства</h2>
+          <h2 id="schedule-import-title">Табель підприємства з PDF</h2>
         </div>
 
-        <textarea
-          className="schedule-page__textarea"
-          data-has-errors={parseResult.errors.length > 0 ? 'true' : 'false'}
-          value={importText}
-          rows={5}
-          placeholder="01.07.2026 In time 06:01&#10;01.07.2026 Out time 14:30&#10;01.07.2026 Total 08:29"
-          onChange={(event) => {
-            setImportText(event.target.value);
-            setMessage(null);
-            setError(null);
-          }}
+        <p className="schedule-page__muted">
+          Оберіть PDF із листа «Ваш табель робочого часу». Файл обробляється лише на цьому пристрої.
+        </p>
+
+        <input
+          ref={importInputRef}
+          className="schedule-page__file-input"
+          type="file"
+          accept="application/pdf,.pdf"
+          disabled={isReadingPdf || isImporting}
+          onChange={(event) => void readSchedulePdf(event.target.files?.[0])}
         />
 
-        <div className="schedule-page__summary-row" aria-live="polite">
-          <span data-status="success">Валідні: {parseResult.items.length}</span>
-          <span data-status={parseResult.errors.length > 0 ? 'error' : 'neutral'}>
-            Помилки: {parseResult.errors.length}
+        <button
+          className="schedule-page__file-button"
+          type="button"
+          disabled={isReadingPdf || isImporting}
+          onClick={openImportPicker}
+        >
+          {isReadingPdf ? (
+            <LoaderCircle className="schedule-page__spinner" aria-hidden="true" size={20} />
+          ) : (
+            <FileUp aria-hidden="true" size={20} />
+          )}
+          <span>
+            {isReadingPdf
+              ? 'Читання PDF...'
+              : selectedFileName
+                ? 'Обрати інший PDF'
+                : 'Обрати PDF'}
           </span>
-        </div>
+        </button>
 
-        {parseResult.errors.length > 0 ? (
+        {selectedFileName ? (
+          <div className="schedule-page__selected-file" aria-live="polite">
+            <FileText aria-hidden="true" size={20} />
+            <div>
+              <strong>{selectedFileName}</strong>
+              <span>
+                {isReadingPdf
+                  ? 'Перевіряємо вміст...'
+                  : pdfParseResult
+                    ? `${pdfParseResult.pageCount} стор. · файл готовий до імпорту`
+                    : 'Файл не готовий до імпорту'}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        {pdfParseResult ? (
+          <div className="schedule-page__summary-row" aria-live="polite">
+            <span data-status="success">Валідні: {pdfParseResult.items.length}</span>
+            <span data-status={pdfParseResult.skippedEmptyCount > 0 ? 'warning' : 'neutral'}>
+              Порожні: {pdfParseResult.skippedEmptyCount}
+            </span>
+            <span data-status={pdfParseResult.errors.length > 0 ? 'error' : 'neutral'}>
+              Помилки: {pdfParseResult.errors.length}
+            </span>
+          </div>
+        ) : null}
+
+        {pdfParseResult && pdfParseResult.errors.length > 0 ? (
           <div className="schedule-page__errors" role="alert">
-            {parseResult.errors.map((parseError) => (
+            {pdfParseResult.errors.map((parseError) => (
               <article key={`${parseError.line}-${parseError.message}`}>
-                <strong>Рядок {parseError.line}</strong>
+                <strong>Запис біля рядка {parseError.line}</strong>
                 <p>{parseError.message}</p>
               </article>
             ))}
@@ -684,7 +876,13 @@ export function SchedulePage({
           onClick={importSchedule}
         >
           <Upload aria-hidden="true" size={20} />
-          <span>{isImporting ? 'Збереження...' : 'Імпортувати'}</span>
+          <span>
+            {isImporting
+              ? 'Збереження...'
+              : pdfParseResult
+                ? `Імпортувати ${formatImportShiftCount(pdfParseResult.items.length)}`
+                : 'Імпортувати'}
+          </span>
         </button>
 
         {error ? (
@@ -706,7 +904,8 @@ export function SchedulePage({
                 className="schedule-page__modal-close"
                 type="button"
                 aria-label="Закрити модальне вікно"
-                onClick={() => setDiscrepancyModal(null)}
+                disabled={pendingActionId !== null}
+                onClick={closeDiscrepancyModal}
               >
                 <X aria-hidden="true" size={20} />
               </button>
@@ -788,7 +987,7 @@ export function SchedulePage({
                   <div className="schedule-page__actions">
                     <button
                       type="button"
-                      disabled={pendingActionId === selectedModalDiscrepancy.id}
+                      disabled={pendingActionId !== null}
                       onClick={() =>
                         void syncDiscrepancy(
                           selectedModalDiscrepancy.id,
@@ -797,16 +996,20 @@ export function SchedulePage({
                         )
                       }
                     >
-                      <RefreshCw aria-hidden="true" size={18} />
+                      <RefreshCw
+                        className={pendingActionId !== null ? 'schedule-page__spinner' : undefined}
+                        aria-hidden="true"
+                        size={18}
+                      />
                       <span>
-                        {pendingActionId === selectedModalDiscrepancy.id
+                        {pendingActionId !== null
                           ? 'Збереження...'
                           : 'Синхронізувати'}
                       </span>
                     </button>
                     <button
                       type="button"
-                      disabled={pendingActionId === selectedModalDiscrepancy.id}
+                      disabled={pendingActionId !== null}
                       onClick={() =>
                         void skipDiscrepancy(
                           selectedModalDiscrepancy.id,

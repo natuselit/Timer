@@ -3,7 +3,7 @@ import {
   type Grade,
   type GradePercentSet
 } from '../../settings';
-import type { ISODateTimeString, WorkTicket } from './types';
+import type { ISODateTimeString, Shift, WorkTicket } from './types';
 
 type WorkTicketBounds = {
   shiftStartTime: ISODateTimeString;
@@ -41,6 +41,17 @@ export type TicketProductionSummary = {
   achievedGrade: Grade | null;
 };
 
+export type ShiftProductionSummary = {
+  ticketCount: number;
+  filledTicketCount: number;
+  unfilledTicketCount: number;
+  actualQuantity: number;
+  currentGradeTarget: number;
+  completionPercent: number | null;
+  productiveMinutes: number;
+  downtimeMinutes: number;
+};
+
 export const calculateTicketProductionSummary = ({
   ticket,
   effectiveEndTime,
@@ -66,6 +77,7 @@ export const calculateTicketProductionSummary = ({
       elapsedMinutes: productiveMinutes
     })
   }));
+  const gradeOneTarget = targets[0]?.quantity ?? 0;
   const currentTarget = targets[currentGrade - 1]?.quantity ?? 0;
   const achievedGrade =
     ticket.actualQuantity === null || productiveMinutes === 0
@@ -82,11 +94,67 @@ export const calculateTicketProductionSummary = ({
     currentGrade,
     currentTarget,
     completionPercent:
-      ticket.actualQuantity === null || currentTarget <= 0
+      ticket.actualQuantity === null || gradeOneTarget <= 0
         ? null
-        : (ticket.actualQuantity / currentTarget) * 100,
+        : (ticket.actualQuantity / gradeOneTarget) * 100,
     achievedGrade
   };
+};
+
+export const calculateShiftProductionSummary = ({
+  shift,
+  fallbackCurrentGrade,
+  fallbackGradeNormPercents
+}: {
+  shift: Pick<Shift, 'workTickets' | 'gradeSnapshot'>;
+  fallbackCurrentGrade: Grade;
+  fallbackGradeNormPercents: GradePercentSet;
+}): ShiftProductionSummary => {
+  const currentGrade = shift.gradeSnapshot?.currentGrade ?? fallbackCurrentGrade;
+  const gradeNormPercents =
+    shift.gradeSnapshot?.gradeNormPercents ?? fallbackGradeNormPercents;
+  const completedTickets = shift.workTickets.filter(
+    (ticket): ticket is WorkTicket & { endedAt: ISODateTimeString } => ticket.endedAt !== null
+  );
+  const summary: ShiftProductionSummary = {
+    ticketCount: completedTickets.length,
+    filledTicketCount: 0,
+    unfilledTicketCount: 0,
+    actualQuantity: 0,
+    currentGradeTarget: 0,
+    completionPercent: null,
+    productiveMinutes: 0,
+    downtimeMinutes: 0
+  };
+  let gradeOneTarget = 0;
+
+  completedTickets.forEach((ticket) => {
+    if (ticket.actualQuantity === null) {
+      summary.unfilledTicketCount += 1;
+      return;
+    }
+
+    const ticketSummary = calculateTicketProductionSummary({
+      ticket,
+      effectiveEndTime: ticket.endedAt,
+      currentGrade,
+      gradeNormPercents
+    });
+
+    summary.filledTicketCount += 1;
+    summary.actualQuantity += ticket.actualQuantity;
+    gradeOneTarget += ticketSummary.targets[0]?.quantity ?? 0;
+    summary.currentGradeTarget += ticketSummary.currentTarget;
+    summary.productiveMinutes += ticketSummary.productiveMinutes;
+    summary.downtimeMinutes += ticketSummary.downtimeMinutes;
+  });
+
+  summary.completionPercent =
+    gradeOneTarget > 0
+      ? (summary.actualQuantity / gradeOneTarget) * 100
+      : null;
+
+  return summary;
 };
 
 export const validateAndSortWorkTickets = (

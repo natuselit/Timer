@@ -1,8 +1,20 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { Download, Eraser, FileUp, FlaskConical, RotateCcw, Save, Shield } from 'lucide-react';
+import {
+  ChevronDown,
+  Download,
+  Eraser,
+  ExternalLink,
+  FileUp,
+  FlaskConical,
+  RotateCcw,
+  Save,
+  Send,
+  Shield
+} from 'lucide-react';
 import appPackage from '../../../../package.json';
 import {
   DEFAULT_SETTINGS,
+  BACKUP_REMINDER_INTERVAL_DAYS,
   GRADE_VALUES,
   HOLD_DELAY_MAX_MS,
   HOLD_DELAY_MIN_MS,
@@ -10,6 +22,7 @@ import {
   calculateGradeMonthlyBonus,
   calculateHourlyRateFromMonthlySalary,
   getNextDesiredGrade,
+  isBackupReminderIntervalDays,
   type Grade,
   type GradePercentSet,
   type Settings,
@@ -18,7 +31,7 @@ import {
 import { INCOGNITO_FINANCIAL_MASK, formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import {
   BackupValidationError,
-  createBackup,
+  BackupReminderRepository,
   localDb,
   parseBackupImportJson,
   recalculateHourlyRateSnapshotsForAllShifts,
@@ -26,9 +39,9 @@ import {
   replaceLocalDataWithDemo,
   restoreBackup,
   SCHEDULE_WARNING_REVIEW_PREFIX,
-  ShiftRepository,
-  serializeBackup
+  ShiftRepository
 } from '../../../shared/lib/local-db';
+import { downloadBackup } from '../../../shared/lib/backup';
 import { toLocalIsoString } from '../../../shared/lib/date-time';
 import './SettingsPage.css';
 
@@ -49,6 +62,7 @@ type FormValues = {
   gradeSalaryBonusPercents: [string, string, string, string];
   gradeNormPercents: [string, string, string, string];
   holdDelaySeconds: string;
+  backupReminderIntervalDays: string;
 };
 
 type FormErrors = Partial<Record<keyof FormValues, string>>;
@@ -78,7 +92,7 @@ const FAQ_ITEMS = [
   {
     question: 'Як працюють тікети та простій?',
     answer:
-      'Одночасно активний лише один тікет. Простій зменшує продуктивний час; його можна коригувати цілими хвилинами через додавання або віднімання.'
+      'Одночасно активний лише один тікет. Простій додається або віднімається через меню «…» активного тікета. Під час завершення вкажіть фактичну кількість у модальному вікні.'
   },
   {
     question: 'Як рахуються оплата та грейди?',
@@ -98,7 +112,7 @@ const FAQ_ITEMS = [
   {
     question: 'Як імпортувати графік підприємства?',
     answer:
-      'Відкрийте вкладку «Графік», вставте текст із датами та часом приходу/виходу, перевірте розпізнані записи й лише тоді застосуйте імпорт.'
+      'Відкрийте вкладку «Графік», оберіть локальний PDF табеля з текстовим шаром, перевірте розпізнані зміни й лише тоді підтвердьте імпорт. Скановані PDF без текстового шару не підтримуються.'
   }
 ] as const;
 
@@ -125,7 +139,8 @@ const toFormValues = (settings: Settings): FormValues => ({
   desiredGrade: String(settings.desiredGrade),
   gradeSalaryBonusPercents: toPercentFormValues(settings.gradeSalaryBonusPercents),
   gradeNormPercents: toPercentFormValues(settings.gradeNormPercents),
-  holdDelaySeconds: String(settings.arriveHoldDelayMs / 1000)
+  holdDelaySeconds: String(settings.arriveHoldDelayMs / 1000),
+  backupReminderIntervalDays: String(settings.backupReminderIntervalDays)
 });
 
 const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors => {
@@ -137,6 +152,7 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   const gradeSalaryBonusPercents = parsePercentFormValues(values.gradeSalaryBonusPercents);
   const gradeNormPercents = parsePercentFormValues(values.gradeNormPercents);
   const holdDelay = parseNumber(values.holdDelaySeconds);
+  const backupReminderIntervalDays = Number(values.backupReminderIntervalDays);
 
   if (!values.employeeFirstName.trim()) {
     errors.employeeFirstName = 'Вкажіть імʼя.';
@@ -181,6 +197,10 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
     errors.holdDelaySeconds = `Затримка має бути від ${delayMinSeconds} до ${delayMaxSeconds} с.`;
   }
 
+  if (!isBackupReminderIntervalDays(backupReminderIntervalDays)) {
+    errors.backupReminderIntervalDays = 'Оберіть 7, 14 або 30 днів.';
+  }
+
   return errors;
 };
 
@@ -202,6 +222,7 @@ const getImportErrorMessage = (error: unknown): string => {
 };
 
 const shiftRepository = new ShiftRepository(localDb);
+const backupReminderRepository = new BackupReminderRepository(localDb);
 
 export function SettingsPage({
   settings,
@@ -223,7 +244,8 @@ export function SettingsPage({
   }, [settings]);
 
   const updateField =
-    (field: keyof FormValues) => (event: ChangeEvent<HTMLInputElement>) => {
+    (field: keyof FormValues) =>
+    (event: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
       setValues((current) => ({
         ...current,
         [field]: event.target.value
@@ -318,6 +340,9 @@ export function SettingsPage({
       gradeNormPercents: parsePercentFormValues(values.gradeNormPercents),
       arriveHoldDelayMs: holdDelayMs,
       leaveHoldDelayMs: holdDelayMs,
+      backupReminderIntervalDays: Number(
+        values.backupReminderIntervalDays
+      ) as Settings['backupReminderIntervalDays'],
       updatedAt: toLocalIsoString(new Date())
     };
 
@@ -461,16 +486,10 @@ export function SettingsPage({
     setNotice(null);
 
     try {
-      const backup = await createBackup(localDb, toLocalIsoString(new Date()));
-      const blob = new Blob([serializeBackup(backup)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      const datePart = backup.exportedAt.slice(0, 10);
-
-      anchor.href = url;
-      anchor.download = `shifter-backup-${datePart}.json`;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      const exportedAt = toLocalIsoString(new Date());
+      const backup = await downloadBackup(localDb, exportedAt);
+      await backupReminderRepository.markExported(backup.exportedAt);
+      onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'JSON backup створено.' });
     } catch {
       setNotice({ tone: 'error', text: 'Не вдалося створити JSON backup.' });
@@ -508,6 +527,7 @@ export function SettingsPage({
         }
 
         await replaceShiftsFromLegacyBackup(localDb, parsedImport.shifts);
+        await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
         onLocalDataChange?.();
         setNotice({
           tone: 'success',
@@ -525,6 +545,7 @@ export function SettingsPage({
         }
 
         const restoredSettings = await restoreBackup(localDb, backup);
+        await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
 
         onLocalDataReplace(restoredSettings);
         setNotice({
@@ -596,6 +617,7 @@ export function SettingsPage({
         }
       );
       await onSettingsChange(resetSettings);
+      await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
       onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'Локальні дані очищено.' });
     } catch {
@@ -620,6 +642,7 @@ export function SettingsPage({
     try {
       const now = toLocalIsoString(new Date());
       const demoData = await replaceLocalDataWithDemo(localDb, now.slice(0, 10), now);
+      await backupReminderRepository.resetAnchor(now);
 
       onLocalDataReplace(demoData.settings);
       onLocalDataChange?.();
@@ -916,6 +939,34 @@ export function SettingsPage({
 
       <section className="settings-page__section" aria-labelledby="data-settings-title">
         <h2 id="data-settings-title">Дані</h2>
+        <label className="settings-page__field">
+          <span>Нагадувати про backup</span>
+          <select
+            aria-invalid={errors.backupReminderIntervalDays ? 'true' : 'false'}
+            aria-describedby={
+              errors.backupReminderIntervalDays
+                ? 'backupReminderIntervalDays-error'
+                : 'backupReminderIntervalDays-help'
+            }
+            value={values.backupReminderIntervalDays}
+            onChange={updateField('backupReminderIntervalDays')}
+          >
+            {BACKUP_REMINDER_INTERVAL_DAYS.map((days) => (
+              <option value={days} key={days}>
+                Кожні {days} днів
+              </option>
+            ))}
+          </select>
+          <small id="backupReminderIntervalDays-help">
+            Як зробити: натисніть «Експорт» нижче та збережіть JSON-файл у надійному
+            місці. Після цього нагадування зникне.
+          </small>
+          {errors.backupReminderIntervalDays ? (
+            <small id="backupReminderIntervalDays-error">
+              {errors.backupReminderIntervalDays}
+            </small>
+          ) : null}
+        </label>
         <div className="settings-page__actions">
           <button
             type="button"
@@ -983,20 +1034,47 @@ export function SettingsPage({
         </div>
       </section>
 
-      <section className="settings-page__section" aria-labelledby="faq-settings-title">
-        <h2 id="faq-settings-title">FAQ</h2>
-        <div className="settings-page__faq">
-          {FAQ_ITEMS.map((item) => (
-            <details key={item.question}>
-              <summary>{item.question}</summary>
-              <p>{item.answer}</p>
-            </details>
-          ))}
-        </div>
+      <section
+        className="settings-page__section settings-page__section--faq"
+        aria-labelledby="faq-settings-title"
+      >
+        <details className="settings-page__faq-dropdown">
+          <summary>
+            <span
+              id="faq-settings-title"
+              className="settings-page__faq-title"
+              role="heading"
+              aria-level={2}
+            >
+              FAQ
+            </span>
+            <span className="settings-page__faq-count">{FAQ_ITEMS.length} питань</span>
+            <ChevronDown size={20} aria-hidden="true" />
+          </summary>
+          <div className="settings-page__faq">
+            {FAQ_ITEMS.map((item) => (
+              <details key={item.question}>
+                <summary>{item.question}</summary>
+                <p>{item.answer}</p>
+              </details>
+            ))}
+          </div>
+        </details>
       </section>
 
       <section className="settings-page__section" aria-labelledby="info-settings-title">
         <h2 id="info-settings-title">Інформація</h2>
+        <a
+          className="settings-page__feedback-link"
+          href="https://t.me/natuselit"
+          target="_blank"
+          rel="noreferrer noopener"
+          aria-label="Зворотний звʼязок у Telegram"
+        >
+          <Send size={18} aria-hidden="true" />
+          <span>Зворотний звʼязок</span>
+          <ExternalLink size={16} aria-hidden="true" />
+        </a>
         <div className="settings-page__readonly-row">
           <span>Версія додатку</span>
           <strong>{appPackage.version}</strong>

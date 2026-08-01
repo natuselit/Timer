@@ -21,6 +21,7 @@ const settings: Settings = {
   coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
+  backupReminderIntervalDays: 14,
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T19:30:00.000+03:00'
@@ -42,7 +43,13 @@ describe('SettingsPage', () => {
       />
     );
 
-    expect(screen.getByRole('heading', { name: 'FAQ' })).toBeTruthy();
+    const faqHeading = screen.getByRole('heading', { name: 'FAQ' });
+    const faqDropdown = faqHeading.closest('details');
+
+    expect(faqDropdown?.open).toBe(false);
+    await user.click(faqHeading.closest('summary')!);
+    expect(faqDropdown?.open).toBe(true);
+
     const coefficientQuestion = screen.getByText('Як працює коефіцієнт?');
     const details = coefficientQuestion.closest('details');
 
@@ -52,6 +59,7 @@ describe('SettingsPage', () => {
     expect(
       screen.getByText(/В автоматичному режимі плановий час оплачується за x1/)
     ).toBeTruthy();
+    expect(screen.getByText(/оберіть локальний PDF табеля з текстовим шаром/i)).toBeTruthy();
   });
 
   it('requests the native decimal keyboard for numeric settings', () => {
@@ -75,5 +83,35 @@ describe('SettingsPage', () => {
     expect(monthlySalary.pattern).toBe('[0-9]*([.,][0-9]*)?');
     expect(holdDelay.type).toBe('text');
     expect(holdDelay.inputMode).toBe('decimal');
+  });
+
+  it('shows backup instructions and Telegram feedback without an author row', async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('Автор')).toBeNull();
+    expect(screen.queryByText('natuselit')).toBeNull();
+    expect(
+      screen.getByText(/Як зробити: натисніть «Експорт» нижче та збережіть JSON-файл/)
+    ).toBeTruthy();
+    const feedbackLink = screen.getByRole('link', {
+      name: /Зворотний звʼязок у Telegram/
+    }) as HTMLAnchorElement;
+    expect(feedbackLink.href).toBe('https://t.me/natuselit');
+
+    await user.selectOptions(screen.getByLabelText(/Нагадувати про backup/), '30');
+    await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ backupReminderIntervalDays: 30 })
+    );
   });
 });

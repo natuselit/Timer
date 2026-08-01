@@ -88,14 +88,13 @@ const createMissingShiftsFromSchedule = async (
   return createdCount;
 };
 
-export const importEnterpriseScheduleText = async (
+export const importParsedEnterpriseSchedule = async (
   repository: EnterpriseScheduleRepository,
-  source: string,
+  parsedResult: EnterpriseScheduleParseResult,
   now = toLocalIsoString(new Date()),
   options: EnterpriseScheduleImportOptions = {}
 ): Promise<EnterpriseScheduleImportResult> => {
-  const result = parseEnterpriseScheduleText(source);
-  const items = result.items.map((item) => toScheduleItem(item, now));
+  const items = parsedResult.items.map((item) => toScheduleItem(item, now));
   let createdShiftCount = 0;
 
   if (items.length > 0) {
@@ -112,11 +111,19 @@ export const importEnterpriseScheduleText = async (
   }
 
   return {
-    ...result,
+    ...parsedResult,
     savedCount: items.length,
     createdShiftCount
   };
 };
+
+export const importEnterpriseScheduleText = async (
+  repository: EnterpriseScheduleRepository,
+  source: string,
+  now = toLocalIsoString(new Date()),
+  options: EnterpriseScheduleImportOptions = {}
+): Promise<EnterpriseScheduleImportResult> =>
+  importParsedEnterpriseSchedule(repository, parseEnterpriseScheduleText(source), now, options);
 
 export const getEnterpriseScheduleByMonth = (
   repository: EnterpriseScheduleRepository,

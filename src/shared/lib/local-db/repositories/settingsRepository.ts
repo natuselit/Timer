@@ -2,6 +2,7 @@ import {
   calculateMonthlySalaryFromHourlyRate,
   DEFAULT_SETTINGS,
   GRADE_VALUES,
+  isBackupReminderIntervalDays,
   isThemePreference,
   type Grade,
   type GradePercentSet,
@@ -75,7 +76,12 @@ export const normalizeSettingsRecord = (
     ),
     themePreference: isThemePreference(storedSettings.themePreference)
       ? storedSettings.themePreference
-      : DEFAULT_SETTINGS.themePreference
+      : DEFAULT_SETTINGS.themePreference,
+    backupReminderIntervalDays: isBackupReminderIntervalDays(
+      storedSettings.backupReminderIntervalDays
+    )
+      ? storedSettings.backupReminderIntervalDays
+      : DEFAULT_SETTINGS.backupReminderIntervalDays
   };
 };
 

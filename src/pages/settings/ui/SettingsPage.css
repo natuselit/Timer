@@ -243,6 +243,27 @@
   overflow-wrap: anywhere;
 }
 
+.settings-page__feedback-link {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-control);
+  background: var(--color-primary-surface);
+  color: var(--color-primary);
+  font-weight: 800;
+  text-align: center;
+  text-decoration: none;
+}
+
+.settings-page__feedback-link:focus-visible {
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
+  outline: none;
+}
+
 .settings-page__toggle {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 48px;
@@ -394,14 +415,77 @@
 }
 
 .settings-page__actions .settings-page__demo {
+  grid-column: 1 / -1;
   border-color: var(--color-primary-border);
   background: var(--color-primary-soft);
   color: var(--color-primary);
 }
 
+.settings-page__section.settings-page__section--faq {
+  display: block;
+  overflow: hidden;
+  padding: 0;
+}
+
+.settings-page__faq-dropdown > summary {
+  display: grid;
+  min-height: 52px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  list-style: none;
+}
+
+.settings-page__faq-dropdown > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-page__faq-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  font-size: 1.18rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.settings-page__faq-title::before {
+  width: 4px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--color-primary);
+  content: '';
+}
+
+.settings-page__faq-count {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.settings-page__faq-dropdown > summary svg {
+  color: var(--color-primary);
+  transition: transform 160ms ease;
+}
+
+.settings-page__faq-dropdown[open] > summary {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settings-page__faq-dropdown[open] > summary svg {
+  transform: rotate(180deg);
+}
+
 .settings-page__faq {
   display: grid;
   gap: 8px;
+  padding: 14px 20px 20px;
 }
 
 .settings-page__faq details {
@@ -504,7 +588,11 @@
   }
 
   .settings-page__actions {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .settings-page__actions .settings-page__demo {
+    grid-column: auto;
   }
 }
 

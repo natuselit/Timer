@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import {
   calculateEnterpriseScheduleComparison,
+  parseEnterpriseScheduleText,
   type EnterpriseScheduleItem
 } from '../../../entities/enterprise-schedule';
 import type { Shift } from '../../../entities/shift';
@@ -32,6 +33,7 @@ import {
   getSettings,
   getShiftsByMonth,
   importEnterpriseScheduleText,
+  importParsedEnterpriseSchedule,
   parseBackupJson,
   parseBackupImportJson,
   recalculateHourlyRateSnapshotsForAllShifts,
@@ -89,6 +91,7 @@ const makeSettings = (overrides: Partial<Settings> = {}): Settings => ({
   coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
+  backupReminderIntervalDays: 14,
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-06-23T10:00:00.000Z',
@@ -237,6 +240,51 @@ describe('database migrations', () => {
       await migratedDatabase.delete();
     }
   });
+
+  it('forces the new grade preset without rewriting historical shift snapshots', async () => {
+    const databaseName = makeDbName();
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase.version(3).stores({
+      settings: '&id',
+      shifts: '&id,&date,updatedAt,createdAt',
+      enterpriseSchedule: '&id,&date,createdAt',
+      appMeta: '&key'
+    });
+    const { backupReminderIntervalDays: _interval, ...legacySettings } = makeSettings({
+      gradeSalaryBonusPercents: [1, 2, 3, 4]
+    });
+    const legacyShift = makeShift({
+      endTime: '2026-06-10T14:30:00.000Z',
+      gradeSnapshot: {
+        currentGrade: 3,
+        desiredGrade: 4,
+        gradeSalaryBonusPercents: [1, 2, 3, 4],
+        gradeNormPercents: [100, 120, 140, 160],
+        cumulativeSalaryBonusPercent: 6
+      }
+    });
+
+    await legacyDatabase.table('settings').put({ ...legacySettings, id: 'default' });
+    await legacyDatabase.table('shifts').put(legacyShift);
+    legacyDatabase.close();
+
+    const migratedDatabase = new ShifterDatabase(databaseName);
+
+    try {
+      await expect(migratedDatabase.settings.get('default')).resolves.toMatchObject({
+        gradeSalaryBonusPercents: [10, 10, 15, 15]
+      });
+      await expect(migratedDatabase.shifts.get(legacyShift.id)).resolves.toMatchObject({
+        gradeSnapshot: {
+          gradeSalaryBonusPercents: [1, 2, 3, 4],
+          cumulativeSalaryBonusPercent: 6
+        }
+      });
+    } finally {
+      migratedDatabase.close();
+      await migratedDatabase.delete();
+    }
+  });
 });
 
 describe('settings repository use-cases', () => {
@@ -248,7 +296,7 @@ describe('settings repository use-cases', () => {
       monthlyBonus: 2000,
       currentGrade: 1,
       desiredGrade: 2,
-      gradeSalaryBonusPercents: [10, 10, 10, 10],
+      gradeSalaryBonusPercents: [10, 10, 15, 15],
       gradeNormPercents: [100, 120, 140, 160],
       forecastDays: 30,
       arriveHoldDelayMs: 1500,
@@ -256,6 +304,7 @@ describe('settings repository use-cases', () => {
       coefficientMode: 'auto',
       shiftDetectionMode: 'auto',
       themePreference: 'system',
+      backupReminderIntervalDays: 14,
       incognitoEnabled: false,
       onboardingCompleted: false,
       updatedAt: new Date(0).toISOString()
@@ -270,7 +319,7 @@ describe('settings repository use-cases', () => {
       monthlyBonus: 2500,
       currentGrade: 2,
       desiredGrade: 3,
-      gradeSalaryBonusPercents: [10, 10, 10, 10],
+      gradeSalaryBonusPercents: [10, 10, 15, 15],
       gradeNormPercents: [100, 120, 140, 160],
       forecastDays: 30,
       arriveHoldDelayMs: 1200,
@@ -278,6 +327,7 @@ describe('settings repository use-cases', () => {
       coefficientMode: 'x1.5',
       shiftDetectionMode: 'manual',
       themePreference: 'dark',
+      backupReminderIntervalDays: 30,
       incognitoEnabled: true,
       onboardingCompleted: true,
       updatedAt: '2026-06-23T10:00:00.000Z'
@@ -1132,6 +1182,55 @@ describe('shift repository use-cases', () => {
 });
 
 describe('enterprise schedule repository use-cases', () => {
+  it('imports an already parsed multi-month schedule and preserves existing shifts', async () => {
+    const existingShift = makeShift({
+      id: 'existing-june-shift',
+      date: '2026-06-02',
+      startTime: '2026-06-02T06:30:00.000+03:00',
+      endTime: '2026-06-02T14:30:00.000+03:00'
+    });
+    const parsedResult = parseEnterpriseScheduleText(`--30.05.2026--
+In time: 06:00
+Out time: 15:29
+Total: 09:29
+--31.05.2026--
+In time:
+Out time:
+Total: :
+--01.06.2026--
+In time: 05:57
+Out time: 16:52
+Total: 10:55
+--02.06.2026--
+In time: 06:30
+Out time: 14:30
+Total: 08:00`);
+
+    await shiftRepository.createShift(existingShift);
+
+    const result = await importParsedEnterpriseSchedule(
+      enterpriseScheduleRepository,
+      parsedResult,
+      '2026-06-23T10:00:00.000+03:00',
+      {
+        shiftRepository,
+        settings: makeSettings({ monthlySalary: 36_960 })
+      }
+    );
+
+    expect(result.savedCount).toBe(3);
+    expect(result.createdShiftCount).toBe(2);
+    expect(result.skippedEmptyCount).toBe(1);
+    await expect(
+      getEnterpriseScheduleBetween(
+        enterpriseScheduleRepository,
+        '2026-05-01',
+        '2026-06-30'
+      )
+    ).resolves.toHaveLength(3);
+    await expect(shiftRepository.getShiftById(existingShift.id)).resolves.toEqual(existingShift);
+  });
+
   it('imports valid schedule items and keeps invalid blocks out of storage', async () => {
     const result = await importEnterpriseScheduleText(
       enterpriseScheduleRepository,
@@ -1446,7 +1545,7 @@ describe('backup use-cases', () => {
     });
   });
 
-  it('round-trips schema v7 ticket fact, downtime and reviewed warnings', () => {
+  it('round-trips schema v8 ticket fact, downtime, settings and reviewed warnings', () => {
     const shift = makeShift({
       id: 'production-backup-shift',
       endTime: '2026-06-10T14:30:00.000Z',
@@ -1487,6 +1586,26 @@ describe('backup use-cases', () => {
           reviewedAt: '2026-06-24T11:00:00.000Z'
         }
       ]
+    });
+  });
+
+  it('migrates schema v7 to the required grade preset and default reminder interval', () => {
+    const {
+      backupReminderIntervalDays: _interval,
+      ...legacySettings
+    } = makeSettings({ gradeSalaryBonusPercents: [1, 2, 3, 4] });
+    const source = JSON.stringify({
+      schemaVersion: 7,
+      exportedAt: '2026-08-01T08:00:00.000Z',
+      settings: legacySettings,
+      shifts: [],
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: []
+    });
+
+    expect(parseBackupJson(source).settings).toMatchObject({
+      gradeSalaryBonusPercents: [10, 10, 15, 15],
+      backupReminderIntervalDays: 14
     });
   });
 
@@ -1627,9 +1746,10 @@ describe('backup use-cases', () => {
     expect(parsed.settings).toMatchObject({
       currentGrade: 1,
       desiredGrade: 2,
-      gradeSalaryBonusPercents: [10, 10, 10, 10],
+      gradeSalaryBonusPercents: [10, 10, 15, 15],
       gradeNormPercents: [100, 120, 140, 160],
-      themePreference: 'system'
+      themePreference: 'system',
+      backupReminderIntervalDays: 14
     });
     expect(parsed.shifts[0]).toMatchObject({
       id: 'legacy-v2-shift',
@@ -1794,6 +1914,24 @@ describe('backup use-cases', () => {
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
     expect(() => parseBackupJson(source)).toThrow('Поле monthlySalary не може бути відʼємним.');
+  });
+
+  it('rejects an unsupported backup reminder interval in schema v8', () => {
+    const parsed = JSON.parse(
+      serializeBackup({
+        schemaVersion: BACKUP_SCHEMA_VERSION,
+        exportedAt: '2026-08-01T08:00:00.000Z',
+        settings: makeSettings(),
+        shifts: [],
+        enterpriseSchedule: [],
+        reviewedScheduleWarnings: []
+      })
+    );
+    parsed.settings.backupReminderIntervalDays = 10;
+
+    expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(
+      'Періодичність backup має бути 7, 14 або 30 днів.'
+    );
   });
 
   it('rejects schema v4 backup with invalid theme preference', () => {

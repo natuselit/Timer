@@ -28,6 +28,7 @@ describe('settings domain types', () => {
       coefficientMode: 'auto',
       shiftDetectionMode: 'auto',
       themePreference: 'system',
+      backupReminderIntervalDays: 14,
       incognitoEnabled: false,
       onboardingCompleted: true,
       updatedAt: '2026-06-23T08:00:00.000+03:00'
@@ -53,10 +54,10 @@ describe('settings domain types', () => {
   });
 
   it('calculates cumulative grade salary bonus', () => {
-    expect(calculateCumulativeGradePercent(1, [10, 10, 10, 10])).toBe(10);
-    expect(calculateCumulativeGradePercent(2, [10, 10, 10, 10])).toBe(20);
-    expect(calculateCumulativeGradePercent(3, [10, 10, 10, 10])).toBe(30);
-    expect(calculateCumulativeGradePercent(4, [10, 10, 10, 10])).toBe(40);
+    expect(calculateCumulativeGradePercent(1, [10, 10, 15, 15])).toBe(10);
+    expect(calculateCumulativeGradePercent(2, [10, 10, 15, 15])).toBe(20);
+    expect(calculateCumulativeGradePercent(3, [10, 10, 15, 15])).toBe(35);
+    expect(calculateCumulativeGradePercent(4, [10, 10, 15, 15])).toBe(50);
   });
 
   it('selects the next desired grade for current grade changes', () => {

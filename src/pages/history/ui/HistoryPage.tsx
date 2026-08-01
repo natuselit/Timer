@@ -1206,7 +1206,7 @@ export function HistoryPage({
                               <div className="history-page__ticket-detail-body">
                                 <dl className="history-page__ticket-detail-metrics">
                                   <div>
-                                    <dt>Норма / 8 год</dt>
+                                    <dt>Норма за 8 год</dt>
                                     <dd>{ticket.normPerEightHours} шт</dd>
                                   </div>
                                   <div>
@@ -1222,7 +1222,7 @@ export function HistoryPage({
                                     <dd>{formatDurationMinutes(production.elapsedMinutes)}</dd>
                                   </div>
                                   <div>
-                                    <dt>Продуктивно</dt>
+                                    <dt>Продуктивний час</dt>
                                     <dd>{formatDurationMinutes(production.productiveMinutes)}</dd>
                                   </div>
                                   <div>
@@ -1230,7 +1230,7 @@ export function HistoryPage({
                                     <dd>{formatDurationMinutes(production.downtimeMinutes)}</dd>
                                   </div>
                                   <div>
-                                    <dt>Виконання G{production.currentGrade}</dt>
+                                    <dt>Виконання %</dt>
                                     <dd>
                                       {production.completionPercent === null
                                         ? '—'
@@ -1576,7 +1576,7 @@ export function HistoryPage({
                                 {production.targets.map((target) => `G${target.grade}: ${target.quantity}`).join(' · ')}
                               </span>
                               <span>
-                                Виконання G{production.currentGrade}:{' '}
+                                Виконання %:{' '}
                                 {production.completionPercent === null
                                   ? '—'
                                   : `${Math.round(production.completionPercent)}%`}

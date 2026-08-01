@@ -160,6 +160,7 @@ export const calculateAnalyticsSummary = ({
     averageDowntimeMinutesPerTicket: 0,
     downtimePercent: null
   };
+  let gradeOneTarget = 0;
 
   completedShifts.forEach((shift) => {
     const salary = calculateSalaryBreakdown(shift);
@@ -213,6 +214,7 @@ export const calculateAnalyticsSummary = ({
         production.actualQuantity += ticket.actualQuantity;
         production.productiveMinutes += ticketSummary.productiveMinutes;
         production.downtimeMinutes += ticketSummary.downtimeMinutes;
+        gradeOneTarget += ticketSummary.targets[0]?.quantity ?? 0;
         production.currentGradeTarget += ticketSummary.currentTarget;
       });
   });
@@ -234,8 +236,8 @@ export const calculateAnalyticsSummary = ({
   const plannedSalary = workSalary + effectiveMonthlyBonus + gradeBonus;
 
   production.completionPercent =
-    production.currentGradeTarget > 0
-      ? (production.actualQuantity / production.currentGradeTarget) * 100
+    gradeOneTarget > 0
+      ? (production.actualQuantity / gradeOneTarget) * 100
       : null;
   production.averageActualPerTicket =
     production.filledTicketCount > 0

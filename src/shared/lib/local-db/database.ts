@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type { AppMetaRecord, SettingsRecord } from './types';
 import type { EnterpriseScheduleItem } from '../../../entities/enterprise-schedule';
 import type { Shift, WorkTicket } from '../../../entities/shift';
+import { DEFAULT_GRADE_SALARY_BONUS_PERCENTS } from '../../../entities/settings';
 
 type LegacyDowntimeInterval = {
   id: string;
@@ -124,6 +125,24 @@ export class ShifterDatabase extends Dexie {
                   };
                 })
               : [];
+          });
+      });
+
+    this.version(4)
+      .stores({
+        settings: '&id',
+        shifts: '&id,&date,updatedAt,createdAt',
+        enterpriseSchedule: '&id,&date,createdAt',
+        appMeta: '&key'
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table<SettingsRecord, 'default'>('settings')
+          .toCollection()
+          .modify((settings) => {
+            settings.gradeSalaryBonusPercents = [
+              ...DEFAULT_GRADE_SALARY_BONUS_PERCENTS
+            ];
           });
       });
   }

@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Edit3, Eye, EyeOff, Trash2, X } from 'lucide-react';
+import {
+  Check,
+  Clock3,
+  Download,
+  Edit3,
+  Ellipsis,
+  Eye,
+  EyeOff,
+  Tickets,
+  Trash2,
+  X
+} from 'lucide-react';
 import { BottomNavigation } from '../../../widgets/bottom-navigation';
 import { AppShell } from '../../../shared/ui/app-shell';
 import {
@@ -15,6 +26,7 @@ import { SchedulePage } from '../../schedule';
 import { SettingsPage } from '../../settings';
 import {
   calculateSalaryBreakdown,
+  calculateShiftProductionSummary,
   calculateTicketProductionSummary,
   getEffectiveCoefficient,
   type ISODateTimeString,
@@ -24,6 +36,7 @@ import {
 import {
   adjustWorkTicketDowntime,
   addWorkTicketToActiveShift,
+  BackupReminderRepository,
   completeWorkTicket,
   createShift,
   deleteWorkTicketFromActiveShift,
@@ -35,8 +48,10 @@ import {
   ShiftConstraintError,
   ShiftRepository,
   updateWorkTicketInActiveShift,
-  updateShift
+  updateShift,
+  type BackupReminderStatus
 } from '../../../shared/lib/local-db';
+import { downloadBackup } from '../../../shared/lib/backup';
 import {
   combineLocalDateAndTime,
   getCalendarPresetSelection,
@@ -53,11 +68,7 @@ import {
   type CalendarDateRange,
   type CalendarRangePreset
 } from '../../../shared/lib/date-time';
-import {
-  INCOGNITO_FINANCIAL_MASK,
-  formatHourlyRate,
-  formatMoney
-} from '../../../shared/lib/format';
+import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import {
   copyTextToClipboard,
   formatShiftClipboardText
@@ -93,6 +104,8 @@ type TicketEditDraft = {
   downtimeMinutes: string;
 };
 
+type DowntimeAdjustmentMode = 'add' | 'subtract';
+
 const createEmptyTicketEditDraft = (): TicketEditDraft => ({
   normPerEightHours: '',
   startedAt: '',
@@ -103,6 +116,7 @@ const createEmptyTicketEditDraft = (): TicketEditDraft => ({
 
 const shiftRepository = new ShiftRepository(localDb);
 const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
+const backupReminderRepository = new BackupReminderRepository(localDb);
 
 const getShiftTitle = (shift: Shift): string => (shift.type === 'first' ? '1 зміна' : '2 зміна');
 
@@ -138,14 +152,6 @@ const normalizeTicketNormDraft = (value: string): string => {
   const digits = value.replace(/\D/g, '');
 
   return digits === '' ? '' : String(Math.min(Number(digits), 999));
-};
-
-const normalizeSignedIntegerDraft = (value: string): string => {
-  const trimmed = value.trim();
-  const sign = trimmed.startsWith('-') ? '-' : trimmed.startsWith('+') ? '+' : '';
-  const digits = trimmed.replace(/\D/g, '');
-
-  return `${sign}${digits}`;
 };
 
 const getTicketErrorMessage = (error: unknown): string =>
@@ -249,24 +255,91 @@ export function MainPage({
   const [ticketError, setTicketError] = useState<string | null>(null);
   const [isAddingTicket, setIsAddingTicket] = useState(false);
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
+  const [isTicketMenuOpen, setIsTicketMenuOpen] = useState(false);
+  const [openCompletedTicketMenuId, setOpenCompletedTicketMenuId] = useState<string | null>(null);
+  const [isDowntimeModalOpen, setIsDowntimeModalOpen] = useState(false);
+  const [downtimeAdjustmentMode, setDowntimeAdjustmentMode] =
+    useState<DowntimeAdjustmentMode>('add');
   const [ticketActualDraft, setTicketActualDraft] = useState('');
   const [downtimeAdjustmentDraft, setDowntimeAdjustmentDraft] = useState('');
+  const [downtimeModalError, setDowntimeModalError] = useState<string | null>(null);
+  const [isCompletionModalOpen, setIsCompletionModalOpen] = useState(false);
+  const [completionModalError, setCompletionModalError] = useState<string | null>(null);
   const [isCompletingTicket, setIsCompletingTicket] = useState(false);
   const [clipboardNotice, setClipboardNotice] = useState<{
     tone: 'success' | 'warning';
     message: string;
   } | null>(null);
   const [isTogglingIncognito, setIsTogglingIncognito] = useState(false);
+  const [backupReminderStatus, setBackupReminderStatus] =
+    useState<BackupReminderStatus | null>(null);
+  const [isExportingBackup, setIsExportingBackup] = useState(false);
+  const [backupReminderError, setBackupReminderError] = useState<string | null>(null);
   const [localDataRefreshKey, setLocalDataRefreshKey] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
   const [sharedCalendarRange, setSharedCalendarRange] = useState<CalendarDateRange | null>(null);
   const [allTimeRange, setAllTimeRange] = useState<CalendarDateRange | null>(null);
   const [activeCalendarRangePreset, setActiveCalendarRangePreset] =
     useState<CalendarRangePreset | null>('month');
+  const ticketMenuRef = useRef<HTMLDivElement | null>(null);
+  const ticketMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const completedTicketMenuRef = useRef<HTMLDivElement | null>(null);
+  const completedTicketMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const downtimeInputRef = useRef<HTMLInputElement | null>(null);
+  const completeTicketButtonRef = useRef<HTMLButtonElement | null>(null);
+  const actualQuantityInputRef = useRef<HTMLInputElement | null>(null);
 
   const notifyLocalDataChange = useCallback(() => {
     setLocalDataRefreshKey((current) => current + 1);
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    let timeoutId: number | null = null;
+
+    const loadBackupReminder = async () => {
+      const checkedAt = toLocalIsoString(new Date());
+
+      try {
+        const status = await backupReminderRepository.getStatus(
+          settings.backupReminderIntervalDays,
+          checkedAt
+        );
+
+        if (!isMounted) {
+          return;
+        }
+
+        setBackupReminderStatus(status);
+
+        if (!status.isDue) {
+          const remainingMs = Math.max(
+            1_000,
+            new Date(status.dueAt).getTime() - new Date(checkedAt).getTime()
+          );
+
+          timeoutId = window.setTimeout(
+            () => void loadBackupReminder(),
+            Math.min(remainingMs, 24 * 60 * 60 * 1_000)
+          );
+        }
+      } catch {
+        if (isMounted) {
+          setBackupReminderStatus(null);
+        }
+      }
+    };
+
+    void loadBackupReminder();
+
+    return () => {
+      isMounted = false;
+
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [dataVersion, localDataRefreshKey, settings.backupReminderIntervalDays]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -364,6 +437,17 @@ export function MainPage({
       endTime: latestCompletedShift.endTime
     });
   }, [latestCompletedShift]);
+  const latestCompletedProduction = useMemo(() => {
+    if (!latestCompletedShift) {
+      return null;
+    }
+
+    return calculateShiftProductionSummary({
+      shift: latestCompletedShift,
+      fallbackCurrentGrade: settings.currentGrade,
+      fallbackGradeNormPercents: settings.gradeNormPercents
+    });
+  }, [latestCompletedShift, settings.currentGrade, settings.gradeNormPercents]);
   const currentEarning = activeSalaryBreakdown?.totalAmount ?? 0;
   const currentCoefficient = activeShift
     ? getEffectiveCoefficient(activeShift, now)
@@ -376,6 +460,20 @@ export function MainPage({
 
     return getTicketTargets(activeShift, activeWorkTicket, now, settings);
   }, [activeShift, activeWorkTicket, now, settings.currentGrade, settings.desiredGrade, settings.gradeNormPercents]);
+  const availableDowntimeAdjustmentMinutes = useMemo(() => {
+    if (!activeWorkTicket) {
+      return 0;
+    }
+
+    if (downtimeAdjustmentMode === 'subtract') {
+      return activeWorkTicket.downtimeMinutes;
+    }
+
+    return Math.max(
+      0,
+      getDurationMinutes(activeWorkTicket.startedAt, now) - activeWorkTicket.downtimeMinutes
+    );
+  }, [activeWorkTicket, downtimeAdjustmentMode, now]);
   const completedTicketTargets = useMemo(() => {
     if (!activeShift) {
       return [];
@@ -385,6 +483,7 @@ export function MainPage({
       .filter((ticket): ticket is WorkTicket & { endedAt: ISODateTimeString } => ticket.endedAt !== null)
       .map((ticket) => ({
         ticket,
+        ticketNumber: activeShift.workTickets.findIndex(({ id }) => id === ticket.id) + 1,
         targets: getTicketTargets(activeShift, ticket, ticket.endedAt, settings)
       }))
       .reverse();
@@ -393,7 +492,134 @@ export function MainPage({
   useEffect(() => {
     setTicketActualDraft('');
     setDowntimeAdjustmentDraft('');
+    setIsTicketMenuOpen(false);
+    setOpenCompletedTicketMenuId(null);
+    setIsDowntimeModalOpen(false);
+    setDowntimeAdjustmentMode('add');
+    setDowntimeModalError(null);
+    setIsCompletionModalOpen(false);
+    setCompletionModalError(null);
   }, [activeWorkTicket?.id]);
+
+  useEffect(() => {
+    if (!isTicketMenuOpen) {
+      return;
+    }
+
+    const closeMenuOnPointerDown = (event: PointerEvent) => {
+      if (!ticketMenuRef.current?.contains(event.target as Node)) {
+        setIsTicketMenuOpen(false);
+      }
+    };
+    const closeMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsTicketMenuOpen(false);
+        ticketMenuButtonRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('pointerdown', closeMenuOnPointerDown);
+    document.addEventListener('keydown', closeMenuOnEscape);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeMenuOnPointerDown);
+      document.removeEventListener('keydown', closeMenuOnEscape);
+    };
+  }, [isTicketMenuOpen]);
+
+  useEffect(() => {
+    if (openCompletedTicketMenuId === null) {
+      return;
+    }
+
+    const closeMenuOnPointerDown = (event: PointerEvent) => {
+      if (!completedTicketMenuRef.current?.contains(event.target as Node)) {
+        setOpenCompletedTicketMenuId(null);
+      }
+    };
+    const closeMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenCompletedTicketMenuId(null);
+        completedTicketMenuButtonRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('pointerdown', closeMenuOnPointerDown);
+    document.addEventListener('keydown', closeMenuOnEscape);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeMenuOnPointerDown);
+      document.removeEventListener('keydown', closeMenuOnEscape);
+    };
+  }, [openCompletedTicketMenuId]);
+
+  useEffect(() => {
+    if (!isDowntimeModalOpen && !isCompletionModalOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const closeModalOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || pendingTicketId !== null || isCompletingTicket) {
+        return;
+      }
+
+      if (isDowntimeModalOpen) {
+        setIsDowntimeModalOpen(false);
+        setDowntimeAdjustmentDraft('');
+        setDowntimeModalError(null);
+        ticketMenuButtonRef.current?.focus();
+      } else {
+        setIsCompletionModalOpen(false);
+        setTicketActualDraft('');
+        setCompletionModalError(null);
+        completeTicketButtonRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('keydown', closeModalOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', closeModalOnEscape);
+    };
+  }, [isCompletionModalOpen, isCompletingTicket, isDowntimeModalOpen, pendingTicketId]);
+
+  useEffect(() => {
+    if (isDowntimeModalOpen) {
+      downtimeInputRef.current?.focus();
+    }
+  }, [isDowntimeModalOpen]);
+
+  useEffect(() => {
+    if (isCompletionModalOpen) {
+      actualQuantityInputRef.current?.focus();
+    }
+  }, [isCompletionModalOpen]);
+
+  const exportBackupFromReminder = async () => {
+    setIsExportingBackup(true);
+    setBackupReminderError(null);
+
+    try {
+      const exportedAt = toLocalIsoString(new Date());
+      const backup = await downloadBackup(localDb, exportedAt);
+
+      await backupReminderRepository.markExported(backup.exportedAt);
+      setBackupReminderStatus(
+        await backupReminderRepository.getStatus(
+          settings.backupReminderIntervalDays,
+          backup.exportedAt
+        )
+      );
+    } catch {
+      setBackupReminderError('Не вдалося створити JSON backup. Спробуйте ще раз.');
+    } finally {
+      setIsExportingBackup(false);
+    }
+  };
 
   const toggleIncognito = async () => {
     setTimerError(null);
@@ -537,21 +763,69 @@ export function MainPage({
     }
   };
 
+  const openDowntimeModal = () => {
+    setIsTicketMenuOpen(false);
+    setDowntimeAdjustmentMode('add');
+    setDowntimeAdjustmentDraft('');
+    setDowntimeModalError(null);
+    setIsDowntimeModalOpen(true);
+  };
+
+  const closeDowntimeModal = () => {
+    if (pendingTicketId !== null) {
+      return;
+    }
+
+    setIsDowntimeModalOpen(false);
+    setDowntimeAdjustmentDraft('');
+    setDowntimeModalError(null);
+    window.setTimeout(() => ticketMenuButtonRef.current?.focus(), 0);
+  };
+
+  const openCompletionModal = () => {
+    setTicketActualDraft('');
+    setCompletionModalError(null);
+    setIsCompletionModalOpen(true);
+  };
+
+  const closeCompletionModal = () => {
+    if (isCompletingTicket) {
+      return;
+    }
+
+    setIsCompletionModalOpen(false);
+    setTicketActualDraft('');
+    setCompletionModalError(null);
+    window.setTimeout(() => completeTicketButtonRef.current?.focus(), 0);
+  };
+
   const addTicketDowntimeAdjustment = async () => {
     if (!activeShift || !activeWorkTicket) {
       return;
     }
 
-    const deltaMinutes = Number(downtimeAdjustmentDraft);
+    const adjustmentMinutes = Number(downtimeAdjustmentDraft);
 
-    if (!Number.isSafeInteger(deltaMinutes) || deltaMinutes === 0) {
-      setTicketError('Вкажіть цілу ненульову кількість хвилин, наприклад +15 або -5.');
+    if (!Number.isSafeInteger(adjustmentMinutes) || adjustmentMinutes <= 0) {
+      setDowntimeModalError('Вкажіть цілу кількість хвилин, більшу за 0.');
       return;
     }
 
+    if (adjustmentMinutes > availableDowntimeAdjustmentMinutes) {
+      setDowntimeModalError(
+        downtimeAdjustmentMode === 'add'
+          ? `Можна додати не більше ${availableDowntimeAdjustmentMinutes} хв.`
+          : `Можна відняти не більше ${availableDowntimeAdjustmentMinutes} хв.`
+      );
+      return;
+    }
+
+    const deltaMinutes = downtimeAdjustmentMode === 'subtract'
+      ? -adjustmentMinutes
+      : adjustmentMinutes;
     const changedAt = toLocalIsoString(new Date());
     setPendingTicketId(activeWorkTicket.id);
-    setTicketError(null);
+    setDowntimeModalError(null);
 
     try {
       const updatedShift = await adjustWorkTicketDowntime(shiftRepository, {
@@ -563,9 +837,11 @@ export function MainPage({
       setNow(changedAt);
       setActiveShift(updatedShift);
       setDowntimeAdjustmentDraft('');
+      setIsDowntimeModalOpen(false);
       notifyLocalDataChange();
+      window.setTimeout(() => ticketMenuButtonRef.current?.focus(), 0);
     } catch (error) {
-      setTicketError(getTicketErrorMessage(error));
+      setDowntimeModalError(getTicketErrorMessage(error));
     } finally {
       setPendingTicketId(null);
     }
@@ -577,20 +853,20 @@ export function MainPage({
     }
 
     if (ticketActualDraft.trim() === '') {
-      setTicketError('Вкажіть цілу фактичну кількість від 0.');
+      setCompletionModalError('Вкажіть цілу фактичну кількість від 0.');
       return;
     }
 
     const actualQuantity = Number(ticketActualDraft);
 
     if (!Number.isSafeInteger(actualQuantity) || actualQuantity < 0) {
-      setTicketError('Вкажіть цілу фактичну кількість від 0.');
+      setCompletionModalError('Вкажіть цілу фактичну кількість від 0.');
       return;
     }
 
     const endedAt = toLocalIsoString(new Date());
     setIsCompletingTicket(true);
-    setTicketError(null);
+    setCompletionModalError(null);
 
     try {
       const updatedShift = await completeWorkTicket(shiftRepository, {
@@ -601,9 +877,11 @@ export function MainPage({
 
       setNow(endedAt);
       setActiveShift(updatedShift);
+      setTicketActualDraft('');
+      setIsCompletionModalOpen(false);
       notifyLocalDataChange();
     } catch (error) {
-      setTicketError(getTicketErrorMessage(error));
+      setCompletionModalError(getTicketErrorMessage(error));
     } finally {
       setIsCompletingTicket(false);
     }
@@ -793,6 +1071,28 @@ export function MainPage({
         ) : null
       }
     >
+      {backupReminderStatus?.isDue ? (
+        <aside className="main-page__backup-reminder" role="alert" aria-live="assertive">
+          <div className="main-page__backup-reminder-copy">
+            <strong>Час зберегти backup</strong>
+            <p>
+              Створіть актуальну резервну копію локальних даних. Нагадування зникне
+              після завантаження JSON-файлу.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={isExportingBackup}
+            onClick={() => void exportBackupFromReminder()}
+          >
+            <Download size={18} aria-hidden="true" />
+            {isExportingBackup ? 'Створення...' : 'Створити backup'}
+          </button>
+          {backupReminderError ? (
+            <p className="main-page__backup-reminder-error">{backupReminderError}</p>
+          ) : null}
+        </aside>
+      ) : null}
       {activePage === 'history' ? (
         <HistoryPage
           key={`history-${dataVersion}-${localDataRefreshKey}`}
@@ -861,16 +1161,10 @@ export function MainPage({
                 </p>
                 <span
                   className="main-page__coefficient-badge"
-                  data-coefficient={settings.incognitoEnabled ? 'masked' : currentCoefficient}
-                  aria-label={`Поточний коефіцієнт: ${
-                    settings.incognitoEnabled
-                      ? INCOGNITO_FINANCIAL_MASK
-                      : `x${currentCoefficient}`
-                  }`}
+                  data-coefficient={currentCoefficient}
+                  aria-label={`Поточний коефіцієнт: x${currentCoefficient}`}
                 >
-                  {settings.incognitoEnabled
-                    ? INCOGNITO_FINANCIAL_MASK
-                    : `x${currentCoefficient}`}
+                  x{currentCoefficient}
                 </span>
               </div>
               <div className="main-page__timer-title-row">
@@ -915,7 +1209,14 @@ export function MainPage({
             ) : null}
           </section>
 
-          <section className="main-page__tasker" aria-labelledby="active-ticket-title">
+          <section
+            className={
+              activeWorkTicket
+                ? 'main-page__tasker main-page__tasker--active-ticket'
+                : 'main-page__tasker'
+            }
+            aria-labelledby="active-ticket-title"
+          >
                   <div className="main-page__tasker-header">
                     <div>
                       <p className="main-page__label">Виробіток</p>
@@ -923,26 +1224,70 @@ export function MainPage({
                     </div>
                     <div className="main-page__tasker-header-tools">
                       <span>{activeShift.workTickets.length} тік.</span>
+                      {activeTicketTargets && activeTicketTargets.downtimeMinutes > 0 ? (
+                        <output
+                          className="main-page__ticket-downtime-badge main-page__ticket-downtime-badge--header"
+                          aria-label={`Загальний простій: ${formatDurationMinutes(
+                            activeTicketTargets.downtimeMinutes
+                          )}`}
+                        >
+                          <Clock3 size={15} aria-hidden="true" />
+                          <span>Простій</span>
+                          <strong>{formatDurationMinutes(activeTicketTargets.downtimeMinutes)}</strong>
+                        </output>
+                      ) : null}
                       {activeWorkTicket ? (
-                        <div className="main-page__ticket-actions" aria-label="Дії з активним тікетом">
+                        <div className="main-page__ticket-more" ref={ticketMenuRef}>
                           <button
+                            ref={ticketMenuButtonRef}
                             type="button"
-                            title="Редагувати тікет"
-                            aria-label="Редагувати активний тікет"
-                            disabled={pendingTicketId !== null}
-                            onClick={() => startTicketEdit(activeWorkTicket)}
+                            title="Дії з тікетом"
+                            aria-label="Інші дії з активним тікетом"
+                            aria-haspopup="menu"
+                            aria-expanded={isTicketMenuOpen}
+                            disabled={pendingTicketId !== null || isCompletingTicket}
+                            onClick={() => {
+                              setOpenCompletedTicketMenuId(null);
+                              setIsTicketMenuOpen((current) => !current);
+                            }}
                           >
-                            <Edit3 size={14} />
+                            <Ellipsis size={16} aria-hidden="true" />
                           </button>
-                          <button
-                            type="button"
-                            title="Видалити тікет"
-                            aria-label="Видалити активний тікет"
-                            disabled={pendingTicketId !== null}
-                            onClick={() => void removeTicket(activeWorkTicket)}
-                          >
-                            <Trash2 size={14} />
-                          </button>
+                          {isTicketMenuOpen ? (
+                            <div
+                              className="main-page__ticket-menu"
+                              role="menu"
+                              aria-label="Інші дії з тікетом"
+                            >
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setIsTicketMenuOpen(false);
+                                  startTicketEdit(activeWorkTicket);
+                                }}
+                              >
+                                <Edit3 size={17} aria-hidden="true" />
+                                <span>Редагувати</span>
+                              </button>
+                              <button type="button" role="menuitem" onClick={openDowntimeModal}>
+                                <Clock3 size={17} aria-hidden="true" />
+                                <span>Додати простій</span>
+                              </button>
+                              <button
+                                className="main-page__ticket-menu-item--danger"
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setIsTicketMenuOpen(false);
+                                  void removeTicket(activeWorkTicket);
+                                }}
+                              >
+                                <Trash2 size={17} aria-hidden="true" />
+                                <span>Видалити</span>
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -1057,92 +1402,55 @@ export function MainPage({
                           </div>
                         </div>
                       ) : null}
-                      <div className="main-page__ticket-targets" aria-label="План для всіх грейдів">
-                        {activeTicketTargets.targets.map((target) => (
-                          <article
-                            data-current={target.grade === activeTicketTargets.currentGrade ? 'true' : 'false'}
-                            key={target.grade}
-                          >
-                            <span>G{target.grade}</span>
-                            <strong>{target.quantity} шт</strong>
-                          </article>
-                        ))}
-                      </div>
-                      <div className="main-page__ticket-downtime">
-                        <div className="main-page__ticket-downtime-header">
-                          <strong>Простій</strong>
-                          <output
-                            aria-label={`Загальний простій: ${formatDurationMinutes(
-                              activeTicketTargets.downtimeMinutes
-                            )}`}
-                          >
-                            {formatDurationMinutes(activeTicketTargets.downtimeMinutes)}
-                          </output>
+                      <div className="main-page__ticket-plan">
+                        <div className="main-page__ticket-plan-header">
+                          <span>План за час тікета</span>
+                          <strong>Ваш G{activeTicketTargets.currentGrade}</strong>
                         </div>
-                        <div className="main-page__ticket-downtime-control">
-                          <label>
-                            <span>Коригування, хв</span>
-                            <span className="main-page__ticket-downtime-input">
-                              <input
-                                type="text"
-                                inputMode="text"
-                                autoComplete="off"
-                                pattern="[+-]?[0-9]*"
-                                aria-label="Коригування, хв"
-                                value={downtimeAdjustmentDraft}
-                                placeholder="+15 або -5"
-                                onChange={(event) => {
-                                  setDowntimeAdjustmentDraft(
-                                    normalizeSignedIntegerDraft(event.target.value)
-                                  );
-                                  setTicketError(null);
-                                }}
-                              />
-                              <span aria-hidden="true">хв</span>
-                            </span>
-                          </label>
-                          <button
-                            type="button"
-                            disabled={pendingTicketId !== null || isCompletingTicket}
-                            onClick={() => void addTicketDowntimeAdjustment()}
-                          >
-                            Додати
-                          </button>
+                        <div className="main-page__ticket-targets" aria-label="План для всіх грейдів">
+                          {activeTicketTargets.targets.map((target) => (
+                            <article
+                              data-current={target.grade === activeTicketTargets.currentGrade ? 'true' : 'false'}
+                              key={target.grade}
+                            >
+                              <span>G{target.grade}</span>
+                              <strong>{target.quantity} шт</strong>
+                            </article>
+                          ))}
                         </div>
                       </div>
-                      <div className="main-page__ticket-complete-form">
-                        <label>
-                          <span>Фактично зроблено, шт</span>
-                          <input
-                            type="text"
-                            inputMode="numeric"
-                            autoComplete="off"
-                            pattern="[0-9]*"
-                            value={ticketActualDraft}
-                            placeholder="0"
-                            onChange={(event) => {
-                              setTicketActualDraft(event.target.value.replace(/\D/g, ''));
-                              setTicketError(null);
-                            }}
-                          />
-                        </label>
+                      <div className="main-page__ticket-footer">
                         <button
+                          ref={completeTicketButtonRef}
+                          className="main-page__ticket-complete-button"
                           type="button"
                           disabled={isCompletingTicket || pendingTicketId !== null}
-                          onClick={() => void finishActiveTicket()}
+                          onClick={openCompletionModal}
                         >
-                          {isCompletingTicket ? 'Збереження...' : 'Завершити тікет'}
+                          <Check size={16} aria-hidden="true" />
+                          <span>Завершити тікет</span>
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <p className="main-page__muted">Додайте тікет, щоб бачити поточну норму.</p>
+                    <p className="main-page__muted main-page__ticket-hint">
+                      Додайте тікет, щоб бачити поточну норму.
+                    </p>
                   )}
 
                   {completedTicketTargets.length > 0 ? (
                     <div className="main-page__ticket-history" aria-label="Завершені тікети">
-                      {completedTicketTargets.map(({ ticket, targets }) => {
+                      {completedTicketTargets.map(({ ticket, ticketNumber, targets }) => {
                         const isEditingTicket = editingTicketId === ticket.id;
+                        const gradeOneTarget =
+                          targets.targets.find((target) => target.grade === 1)?.quantity ?? 0;
+                        const completionLabel = targets.completionPercent === null
+                          ? '—'
+                          : `${Math.round(targets.completionPercent)}%`;
+                        const actualQuantityLabel = ticket.actualQuantity === null
+                          ? '—'
+                          : String(ticket.actualQuantity);
+                        const isCompletedMenuOpen = openCompletedTicketMenuId === ticket.id;
 
                         return (
                           <article
@@ -1152,6 +1460,7 @@ export function MainPage({
                                 : 'main-page__ticket-history-item'
                             }
                             key={ticket.id}
+                            aria-label={`Підсумок тікета ${formatTime(ticket.startedAt)}`}
                           >
                             {isEditingTicket ? (
                               <>
@@ -1271,52 +1580,92 @@ export function MainPage({
                               </>
                             ) : (
                               <>
-                                <span className="main-page__ticket-history-time">
-                                  {formatTime(ticket.startedAt)}-{formatTime(ticket.endedAt)}
-                                </span>
-                                <strong>{ticket.actualQuantity === null ? 'Факт не внесено' : `Факт ${ticket.actualQuantity} шт`}</strong>
-                                <small>
-                                  Продуктивно {formatDurationMinutes(targets.productiveMinutes)} · простій{' '}
-                                  {formatDurationMinutes(targets.downtimeMinutes)}
-                                </small>
-                                <small>
-                                  {targets.targets.map((target) => `G${target.grade}: ${target.quantity}`).join(' · ')}
-                                </small>
-                                <small>
-                                  Виконання G{targets.currentGrade}:{' '}
-                                  {targets.completionPercent === null
-                                    ? '—'
-                                    : `${Math.round(targets.completionPercent)}%`}
-                                </small>
-                                <small>
-                                  Результат: {ticket.actualQuantity === null
-                                    ? '—'
-                                    : targets.productiveMinutes === 0
-                                      ? 'грейд не визначено'
-                                    : targets.achievedGrade
-                                      ? `G${targets.achievedGrade}`
-                                      : 'нижче G1'}
-                                </small>
-                                <div className="main-page__ticket-actions" aria-label="Дії з завершеним тікетом">
-                                  <button
-                                    type="button"
-                                    title="Редагувати тікет"
-                                    aria-label={`Редагувати тікет ${formatTime(ticket.startedAt)}`}
-                                    disabled={pendingTicketId !== null}
-                                    onClick={() => startTicketEdit(ticket)}
+                                <div className="main-page__ticket-history-header">
+                                  <div className="main-page__ticket-history-meta">
+                                    <span className="main-page__ticket-history-number">
+                                      Тікет {ticketNumber}
+                                    </span>
+                                    <time className="main-page__ticket-history-time">
+                                      {formatTime(ticket.startedAt)}–{formatTime(ticket.endedAt)}
+                                    </time>
+                                  </div>
+                                  <output
+                                    className="main-page__ticket-history-completion"
+                                    aria-label={`Виконання плану G1: ${completionLabel}`}
                                   >
-                                    <Edit3 size={14} />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    title="Видалити тікет"
-                                    aria-label={`Видалити тікет ${formatTime(ticket.startedAt)}`}
-                                    disabled={pendingTicketId !== null}
-                                    onClick={() => void removeTicket(ticket)}
+                                    {completionLabel}
+                                  </output>
+                                  <div
+                                    className="main-page__ticket-more"
+                                    ref={isCompletedMenuOpen ? completedTicketMenuRef : undefined}
                                   >
-                                    <Trash2 size={14} />
-                                  </button>
+                                    <button
+                                      ref={isCompletedMenuOpen ? completedTicketMenuButtonRef : undefined}
+                                      type="button"
+                                      title="Дії з завершеним тікетом"
+                                      aria-label={`Інші дії з тікетом ${formatTime(ticket.startedAt)}`}
+                                      aria-haspopup="menu"
+                                      aria-expanded={isCompletedMenuOpen}
+                                      disabled={pendingTicketId !== null}
+                                      onClick={(event) => {
+                                        setIsTicketMenuOpen(false);
+                                        completedTicketMenuButtonRef.current = event.currentTarget;
+                                        setOpenCompletedTicketMenuId((current) =>
+                                          current === ticket.id ? null : ticket.id
+                                        );
+                                      }}
+                                    >
+                                      <Ellipsis size={16} aria-hidden="true" />
+                                    </button>
+                                    {isCompletedMenuOpen ? (
+                                      <div
+                                        className="main-page__ticket-menu"
+                                        role="menu"
+                                        aria-label={`Дії з завершеним тікетом ${formatTime(ticket.startedAt)}`}
+                                      >
+                                        <button
+                                          type="button"
+                                          role="menuitem"
+                                          onClick={() => {
+                                            setOpenCompletedTicketMenuId(null);
+                                            startTicketEdit(ticket);
+                                          }}
+                                        >
+                                          <Edit3 size={17} aria-hidden="true" />
+                                          <span>Редагувати</span>
+                                        </button>
+                                        <button
+                                          className="main-page__ticket-menu-item--danger"
+                                          type="button"
+                                          role="menuitem"
+                                          onClick={() => {
+                                            setOpenCompletedTicketMenuId(null);
+                                            void removeTicket(ticket);
+                                          }}
+                                        >
+                                          <Trash2 size={17} aria-hidden="true" />
+                                          <span>Видалити</span>
+                                        </button>
+                                      </div>
+                                    ) : null}
+                                  </div>
                                 </div>
+                                <dl className="main-page__ticket-history-metrics">
+                                  <div>
+                                    <dt>Факт / план G1</dt>
+                                    <dd>{actualQuantityLabel} / {gradeOneTarget} шт</dd>
+                                  </div>
+                                  <div>
+                                    <dt>Продуктивно</dt>
+                                    <dd>{formatDurationMinutes(targets.productiveMinutes)}</dd>
+                                  </div>
+                                  {targets.downtimeMinutes > 0 ? (
+                                    <div data-tone="warning">
+                                      <dt>Простій</dt>
+                                      <dd>{formatDurationMinutes(targets.downtimeMinutes)}</dd>
+                                    </div>
+                                  ) : null}
+                                </dl>
                               </>
                             )}
                           </article>
@@ -1340,6 +1689,230 @@ export function MainPage({
                 onConfirm={leave}
                 tone="danger"
               />
+            </div>
+          ) : null}
+
+          {isDowntimeModalOpen && activeWorkTicket && activeTicketTargets ? (
+            <div
+              className="main-page__ticket-modal-overlay"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  closeDowntimeModal();
+                }
+              }}
+            >
+              <section
+                className="main-page__ticket-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="downtime-modal-title"
+              >
+                <header className="main-page__ticket-modal-header">
+                  <div>
+                    <p className="main-page__label">Тікет зміни</p>
+                    <h2 id="downtime-modal-title">Простій</h2>
+                  </div>
+                  <button
+                    className="main-page__ticket-modal-close"
+                    type="button"
+                    aria-label="Закрити додавання простою"
+                    disabled={pendingTicketId !== null}
+                    onClick={closeDowntimeModal}
+                  >
+                    <X size={20} aria-hidden="true" />
+                  </button>
+                </header>
+
+                <div className="main-page__ticket-modal-summary">
+                  <span>Накопичений простій</span>
+                  <strong>{formatDurationMinutes(activeTicketTargets.downtimeMinutes)}</strong>
+                </div>
+
+                <form
+                  className="main-page__ticket-modal-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void addTicketDowntimeAdjustment();
+                  }}
+                >
+                  <div
+                    className="main-page__ticket-mode-switch"
+                    role="group"
+                    aria-label="Спосіб коригування простою"
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={downtimeAdjustmentMode === 'add'}
+                      disabled={pendingTicketId !== null}
+                      onClick={() => {
+                        setDowntimeAdjustmentMode('add');
+                        setDowntimeModalError(null);
+                      }}
+                    >
+                      Додати
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={downtimeAdjustmentMode === 'subtract'}
+                      disabled={pendingTicketId !== null}
+                      onClick={() => {
+                        setDowntimeAdjustmentMode('subtract');
+                        setDowntimeModalError(null);
+                      }}
+                    >
+                      Відняти
+                    </button>
+                  </div>
+
+                  <label className="main-page__ticket-modal-field">
+                    <span>Кількість хвилин</span>
+                    <span className="main-page__ticket-modal-input">
+                      <input
+                        ref={downtimeInputRef}
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        pattern="[0-9]*"
+                        aria-label="Кількість хвилин"
+                        aria-invalid={downtimeModalError ? 'true' : 'false'}
+                        aria-describedby={
+                          downtimeModalError
+                            ? 'downtime-modal-help downtime-modal-error'
+                            : 'downtime-modal-help'
+                        }
+                        value={downtimeAdjustmentDraft}
+                        placeholder="15"
+                        onChange={(event) => {
+                          setDowntimeAdjustmentDraft(event.target.value.replace(/\D/g, ''));
+                          setDowntimeModalError(null);
+                        }}
+                      />
+                      <span aria-hidden="true">хв</span>
+                    </span>
+                    <small id="downtime-modal-help">
+                      {downtimeAdjustmentMode === 'add' ? 'Можна додати' : 'Можна відняти'} до{' '}
+                      {availableDowntimeAdjustmentMinutes} хв.
+                    </small>
+                  </label>
+
+                  {downtimeModalError ? (
+                    <p
+                      className="main-page__ticket-modal-error"
+                      id="downtime-modal-error"
+                      role="alert"
+                    >
+                      {downtimeModalError}
+                    </p>
+                  ) : null}
+
+                  <div className="main-page__ticket-modal-actions">
+                    <button
+                      type="button"
+                      disabled={pendingTicketId !== null}
+                      onClick={closeDowntimeModal}
+                    >
+                      Скасувати
+                    </button>
+                    <button type="submit" disabled={pendingTicketId !== null}>
+                      {pendingTicketId !== null
+                        ? 'Збереження...'
+                        : downtimeAdjustmentMode === 'add'
+                          ? 'Додати простій'
+                          : 'Відняти простій'}
+                    </button>
+                  </div>
+                </form>
+              </section>
+            </div>
+          ) : null}
+
+          {isCompletionModalOpen && activeWorkTicket ? (
+            <div
+              className="main-page__ticket-modal-overlay"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  closeCompletionModal();
+                }
+              }}
+            >
+              <section
+                className="main-page__ticket-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="completion-modal-title"
+              >
+                <header className="main-page__ticket-modal-header">
+                  <div>
+                    <p className="main-page__label">Тікет зміни</p>
+                    <h2 id="completion-modal-title">Завершення тікета</h2>
+                  </div>
+                  <button
+                    className="main-page__ticket-modal-close"
+                    type="button"
+                    aria-label="Закрити завершення тікета"
+                    disabled={isCompletingTicket}
+                    onClick={closeCompletionModal}
+                  >
+                    <X size={20} aria-hidden="true" />
+                  </button>
+                </header>
+
+                <form
+                  className="main-page__ticket-modal-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void finishActiveTicket();
+                  }}
+                >
+                  <label className="main-page__ticket-modal-field">
+                    <span>Фактично зроблено, шт</span>
+                    <input
+                      ref={actualQuantityInputRef}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      pattern="[0-9]*"
+                      aria-label="Фактично зроблено, шт"
+                      aria-invalid={completionModalError ? 'true' : 'false'}
+                      aria-describedby={
+                        completionModalError
+                          ? 'completion-modal-help completion-modal-error'
+                          : 'completion-modal-help'
+                      }
+                      value={ticketActualDraft}
+                      placeholder="0"
+                      onChange={(event) => {
+                        setTicketActualDraft(event.target.value.replace(/\D/g, ''));
+                        setCompletionModalError(null);
+                      }}
+                    />
+                    <small id="completion-modal-help">Можна вказати 0, якщо виробітку не було.</small>
+                  </label>
+
+                  {completionModalError ? (
+                    <p
+                      className="main-page__ticket-modal-error"
+                      id="completion-modal-error"
+                      role="alert"
+                    >
+                      {completionModalError}
+                    </p>
+                  ) : null}
+
+                  <div className="main-page__ticket-modal-actions">
+                    <button
+                      type="button"
+                      disabled={isCompletingTicket}
+                      onClick={closeCompletionModal}
+                    >
+                      Скасувати
+                    </button>
+                    <button type="submit" disabled={isCompletingTicket}>
+                      {isCompletingTicket ? 'Збереження...' : 'Завершити тікет'}
+                    </button>
+                  </div>
+                </form>
+              </section>
             </div>
           ) : null}
         </>
@@ -1403,6 +1976,60 @@ export function MainPage({
                         </strong>
                       </article>
                     </div>
+                    <div
+                      className="main-page__last-ticket-summary"
+                      aria-label="Загальна статистика тікетів останньої зміни"
+                    >
+                      <div className="main-page__last-ticket-summary-header">
+                        <span>
+                          <Tickets size={18} aria-hidden="true" />
+                          Тікети
+                        </span>
+                        <strong>
+                          {latestCompletedProduction?.filledTicketCount ?? 0}/
+                          {latestCompletedProduction?.ticketCount ?? 0} заповнено
+                        </strong>
+                      </div>
+                      {latestCompletedProduction && latestCompletedProduction.ticketCount > 0 ? (
+                        <dl className="main-page__last-ticket-metrics">
+                          <div>
+                            <dt>Факт</dt>
+                            <dd>{latestCompletedProduction.actualQuantity} шт</dd>
+                          </div>
+                          <div>
+                            <dt>
+                              План G
+                              {latestCompletedShift.gradeSnapshot?.currentGrade ?? settings.currentGrade}
+                            </dt>
+                            <dd>{latestCompletedProduction.currentGradeTarget} шт</dd>
+                          </div>
+                          <div>
+                            <dt>Виконання %</dt>
+                            <dd>
+                              {latestCompletedProduction.completionPercent === null
+                                ? '—'
+                                : `${Math.round(latestCompletedProduction.completionPercent)}%`}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Продуктивний час</dt>
+                            <dd>
+                              {formatDurationMinutes(latestCompletedProduction.productiveMinutes)}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Простій</dt>
+                            <dd>{formatDurationMinutes(latestCompletedProduction.downtimeMinutes)}</dd>
+                          </div>
+                          <div>
+                            <dt>Без факту</dt>
+                            <dd>{latestCompletedProduction.unfilledTicketCount}</dd>
+                          </div>
+                        </dl>
+                      ) : (
+                        <p className="main-page__last-ticket-empty">У цій зміні тікетів немає.</p>
+                      )}
+                    </div>
                   </>
                 ) : (
                   <>
@@ -1452,7 +2079,6 @@ export function MainPage({
                   </p>
                 ) : null}
           </section>
-          <div className="main-page__action-spacer" aria-hidden="true" />
         </>
       )}
     </AppShell>

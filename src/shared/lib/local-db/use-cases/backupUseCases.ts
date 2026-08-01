@@ -1,5 +1,6 @@
 import {
   DEFAULT_SETTINGS,
+  BACKUP_REMINDER_INTERVAL_DAYS,
   FORECAST_DAYS_MAX,
   FORECAST_DAYS_MIN,
   GRADE_VALUES,
@@ -7,6 +8,7 @@ import {
   HOLD_DELAY_MIN_MS,
   calculateMonthlySalaryFromHourlyRate,
   isThemePreference,
+  type BackupReminderIntervalDays,
   type Grade,
   type GradePercentSet,
   type Settings
@@ -45,7 +47,8 @@ const THEME_BACKUP_SCHEMA_VERSION = 4;
 const TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION = 5;
 const MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION = 6;
 const REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION = 7;
-export const BACKUP_SCHEMA_VERSION = REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION;
+const BACKUP_REMINDER_BACKUP_SCHEMA_VERSION = 8;
+export const BACKUP_SCHEMA_VERSION = BACKUP_REMINDER_BACKUP_SCHEMA_VERSION;
 const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   LEGACY_BACKUP_SCHEMA_VERSION,
   2,
@@ -53,6 +56,7 @@ const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   THEME_BACKUP_SCHEMA_VERSION,
   TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION,
   MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION,
+  REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION,
   BACKUP_SCHEMA_VERSION
 ]);
 
@@ -219,6 +223,19 @@ const readBoolean = (record: Record<string, unknown>, key: string): boolean => {
   return value;
 };
 
+const readBackupReminderIntervalDays = (
+  record: Record<string, unknown>,
+  key: string
+): BackupReminderIntervalDays => {
+  const value = readFiniteNumber(record, key);
+
+  if (!BACKUP_REMINDER_INTERVAL_DAYS.includes(value as BackupReminderIntervalDays)) {
+    throw new BackupValidationError('Періодичність backup має бути 7, 14 або 30 днів.');
+  }
+
+  return value as BackupReminderIntervalDays;
+};
+
 const parseJsonRecord = (source: string): Record<string, unknown> => {
   let parsed: unknown;
 
@@ -297,7 +314,7 @@ const parseSettings = (
     currentGrade,
     desiredGrade,
     gradeSalaryBonusPercents:
-      schemaVersion >= GRADE_AND_TICKETS_BACKUP_SCHEMA_VERSION
+      schemaVersion >= BACKUP_REMINDER_BACKUP_SCHEMA_VERSION
         ? readPercentSet(value, 'gradeSalaryBonusPercents')
         : DEFAULT_SETTINGS.gradeSalaryBonusPercents,
     gradeNormPercents:
@@ -323,6 +340,10 @@ const parseSettings = (
       schemaVersion >= THEME_BACKUP_SCHEMA_VERSION
         ? (themePreference as Settings['themePreference'])
         : DEFAULT_SETTINGS.themePreference,
+    backupReminderIntervalDays:
+      schemaVersion >= BACKUP_REMINDER_BACKUP_SCHEMA_VERSION
+        ? readBackupReminderIntervalDays(value, 'backupReminderIntervalDays')
+        : DEFAULT_SETTINGS.backupReminderIntervalDays,
     incognitoEnabled: readBoolean(value, 'incognitoEnabled'),
     onboardingCompleted: readBoolean(value, 'onboardingCompleted'),
     updatedAt

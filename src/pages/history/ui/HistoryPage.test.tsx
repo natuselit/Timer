@@ -23,6 +23,7 @@ const settings: Settings = {
   coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
+  backupReminderIntervalDays: 14,
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T06:00:00.000+03:00'
@@ -54,7 +55,26 @@ beforeEach(async () => {
   await localDb.shifts.bulkPut([
     makeShift({
       id: 'mixed-coefficients',
-      startTime: '2026-07-27T06:20:00.000+03:00'
+      startTime: '2026-07-27T06:20:00.000+03:00',
+      gradeSnapshot: {
+        currentGrade: 2,
+        desiredGrade: 3,
+        gradeSalaryBonusPercents: [10, 10, 15, 15],
+        gradeNormPercents: [100, 120, 140, 160],
+        cumulativeSalaryBonusPercent: 20
+      },
+      workTickets: [
+        {
+          id: 'grade-one-completion-ticket',
+          normPerEightHours: 60,
+          startedAt: '2026-07-27T06:55:00.000+03:00',
+          endedAt: '2026-07-27T10:15:00.000+03:00',
+          actualQuantity: 20,
+          downtimeMinutes: 0,
+          createdAt: '2026-07-27T06:55:00.000+03:00',
+          updatedAt: '2026-07-27T10:15:00.000+03:00'
+        }
+      ]
     }),
     makeShift({
       id: 'active-single-coefficient',
@@ -102,5 +122,26 @@ describe('HistoryPage', () => {
     await waitFor(() => {
       expect(screen.getAllByLabelText('Зароблено по коефіцієнтах')).toHaveLength(1);
     });
+  });
+
+  it('calculates ticket completion against the G1 target regardless of current grade', async () => {
+    render(
+      <HistoryPage
+        settings={settings}
+        calendarMonth={{ year: 2026, month: 7 }}
+        selectedRange={{ start: '2026-07-01', end: '2026-07-31' }}
+        onCalendarMonthChange={vi.fn()}
+        onSelectedRangeChange={vi.fn()}
+        activeRangePreset="month"
+        isAllTimePresetEnabled
+        onRangePresetSelect={vi.fn()}
+      />
+    );
+
+    const completionLabel = await screen.findByText('Виконання %');
+    const completionTile = completionLabel.closest('div');
+
+    expect(completionTile?.textContent).toContain('80%');
+    expect(screen.queryByText('Виконання G2')).toBeNull();
   });
 });

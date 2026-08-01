@@ -18,6 +18,7 @@ Out time: 15:50
 Total: 09:20`);
 
     expect(result.errors).toEqual([]);
+    expect(result.skippedEmptyCount).toBe(0);
     expect(result.items).toEqual([
       {
         date: '2026-06-01',
@@ -83,6 +84,7 @@ Total: :`);
 
     expect(result.errors).toEqual([]);
     expect(result.items).toHaveLength(2);
+    expect(result.skippedEmptyCount).toBe(1);
     expect(result.items.map((item) => item.date)).toEqual(['2026-06-01', '2026-06-02']);
   });
 
@@ -99,6 +101,7 @@ Total: :`);
 
     expect(result.errors).toEqual([]);
     expect(result.items).toHaveLength(2);
+    expect(result.skippedEmptyCount).toBe(1);
     expect(result.items[0]).toEqual({
       date: '2026-07-01',
       shiftType: 'first',
@@ -153,6 +156,7 @@ Total: 05:00`);
 
     expect(result.errors).toEqual([]);
     expect(result.items).toHaveLength(1);
+    expect(result.skippedEmptyCount).toBe(2);
     expect(result.items[0]).toMatchObject({
       date: '2026-05-21',
       inTime: '14:26',

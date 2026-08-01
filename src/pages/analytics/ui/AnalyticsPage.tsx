@@ -391,7 +391,7 @@ export function AnalyticsPage({
                 <dd>{summary.production.currentGradeTarget} шт</dd>
               </div>
               <div>
-                <dt>Виконання</dt>
+                <dt>Виконання %</dt>
                 <dd>{formatPercent(summary.production.completionPercent)}</dd>
               </div>
               <div>
