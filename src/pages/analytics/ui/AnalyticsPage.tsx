@@ -1,18 +1,35 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
+  CalendarCheck2,
   ChartNoAxesColumnIncreasing,
   Clock3,
   Coins,
   MoonStar,
   SunMedium,
+  TrendingUp,
   type LucideIcon
 } from 'lucide-react';
 import type { Settings } from '../../../entities/settings';
 import type { LocalDateString, Shift, ShiftType } from '../../../entities/shift';
 import { getShiftsBetween, localDb, ShiftRepository } from '../../../shared/lib/local-db';
-import { formatDurationMinutes, toLocalIsoString } from '../../../shared/lib/date-time';
-import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
+import {
+  formatDurationMinutes,
+  formatShortMinuteDuration,
+  formatShortNumericDate,
+  getNextHeldCalendarRange,
+  getSingleDateRange,
+  toLocalIsoString
+} from '../../../shared/lib/date-time';
+import {
+  formatHourlyRate,
+  formatMoney,
+  INCOGNITO_FINANCIAL_MASK
+} from '../../../shared/lib/format';
+import {
+  calculateAnalyticsPeriodComparison,
+  getPreviousAnalyticsRange
+} from '../../../shared/lib/shifts/analyticsComparison';
 import {
   calculateAnalyticsSummary,
   type ShiftTypeAnalytics
@@ -95,6 +112,25 @@ const getShiftCountLabel = (value: number): string => {
 
 const formatShiftCountWithLabel = (value: number): string => `${value} ${getShiftCountLabel(value)}`;
 
+const getDayCountLabel = (value: number): string => {
+  const lastTwoDigits = value % 100;
+  const lastDigit = value % 10;
+
+  if (lastTwoDigits >= 11 && lastTwoDigits <= 14) {
+    return 'днів';
+  }
+
+  if (lastDigit === 1) {
+    return 'день';
+  }
+
+  if (lastDigit >= 2 && lastDigit <= 4) {
+    return 'дні';
+  }
+
+  return 'днів';
+};
+
 const formatPercent = (value: number | null): string =>
   value === null ? '—' : `${Math.round(value)}%`;
 
@@ -106,29 +142,78 @@ const formatDecimal = (value: number | null, suffix = ''): string =>
         maximumFractionDigits: 1
       })}${suffix}`;
 
-const getNextSelectedRange = (
-  current: CalendarDateRange | null,
-  date: LocalDateString
-): CalendarDateRange => {
-  if (!current || current.end) {
-    return {
-      start: date,
-      end: null
-    };
+const formatSignedValue = (
+  value: number | null,
+  suffix: string,
+  maximumFractionDigits = 0
+): string => {
+  if (value === null) {
+    return '—';
   }
 
-  if (date < current.start) {
-    return {
-      start: date,
-      end: current.start
-    };
-  }
+  const formattedValue = Math.abs(value).toLocaleString('uk-UA', {
+    maximumFractionDigits
+  });
 
-  return {
-    start: current.start,
-    end: date
-  };
+  return `${value > 0 ? '+' : value < 0 ? '−' : ''}${formattedValue}${suffix}`;
 };
+
+const formatSignedMoney = (value: number, incognitoEnabled: boolean): string => {
+  if (incognitoEnabled) {
+    return INCOGNITO_FINANCIAL_MASK;
+  }
+
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
+
+  return `${sign}${formatMoney(Math.abs(value), false)}`;
+};
+
+const formatSignedDuration = (value: number): string => {
+  const sign = value > 0 ? '+' : value < 0 ? '−' : '';
+
+  return `${sign}${formatDurationMinutes(Math.abs(value))}`;
+};
+
+const getChangeTone = (value: number | null): 'positive' | 'negative' | 'neutral' =>
+  value === null || value === 0 ? 'neutral' : value > 0 ? 'positive' : 'negative';
+
+const formatAnalyticsRange = ({
+  start,
+  end
+}: {
+  start: LocalDateString;
+  end: LocalDateString;
+}): string =>
+  start === end
+    ? formatShortNumericDate(start)
+    : `${formatShortNumericDate(start)}–${formatShortNumericDate(end)}`;
+
+const getDeviationFacts = ({
+  lateArrivalMinutes,
+  earlyExitMinutes
+}: {
+  lateArrivalMinutes: number;
+  earlyExitMinutes: number;
+}): Array<{ key: 'late' | 'early'; label: string; value: string }> => [
+  ...(lateArrivalMinutes > 0
+    ? [
+        {
+          key: 'late' as const,
+          label: 'Запізнення',
+          value: formatShortMinuteDuration(lateArrivalMinutes)
+        }
+      ]
+    : []),
+  ...(earlyExitMinutes > 0
+    ? [
+        {
+          key: 'early' as const,
+          label: 'Ранній вихід',
+          value: formatShortMinuteDuration(earlyExitMinutes)
+        }
+      ]
+    : [])
+];
 
 const shiftTypeRows: Array<{
   key: ShiftType;
@@ -161,6 +246,7 @@ export function AnalyticsPage({
   onRangePresetSelect
 }: AnalyticsPageProps) {
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [previousShifts, setPreviousShifts] = useState<Shift[]>([]);
   const [calendarShifts, setCalendarShifts] = useState<Shift[]>([]);
   const [now, setNow] = useState(() => toLocalIsoString(new Date()));
   const [isLoading, setIsLoading] = useState(true);
@@ -176,6 +262,10 @@ export function AnalyticsPage({
         : calendarMonthRange,
     [selectedRange, calendarMonthRange]
   );
+  const previousDateRange = useMemo(
+    () => getPreviousAnalyticsRange(loadedDateRange),
+    [loadedDateRange]
+  );
 
   const loadAnalytics = useCallback(async () => {
     setIsLoading(true);
@@ -185,19 +275,21 @@ export function AnalyticsPage({
       const currentDate = new Date();
 
       setNow(toLocalIsoString(currentDate));
-      const [nextShifts, nextCalendarShifts] = await Promise.all([
+      const [nextShifts, nextPreviousShifts, nextCalendarShifts] = await Promise.all([
         getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
+        getShiftsBetween(shiftRepository, previousDateRange.start, previousDateRange.end),
         getShiftsBetween(shiftRepository, calendarMonthRange.start, calendarMonthRange.end)
       ]);
 
       setShifts(nextShifts);
+      setPreviousShifts(nextPreviousShifts);
       setCalendarShifts(nextCalendarShifts);
     } catch {
       setError('Не вдалося завантажити аналітику.');
     } finally {
       setIsLoading(false);
     }
-  }, [calendarMonthRange, loadedDateRange]);
+  }, [calendarMonthRange, loadedDateRange, previousDateRange]);
 
   useEffect(() => {
     void loadAnalytics();
@@ -223,6 +315,22 @@ export function AnalyticsPage({
       }),
     [shifts, now, loadedDateRange, settings.monthlyBonus]
   );
+  const previousSummary = useMemo(
+    () =>
+      calculateAnalyticsSummary({
+        shifts: previousShifts,
+        now,
+        periodStart: previousDateRange.start,
+        periodEnd: previousDateRange.end,
+        monthlyBonus: 0,
+        includeMonthlyBonus: false
+      }),
+    [previousShifts, now, previousDateRange]
+  );
+  const periodComparison = useMemo(
+    () => calculateAnalyticsPeriodComparison(summary, previousSummary),
+    [summary, previousSummary]
+  );
   const moveMonth = (direction: -1 | 1) => {
     const next = new Date(calendarMonth.year, calendarMonth.month - 1 + direction, 1);
 
@@ -230,18 +338,29 @@ export function AnalyticsPage({
       year: next.getFullYear(),
       month: next.getMonth() + 1
     });
-    onSelectedRangeChange(null);
+
+    if (activeRangePreset !== 'month') {
+      onSelectedRangeChange(null);
+    }
   };
 
-  const selectDate = (date: LocalDateString) => {
+  const syncCalendarMonthToDate = (date: LocalDateString) => {
     const [year, month] = date.split('-').map(Number);
     const isOutsideVisibleMonth = year !== calendarMonth.year || month !== calendarMonth.month;
 
     if (isOutsideVisibleMonth) {
       onCalendarMonthChange({ year, month });
     }
+  };
 
-    onSelectedRangeChange(getNextSelectedRange(selectedRange, date));
+  const selectDate = (date: LocalDateString) => {
+    syncCalendarMonthToDate(date);
+    onSelectedRangeChange(getSingleDateRange(date));
+  };
+
+  const holdDate = (date: LocalDateString) => {
+    syncCalendarMonthToDate(date);
+    onSelectedRangeChange(getNextHeldCalendarRange(selectedRange, date));
   };
   const hasAnalyticsData = summary.shiftCount > 0;
   const visibleCoefficientBreakdown = summary.coefficientBreakdown.filter((item) => item.minutes > 0);
@@ -262,6 +381,7 @@ export function AnalyticsPage({
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}
         onDateSelect={selectDate}
+        onDateHold={holdDate}
         activeRangePreset={activeRangePreset}
         isAllTimePresetEnabled={isAllTimePresetEnabled}
         onRangePresetSelect={onRangePresetSelect}
@@ -307,6 +427,10 @@ export function AnalyticsPage({
                 <span>Грейдова премія</span>
                 <strong>{formatMoney(summary.gradeBonus, settings.incognitoEnabled)}</strong>
               </article>
+              <article className="analytics-page__money-card">
+                <span>За перепрацювання</span>
+                <strong>{formatMoney(summary.overtimeIncome, settings.incognitoEnabled)}</strong>
+              </article>
               <article className="analytics-page__money-card analytics-page__money-card--count">
                 <span>Змін</span>
                 <strong>{summary.shiftCount}</strong>
@@ -322,6 +446,134 @@ export function AnalyticsPage({
             </div>
           </section>
 
+          <section className="analytics-page__panel" aria-labelledby="analytics-comparison-title">
+            <header className="analytics-page__panel-header">
+              <div>
+                <p className="analytics-page__eyebrow">
+                  Попередній період {formatAnalyticsRange(previousDateRange)}
+                </p>
+                <h3 id="analytics-comparison-title">Порівняння</h3>
+              </div>
+              <TrendingUp aria-hidden="true" size={24} />
+            </header>
+
+            {periodComparison.hasPreviousData ? (
+              <div className="analytics-page__comparison-grid" aria-label="Зміни до попереднього періоду">
+                <article
+                  data-tone={
+                    settings.incognitoEnabled
+                      ? 'neutral'
+                      : getChangeTone(periodComparison.salaryPercentChange)
+                  }
+                >
+                  <header>
+                    <span>Базовий заробіток</span>
+                    <strong>
+                      {settings.incognitoEnabled
+                        ? INCOGNITO_FINANCIAL_MASK
+                        : formatSignedValue(periodComparison.salaryPercentChange, '%')}
+                    </strong>
+                  </header>
+                  <div className="analytics-page__comparison-values">
+                    <span>
+                      <small>Зараз</small>
+                      <strong>{formatMoney(summary.workSalary, settings.incognitoEnabled)}</strong>
+                    </span>
+                    <span>
+                      <small>Було</small>
+                      <strong>{formatMoney(previousSummary.workSalary, settings.incognitoEnabled)}</strong>
+                    </span>
+                  </div>
+                  <footer>
+                    <span>Різниця</span>
+                    <strong>
+                      {formatSignedMoney(
+                        periodComparison.salaryAmountChange,
+                        settings.incognitoEnabled
+                      )}
+                    </strong>
+                  </footer>
+                </article>
+                <article data-tone={getChangeTone(periodComparison.workedMinutesPercentChange)}>
+                  <header>
+                    <span>Відпрацьований час</span>
+                    <strong>{formatSignedValue(periodComparison.workedMinutesPercentChange, '%')}</strong>
+                  </header>
+                  <div className="analytics-page__comparison-values">
+                    <span>
+                      <small>Зараз</small>
+                      <strong>{formatDurationMinutes(summary.totalMinutes)}</strong>
+                    </span>
+                    <span>
+                      <small>Було</small>
+                      <strong>{formatDurationMinutes(previousSummary.totalMinutes)}</strong>
+                    </span>
+                  </div>
+                  <footer>
+                    <span>Різниця</span>
+                    <strong>{formatSignedDuration(periodComparison.workedMinutesChange)}</strong>
+                  </footer>
+                </article>
+                <article data-tone={getChangeTone(periodComparison.shiftCountChange)}>
+                  <header>
+                    <span>Кількість змін</span>
+                    <strong>{formatSignedValue(periodComparison.shiftCountPercentChange, '%')}</strong>
+                  </header>
+                  <div className="analytics-page__comparison-values">
+                    <span>
+                      <small>Зараз</small>
+                      <strong>{summary.shiftCount}</strong>
+                    </span>
+                    <span>
+                      <small>Було</small>
+                      <strong>{previousSummary.shiftCount}</strong>
+                    </span>
+                  </div>
+                  <footer>
+                    <span>Різниця</span>
+                    <strong>{formatSignedValue(periodComparison.shiftCountChange, '')}</strong>
+                  </footer>
+                </article>
+                <article data-tone={getChangeTone(periodComparison.completionPercentagePointChange)}>
+                  <header>
+                    <span>Виконання G1</span>
+                    <strong>
+                      {formatSignedValue(
+                        periodComparison.completionPercentagePointChange,
+                        ' в.п.',
+                        1
+                      )}
+                    </strong>
+                  </header>
+                  <div className="analytics-page__comparison-values">
+                    <span>
+                      <small>Зараз</small>
+                      <strong>{formatPercent(summary.production.completionPercent)}</strong>
+                    </span>
+                    <span>
+                      <small>Було</small>
+                      <strong>{formatPercent(previousSummary.production.completionPercent)}</strong>
+                    </span>
+                  </div>
+                  <footer>
+                    <span>Різниця</span>
+                    <strong>
+                      {formatSignedValue(
+                        periodComparison.completionPercentagePointChange,
+                        ' в.п.',
+                        1
+                      )}
+                    </strong>
+                  </footer>
+                </article>
+              </div>
+            ) : (
+              <p className="analytics-page__comparison-empty">
+                У попередньому періоді немає змін для порівняння.
+              </p>
+            )}
+          </section>
+
           <section className="analytics-page__panel" aria-labelledby="analytics-time-title">
             <header className="analytics-page__panel-header">
               <div>
@@ -332,7 +584,7 @@ export function AnalyticsPage({
             </header>
 
             <dl className="analytics-page__detail-list" aria-label="Показники часу">
-              <div className="analytics-page__detail-item--featured analytics-page__detail-item--time-total">
+              <div className="analytics-page__detail-item--wide analytics-page__detail-item--time-total">
                 <dt>Загалом</dt>
                 <dd>{formatDurationMinutes(summary.totalMinutes)}</dd>
               </div>
@@ -372,6 +624,80 @@ export function AnalyticsPage({
             ) : null}
           </section>
 
+          <section
+            className="analytics-page__panel analytics-page__discipline"
+            data-has-deviations={summary.deviations.length > 0}
+            aria-labelledby="analytics-discipline-title"
+          >
+            <header className="analytics-page__deviation-header">
+              <div className="analytics-page__deviation-title-row">
+                <span className="analytics-page__deviation-icon" aria-hidden="true">
+                  <CalendarCheck2 size={20} />
+                </span>
+                <div>
+                  <p className="analytics-page__eyebrow">Дисципліна</p>
+                  <h3 id="analytics-discipline-title">Дотримання графіка</h3>
+                </div>
+                <strong className="analytics-page__deviation-count">
+                  {summary.deviations.length} {getDayCountLabel(summary.deviations.length)}
+                </strong>
+              </div>
+
+              <div className="analytics-page__deviation-totals" aria-label="Підсумок дисципліни">
+                <article data-tone="success">
+                  <span>Без відхилень</span>
+                  <strong>
+                    {summary.onScheduleShiftCount}/{summary.completedShiftCount} ·{' '}
+                    {formatPercent(summary.scheduleAdherencePercent)}
+                  </strong>
+                </article>
+                <article data-tone="late">
+                  <span>Запізнення</span>
+                  <strong>{formatShortMinuteDuration(summary.lateArrivalMinutes)}</strong>
+                  <small>
+                    {formatShiftCountWithLabel(summary.lateArrivalShiftCount)} · сер.{' '}
+                    {formatShortMinuteDuration(Math.round(summary.averageLateArrivalMinutes))}
+                  </small>
+                </article>
+                <article data-tone="early">
+                  <span>Ранній вихід</span>
+                  <strong>{formatShortMinuteDuration(summary.earlyExitMinutes)}</strong>
+                  <small>
+                    {formatShiftCountWithLabel(summary.earlyExitShiftCount)} · сер.{' '}
+                    {formatShortMinuteDuration(Math.round(summary.averageEarlyExitMinutes))}
+                  </small>
+                </article>
+              </div>
+            </header>
+
+            {summary.deviations.length > 0 ? (
+              <div className="analytics-page__deviation-list" aria-label="Відхилення за днями">
+                {summary.deviations.map((item) => {
+                  const facts = getDeviationFacts(item);
+
+                  return (
+                    <article className="analytics-page__deviation" key={item.date}>
+                      <time dateTime={item.date}>{formatShortNumericDate(item.date)}</time>
+                      <div className="analytics-page__deviation-facts">
+                        {facts.map((fact) => (
+                          <span
+                            className="analytics-page__deviation-fact"
+                            data-tone={fact.key}
+                            aria-label={`${fact.label}: ${fact.value}`}
+                            key={fact.key}
+                          >
+                            <small>{fact.label}</small>
+                            <strong>{fact.value}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+
           <section className="analytics-page__panel" aria-labelledby="analytics-production-title">
             <header className="analytics-page__panel-header">
               <div>
@@ -387,11 +713,15 @@ export function AnalyticsPage({
                 <dd>{summary.production.actualQuantity} шт</dd>
               </div>
               <div className="analytics-page__detail-item--wide">
+                <dt>План G1</dt>
+                <dd>{summary.production.gradeOneTarget} шт</dd>
+              </div>
+              <div>
                 <dt>План поточного G</dt>
                 <dd>{summary.production.currentGradeTarget} шт</dd>
               </div>
               <div>
-                <dt>Виконання %</dt>
+                <dt>Виконання від G1</dt>
                 <dd>{formatPercent(summary.production.completionPercent)}</dd>
               </div>
               <div>

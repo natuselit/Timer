@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { LocalDateString } from '../../../entities/shift';
 import type {
@@ -27,6 +28,7 @@ type MonthCalendarProps = {
   onPreviousMonth: () => void;
   onNextMonth: () => void;
   onDateSelect: (date: LocalDateString) => void;
+  onDateHold?: (date: LocalDateString) => void;
   activeRangePreset?: CalendarRangePreset | null;
   isAllTimePresetEnabled?: boolean;
   onRangePresetSelect?: (preset: CalendarRangePreset) => void;
@@ -38,6 +40,7 @@ type MonthCalendarProps = {
 };
 
 const weekdayLabels = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Нд'];
+const CALENDAR_RANGE_HOLD_DELAY_MS = 550;
 
 const rangePresetLabels: Record<CalendarRangePreset, string> = {
   today: 'Сьогодні',
@@ -114,6 +117,7 @@ export function MonthCalendar({
   onPreviousMonth,
   onNextMonth,
   onDateSelect,
+  onDateHold,
   activeRangePreset,
   isAllTimePresetEnabled = false,
   onRangePresetSelect,
@@ -123,6 +127,9 @@ export function MonthCalendar({
   selectionMode = 'range',
   hideNavigation = false
 }: MonthCalendarProps) {
+  const holdTimerRef = useRef<number | null>(null);
+  const didHoldRef = useRef(false);
+  const [holdingDate, setHoldingDate] = useState<LocalDateString | null>(null);
   const firstDay = new Date(year, month - 1, 1);
   const daysInMonth = new Date(year, month, 0).getDate();
   const daysInPreviousMonth = new Date(year, month - 1, 0).getDate();
@@ -136,6 +143,8 @@ export function MonthCalendar({
   const previousMonth = new Date(year, month - 2, 1);
   const nextMonth = new Date(year, month, 1);
   const calendarRange = getCalendarRange(year, month, selectedRange);
+  const hasPendingRange = selectionMode === 'range' && selectedRange?.end === null;
+  const rangeHintId = `${titleId}-range-hint`;
   const cells: CalendarCell[] = [
     ...Array.from({ length: leadingEmptyDays }, (_, index) => {
       const day = daysInPreviousMonth - leadingEmptyDays + index + 1;
@@ -160,6 +169,49 @@ export function MonthCalendar({
       isCurrentMonth: false
     }))
   ];
+
+  const clearHoldTimer = () => {
+    if (holdTimerRef.current !== null) {
+      window.clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+
+    setHoldingDate(null);
+  };
+
+  useEffect(
+    () => () => {
+      if (holdTimerRef.current !== null) {
+        window.clearTimeout(holdTimerRef.current);
+      }
+    },
+    []
+  );
+
+  const startDateHold = (date: LocalDateString) => {
+    if (selectionMode !== 'range' || !onDateHold) {
+      return;
+    }
+
+    clearHoldTimer();
+    didHoldRef.current = false;
+    setHoldingDate(date);
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null;
+      didHoldRef.current = true;
+      setHoldingDate(null);
+      onDateHold(date);
+    }, CALENDAR_RANGE_HOLD_DELAY_MS);
+  };
+
+  const selectDate = (date: LocalDateString) => {
+    if (didHoldRef.current) {
+      didHoldRef.current = false;
+      return;
+    }
+
+    onDateSelect(date);
+  };
 
   return (
     <section
@@ -221,6 +273,14 @@ export function MonthCalendar({
         </div>
       ) : null}
 
+      {selectionMode === 'range' && !isCompact ? (
+        <p className="month-calendar__range-hint" id={rangeHintId} aria-live="polite">
+          {hasPendingRange
+            ? 'Затисніть кінцеву дату діапазону.'
+            : 'Для діапазону затисніть початкову й кінцеву дату.'}
+        </p>
+      ) : null}
+
       {!hideSummary ? (
         <div className="month-calendar__summary" aria-label="Підсумок періоду">
           <article>
@@ -244,7 +304,10 @@ export function MonthCalendar({
         ))}
       </div>
 
-      <div className="month-calendar__grid">
+      <div
+        className="month-calendar__grid"
+        aria-describedby={selectionMode === 'range' && !isCompact ? rangeHintId : undefined}
+      >
         {cells.map((cell) => {
           const hasShift = markedDates.has(cell.dateKey);
           const isRangeStart = rangeStart === cell.dateKey;
@@ -261,6 +324,7 @@ export function MonthCalendar({
               className="month-calendar__day"
               data-current-month={cell.isCurrentMonth ? 'true' : 'false'}
               data-has-shift={hasShift ? 'true' : 'false'}
+              data-holding={holdingDate === cell.dateKey ? 'true' : 'false'}
               data-in-range={isInRange ? 'true' : 'false'}
               data-range-start={isRangeStart ? 'true' : 'false'}
               data-range-end={isRangeEnd ? 'true' : 'false'}
@@ -273,9 +337,24 @@ export function MonthCalendar({
               }
               aria-pressed={isInRange}
               key={cell.key}
-              onClick={() => onDateSelect(cell.dateKey)}
+              onClick={() => selectDate(cell.dateKey)}
+              onContextMenu={(event) => {
+                if (selectionMode === 'range' && onDateHold) {
+                  event.preventDefault();
+                }
+              }}
+              onPointerCancel={() => {
+                didHoldRef.current = false;
+                clearHoldTimer();
+              }}
+              onPointerDown={() => startDateHold(cell.dateKey)}
+              onPointerLeave={() => {
+                didHoldRef.current = false;
+                clearHoldTimer();
+              }}
+              onPointerUp={clearHoldTimer}
             >
-              {cell.day}
+              <span>{cell.day}</span>
             </button>
           );
         })}

@@ -31,6 +31,33 @@ export const getCalendarMonthRange = ({
   end: toDateKey(year, month, new Date(year, month, 0).getDate())
 });
 
+export const getSingleDateRange = (date: LocalDateString): CalendarDateRange => ({
+  start: date,
+  end: date
+});
+
+export const getNextHeldCalendarRange = (
+  current: CalendarDateRange | null,
+  date: LocalDateString
+): CalendarDateRange => {
+  if (!current || current.end !== null) {
+    return {
+      start: date,
+      end: null
+    };
+  }
+
+  return date < current.start
+    ? {
+        start: date,
+        end: current.start
+      }
+    : {
+        start: current.start,
+        end: date
+      };
+};
+
 export const getCalendarPresetSelection = ({
   preset,
   calendarMonth,

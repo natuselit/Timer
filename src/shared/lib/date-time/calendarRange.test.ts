@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   countWeekdaysInDateRange,
   getCalendarPresetSelection,
+  getNextHeldCalendarRange,
+  getSingleDateRange,
   type CalendarDateRange
 } from './calendarRange';
 
@@ -62,5 +64,25 @@ describe('calendar range presets', () => {
   it('counts weekdays inclusively for forward and reversed ranges', () => {
     expect(countWeekdaysInDateRange('2026-07-20', '2026-07-26')).toBe(5);
     expect(countWeekdaysInDateRange('2026-07-26', '2026-07-20')).toBe(5);
+  });
+
+  it('keeps a short date selection as a complete single-day range', () => {
+    expect(getSingleDateRange('2026-07-12')).toEqual({
+      start: '2026-07-12',
+      end: '2026-07-12'
+    });
+  });
+
+  it('builds a range only from two held dates and normalizes their order', () => {
+    const pendingRange = getNextHeldCalendarRange(
+      { start: '2026-07-01', end: '2026-07-31' },
+      '2026-07-20'
+    );
+
+    expect(pendingRange).toEqual({ start: '2026-07-20', end: null });
+    expect(getNextHeldCalendarRange(pendingRange, '2026-07-10')).toEqual({
+      start: '2026-07-10',
+      end: '2026-07-20'
+    });
   });
 });

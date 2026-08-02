@@ -46,6 +46,8 @@ import {
   formatShortNumericDate,
   formatTime,
   countWeekdaysInDateRange,
+  getNextHeldCalendarRange,
+  getSingleDateRange,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
@@ -158,30 +160,6 @@ const getSelectedRangeBounds = (
   start: range.start,
   end: range.end ?? range.start
 });
-
-const getNextSelectedRange = (
-  current: CalendarDateRange | null,
-  date: LocalDateString
-): CalendarDateRange => {
-  if (!current || current.end) {
-    return {
-      start: date,
-      end: null
-    };
-  }
-
-  if (date < current.start) {
-    return {
-      start: date,
-      end: current.start
-    };
-  }
-
-  return {
-    start: current.start,
-    end: date
-  };
-};
 
 const getActualShiftDurationMinutes = (shift: Shift): number => {
   if (!shift.endTime) {
@@ -372,18 +350,29 @@ export function SchedulePage({
       year: next.getFullYear(),
       month: next.getMonth() + 1
     });
-    onSelectedRangeChange(null);
+
+    if (activeRangePreset !== 'month') {
+      onSelectedRangeChange(null);
+    }
   };
 
-  const selectDate = (date: LocalDateString) => {
+  const syncCalendarMonthToDate = (date: LocalDateString) => {
     const [year, month] = date.split('-').map(Number);
     const isOutsideVisibleMonth = year !== calendarMonth.year || month !== calendarMonth.month;
 
     if (isOutsideVisibleMonth) {
       onCalendarMonthChange({ year, month });
     }
+  };
 
-    onSelectedRangeChange(getNextSelectedRange(selectedRange, date));
+  const selectDate = (date: LocalDateString) => {
+    syncCalendarMonthToDate(date);
+    onSelectedRangeChange(getSingleDateRange(date));
+  };
+
+  const holdDate = (date: LocalDateString) => {
+    syncCalendarMonthToDate(date);
+    onSelectedRangeChange(getNextHeldCalendarRange(selectedRange, date));
   };
 
   const getComparisonForMonth = async (month: CalendarMonth) => {
@@ -690,6 +679,7 @@ export function SchedulePage({
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}
         onDateSelect={selectDate}
+        onDateHold={holdDate}
         activeRangePreset={activeRangePreset}
         isAllTimePresetEnabled={isAllTimePresetEnabled}
         onRangePresetSelect={onRangePresetSelect}

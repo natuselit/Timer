@@ -45,6 +45,8 @@ import {
   formatTimeInputDraft,
   formatTime,
   getDurationMinutes,
+  getNextHeldCalendarRange,
+  getSingleDateRange,
   getTimeInputValue,
   normalizeTimeInput,
   toLocalIsoString
@@ -452,30 +454,6 @@ const getSelectedRangeBounds = (
   end: range.end ?? range.start
 });
 
-const getNextSelectedRange = (
-  current: CalendarDateRange | null,
-  date: LocalDateString
-): CalendarDateRange => {
-  if (!current || current.end) {
-    return {
-      start: date,
-      end: null
-    };
-  }
-
-  if (date < current.start) {
-    return {
-      start: date,
-      end: current.start
-    };
-  }
-
-  return {
-    start: current.start,
-    end: date
-  };
-};
-
 export function HistoryPage({
   settings,
   calendarMonth,
@@ -572,15 +550,23 @@ export function HistoryPage({
     [visibleShifts, now]
   );
 
-  const selectDate = (date: LocalDateString) => {
+  const syncCalendarMonthToDate = (date: LocalDateString) => {
     const [year, month] = date.split('-').map(Number);
     const isOutsideVisibleMonth = year !== calendarMonth.year || month !== calendarMonth.month;
 
     if (isOutsideVisibleMonth) {
       onCalendarMonthChange({ year, month });
     }
+  };
 
-    onSelectedRangeChange(getNextSelectedRange(selectedRange, date));
+  const selectDate = (date: LocalDateString) => {
+    syncCalendarMonthToDate(date);
+    onSelectedRangeChange(getSingleDateRange(date));
+  };
+
+  const holdDate = (date: LocalDateString) => {
+    syncCalendarMonthToDate(date);
+    onSelectedRangeChange(getNextHeldCalendarRange(selectedRange, date));
   };
 
   const openCreateEditor = () => {
@@ -625,13 +611,16 @@ export function HistoryPage({
   };
 
   const moveMonth = (direction: -1 | 1) => {
-    onSelectedRangeChange(null);
     const next = new Date(calendarMonth.year, calendarMonth.month - 1 + direction, 1);
 
     onCalendarMonthChange({
       year: next.getFullYear(),
       month: next.getMonth() + 1
     });
+
+    if (activeRangePreset !== 'month') {
+      onSelectedRangeChange(null);
+    }
   };
 
   const moveEditorMonth = (direction: -1 | 1) => {
@@ -983,6 +972,7 @@ export function HistoryPage({
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}
         onDateSelect={selectDate}
+        onDateHold={holdDate}
         activeRangePreset={activeRangePreset}
         isAllTimePresetEnabled={isAllTimePresetEnabled}
         onRangePresetSelect={onRangePresetSelect}

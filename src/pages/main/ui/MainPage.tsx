@@ -54,6 +54,7 @@ import {
 import { downloadBackup } from '../../../shared/lib/backup';
 import {
   combineLocalDateAndTime,
+  getCalendarMonthRange,
   getCalendarPresetSelection,
   formatTimeInputDraft,
   formatDate,
@@ -277,7 +278,9 @@ export function MainPage({
   const [backupReminderError, setBackupReminderError] = useState<string | null>(null);
   const [localDataRefreshKey, setLocalDataRefreshKey] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
-  const [sharedCalendarRange, setSharedCalendarRange] = useState<CalendarDateRange | null>(null);
+  const [sharedCalendarRange, setSharedCalendarRange] = useState<CalendarDateRange | null>(
+    () => getCalendarMonthRange(getCurrentMonth())
+  );
   const [allTimeRange, setAllTimeRange] = useState<CalendarDateRange | null>(null);
   const [activeCalendarRangePreset, setActiveCalendarRangePreset] =
     useState<CalendarRangePreset | null>('month');
@@ -1022,6 +1025,16 @@ export function MainPage({
     setSharedCalendarRange(range);
     setActiveCalendarRangePreset(null);
   }, []);
+  const changeSharedCalendarMonth = useCallback(
+    (month: CalendarMonth) => {
+      setSharedCalendarMonth(month);
+
+      if (activeCalendarRangePreset === 'month') {
+        setSharedCalendarRange(getCalendarMonthRange(month));
+      }
+    },
+    [activeCalendarRangePreset]
+  );
   const selectCalendarRangePreset = useCallback(
     (preset: CalendarRangePreset) => {
       const selection = getCalendarPresetSelection({
@@ -1099,7 +1112,7 @@ export function MainPage({
           settings={settings}
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
-          onCalendarMonthChange={setSharedCalendarMonth}
+          onCalendarMonthChange={changeSharedCalendarMonth}
           onSelectedRangeChange={changeSharedCalendarRange}
           activeRangePreset={activeCalendarRangePreset}
           isAllTimePresetEnabled={allTimeRange !== null}
@@ -1112,7 +1125,7 @@ export function MainPage({
           settings={settings}
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
-          onCalendarMonthChange={setSharedCalendarMonth}
+          onCalendarMonthChange={changeSharedCalendarMonth}
           onSelectedRangeChange={changeSharedCalendarRange}
           activeRangePreset={activeCalendarRangePreset}
           isAllTimePresetEnabled={allTimeRange !== null}
@@ -1124,7 +1137,7 @@ export function MainPage({
           settings={settings}
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
-          onCalendarMonthChange={setSharedCalendarMonth}
+          onCalendarMonthChange={changeSharedCalendarMonth}
           onSelectedRangeChange={changeSharedCalendarRange}
           activeRangePreset={activeCalendarRangePreset}
           isAllTimePresetEnabled={allTimeRange !== null}

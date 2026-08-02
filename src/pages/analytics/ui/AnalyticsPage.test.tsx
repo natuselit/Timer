@@ -31,11 +31,10 @@ const settings: Settings = {
 
 const makeShift = (
   id: string,
-  day: number,
-  coefficientMode: CoefficientMode
+  date: `2026-${string}`,
+  coefficientMode: CoefficientMode,
+  overrides: Partial<Shift> = {}
 ): Shift => {
-  const date = `2026-07-${String(day).padStart(2, '0')}` as const;
-
   return {
     id,
     date,
@@ -52,16 +51,43 @@ const makeShift = (
     coefficientMode,
     isAutoClosed: false,
     createdAt: `${date}T06:30:00.000+03:00`,
-    updatedAt: `${date}T14:30:00.000+03:00`
+    updatedAt: `${date}T14:30:00.000+03:00`,
+    ...overrides
   };
 };
 
 beforeEach(async () => {
   await localDb.shifts.clear();
   await localDb.shifts.bulkPut([
-    makeShift('x1', 25, 'x1'),
-    makeShift('x1.5', 26, 'x1.5'),
-    makeShift('x2', 27, 'x2')
+    makeShift('previous-period', '2026-06-15', 'x1'),
+    makeShift('auto-overtime', '2026-07-25', 'auto', {
+      startTime: '2026-07-25T06:20:00.000+03:00',
+      endTime: '2026-07-25T14:40:00.000+03:00',
+      gradeSnapshot: {
+        currentGrade: 2,
+        desiredGrade: 3,
+        gradeSalaryBonusPercents: [10, 10, 10, 10],
+        gradeNormPercents: [100, 120, 140, 160],
+        cumulativeSalaryBonusPercent: 20
+      },
+      workTickets: [
+        {
+          id: 'filled-ticket',
+          normPerEightHours: 48,
+          startedAt: '2026-07-25T07:00:00.000+03:00',
+          endedAt: '2026-07-25T08:00:00.000+03:00',
+          actualQuantity: 12,
+          downtimeMinutes: 0,
+          createdAt: '2026-07-25T07:00:00.000+03:00',
+          updatedAt: '2026-07-25T08:00:00.000+03:00'
+        }
+      ]
+    }),
+    makeShift('x1.5', '2026-07-26', 'x1.5'),
+    makeShift('x2', '2026-07-27', 'x2', {
+      startTime: '2026-07-27T06:45:00.000+03:00',
+      endTime: '2026-07-27T14:20:00.000+03:00'
+    })
   ]);
 });
 
@@ -71,7 +97,7 @@ afterEach(async () => {
 });
 
 describe('AnalyticsPage', () => {
-  it('keeps coefficient tones identifiable and no longer renders schedule control', async () => {
+  it('shows coefficients, period comparison, discipline and explicit G1 targets', async () => {
     const { container } = render(
       <AnalyticsPage
         settings={settings}
@@ -90,6 +116,40 @@ describe('AnalyticsPage', () => {
     expect(container.querySelector('[data-coefficient="1.5"]')).toBeTruthy();
     expect(container.querySelector('[data-coefficient="2"]')).toBeTruthy();
     expect(container.querySelector('.analytics-page__detail-item--time-total')).toBeTruthy();
-    expect(screen.queryByText('Контроль графіка')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Порівняння' })).toBeTruthy();
+    expect(screen.getByText('Попередній період 01.06–30.06')).toBeTruthy();
+    expect(screen.getAllByText('Зараз')).toHaveLength(4);
+    expect(screen.getAllByText('Було')).toHaveLength(4);
+    expect(screen.getAllByText('Різниця')).toHaveLength(4);
+    expect(screen.getByText('За перепрацювання')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Дотримання графіка' })).toBeTruthy();
+    expect(screen.getByLabelText('Запізнення: 15 хв')).toBeTruthy();
+    expect(screen.getByLabelText('Ранній вихід: 10 хв')).toBeTruthy();
+    expect(screen.getByText('План G1')).toBeTruthy();
+    expect(screen.getByText('Виконання від G1')).toBeTruthy();
+  });
+
+  it('masks overtime income and salary comparison in incognito mode', async () => {
+    const { container } = render(
+      <AnalyticsPage
+        settings={{ ...settings, incognitoEnabled: true }}
+        calendarMonth={{ year: 2026, month: 7 }}
+        selectedRange={{ start: '2026-07-01', end: '2026-07-31' }}
+        onCalendarMonthChange={vi.fn()}
+        onSelectedRangeChange={vi.fn()}
+        activeRangePreset="month"
+        isAllTimePresetEnabled
+        onRangePresetSelect={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Гроші' })).toBeTruthy();
+
+    const overtimeLabel = screen.getByText('За перепрацювання');
+    const comparisonGrid = container.querySelector('[aria-label="Зміни до попереднього періоду"]');
+    const salaryComparison = comparisonGrid?.querySelector('article:first-child');
+
+    expect(overtimeLabel.nextElementSibling?.textContent).toBe('••••');
+    expect(salaryComparison?.textContent?.match(/••••/g)).toHaveLength(4);
   });
 });

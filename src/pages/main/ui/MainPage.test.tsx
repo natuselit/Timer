@@ -77,6 +77,29 @@ afterEach(async () => {
 });
 
 describe('MainPage active shift', () => {
+  it('uses the current month preset for calendar screens by default', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MainPage
+        settings={settings}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Аналітика' }));
+
+    const monthPreset = screen.getByRole('button', { name: 'Місяць' });
+
+    expect(monthPreset.getAttribute('aria-pressed')).toBe('true');
+
+    await user.click(screen.getByRole('button', { name: 'Попередній місяць' }));
+
+    expect(monthPreset.getAttribute('aria-pressed')).toBe('true');
+  });
+
   it('shows compact downtime and opens the accessible action modal from the menu', async () => {
     const user = userEvent.setup();
 

@@ -31,6 +31,7 @@ export type AnalyticsSummary = {
   effectiveHourlyIncome: number;
   totalMinutes: number;
   shiftCount: number;
+  completedShiftCount: number;
   averageShiftMinutes: number;
   overtimeMinutes: number;
   overtimeIncome: number;
@@ -63,6 +64,7 @@ export type AnalyticsSummary = {
     actualQuantity: number;
     productiveMinutes: number;
     downtimeMinutes: number;
+    gradeOneTarget: number;
     currentGradeTarget: number;
     completionPercent: number | null;
     averageActualPerTicket: number;
@@ -151,6 +153,7 @@ export const calculateAnalyticsSummary = ({
     actualQuantity: 0,
     productiveMinutes: 0,
     downtimeMinutes: 0,
+    gradeOneTarget: 0,
     currentGradeTarget: 0,
     completionPercent: null,
     averageActualPerTicket: 0,
@@ -239,6 +242,7 @@ export const calculateAnalyticsSummary = ({
     gradeOneTarget > 0
       ? (production.actualQuantity / gradeOneTarget) * 100
       : null;
+  production.gradeOneTarget = gradeOneTarget;
   production.averageActualPerTicket =
     production.filledTicketCount > 0
       ? production.actualQuantity / production.filledTicketCount
@@ -278,6 +282,7 @@ export const calculateAnalyticsSummary = ({
     effectiveHourlyIncome: totalMinutes > 0 ? (workSalary * 60) / totalMinutes : 0,
     totalMinutes,
     shiftCount,
+    completedShiftCount: scheduleControl.completedShiftCount,
     averageShiftMinutes: shiftCount > 0 ? totalMinutes / shiftCount : 0,
     overtimeMinutes,
     overtimeIncome,
