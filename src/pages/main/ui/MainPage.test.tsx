@@ -6,7 +6,11 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import type { Shift } from '../../../entities/shift';
-import { BACKUP_REMINDER_ANCHOR_KEY, localDb } from '../../../shared/lib/local-db';
+import {
+  BACKUP_REMINDER_ANCHOR_KEY,
+  CALENDAR_TUTORIAL_SEEN_KEY,
+  localDb
+} from '../../../shared/lib/local-db';
 import { MainPage } from './MainPage';
 
 const settings: Settings = {
@@ -77,7 +81,7 @@ afterEach(async () => {
 });
 
 describe('MainPage active shift', () => {
-  it('uses the current month preset for calendar screens by default', async () => {
+  it('uses today as the default preset for calendar screens', async () => {
     const user = userEvent.setup();
 
     render(
@@ -91,13 +95,51 @@ describe('MainPage active shift', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Аналітика' }));
 
-    const monthPreset = screen.getByRole('button', { name: 'Місяць' });
+    expect(
+      screen.getByRole('button', { name: 'Сьогодні' }).getAttribute('aria-pressed')
+    ).toBe('true');
+    expect(
+      screen.getByRole('button', { name: 'Місяць' }).getAttribute('aria-pressed')
+    ).toBe('false');
+  });
 
-    expect(monthPreset.getAttribute('aria-pressed')).toBe('true');
+  it('shows the calendar tutorial once and allows reopening it from settings', async () => {
+    const user = userEvent.setup();
 
-    await user.click(screen.getByRole('button', { name: 'Попередній місяць' }));
+    render(
+      <MainPage
+        settings={settings}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
 
-    expect(monthPreset.getAttribute('aria-pressed')).toBe('true');
+    await user.click(await screen.findByRole('button', { name: 'Аналітика' }));
+
+    expect(
+      await screen.findByRole('dialog', { name: 'Почніть із потрібного періоду' })
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Закрити навчання календаря' }));
+
+    await waitFor(async () => {
+      expect((await localDb.appMeta.get(CALENDAR_TUTORIAL_SEEN_KEY))?.value).toBe('true');
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Таймер' }));
+    await user.click(screen.getByRole('button', { name: 'Історія' }));
+
+    expect(screen.queryByRole('dialog', { name: 'Почніть із потрібного періоду' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Налашт.' }));
+    await user.click(
+      screen.getByRole('button', { name: 'Як користуватися календарем' })
+    );
+
+    expect(
+      screen.getByRole('dialog', { name: 'Почніть із потрібного періоду' })
+    ).toBeTruthy();
   });
 
   it('shows compact downtime and opens the accessible action modal from the menu', async () => {

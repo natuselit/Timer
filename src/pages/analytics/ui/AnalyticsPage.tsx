@@ -17,8 +17,10 @@ import {
   formatDurationMinutes,
   formatShortMinuteDuration,
   formatShortNumericDate,
+  getDateFromDateTime,
   getNextHeldCalendarRange,
   getSingleDateRange,
+  shouldResetCalendarRangeOnMonthNavigation,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import {
@@ -28,7 +30,7 @@ import {
 } from '../../../shared/lib/format';
 import {
   calculateAnalyticsPeriodComparison,
-  getPreviousAnalyticsRange
+  getAnalyticsComparisonRanges
 } from '../../../shared/lib/shifts/analyticsComparison';
 import {
   calculateAnalyticsSummary,
@@ -262,10 +264,12 @@ export function AnalyticsPage({
         : calendarMonthRange,
     [selectedRange, calendarMonthRange]
   );
-  const previousDateRange = useMemo(
-    () => getPreviousAnalyticsRange(loadedDateRange),
-    [loadedDateRange]
+  const today = getDateFromDateTime(now);
+  const comparisonRanges = useMemo(
+    () => getAnalyticsComparisonRanges(loadedDateRange, today),
+    [loadedDateRange, today]
   );
+  const previousDateRange = comparisonRanges.previous;
 
   const loadAnalytics = useCallback(async () => {
     setIsLoading(true);
@@ -315,6 +319,27 @@ export function AnalyticsPage({
       }),
     [shifts, now, loadedDateRange, settings.monthlyBonus]
   );
+  const comparisonCurrentShifts = useMemo(
+    () =>
+      shifts.filter(
+        (shift) =>
+          shift.date >= comparisonRanges.current.start &&
+          shift.date <= comparisonRanges.current.end
+      ),
+    [comparisonRanges.current, shifts]
+  );
+  const comparisonCurrentSummary = useMemo(
+    () =>
+      calculateAnalyticsSummary({
+        shifts: comparisonCurrentShifts,
+        now,
+        periodStart: comparisonRanges.current.start,
+        periodEnd: comparisonRanges.current.end,
+        monthlyBonus: 0,
+        includeMonthlyBonus: false
+      }),
+    [comparisonCurrentShifts, comparisonRanges.current, now]
+  );
   const previousSummary = useMemo(
     () =>
       calculateAnalyticsSummary({
@@ -328,8 +353,8 @@ export function AnalyticsPage({
     [previousShifts, now, previousDateRange]
   );
   const periodComparison = useMemo(
-    () => calculateAnalyticsPeriodComparison(summary, previousSummary),
-    [summary, previousSummary]
+    () => calculateAnalyticsPeriodComparison(comparisonCurrentSummary, previousSummary),
+    [comparisonCurrentSummary, previousSummary]
   );
   const moveMonth = (direction: -1 | 1) => {
     const next = new Date(calendarMonth.year, calendarMonth.month - 1 + direction, 1);
@@ -339,7 +364,9 @@ export function AnalyticsPage({
       month: next.getMonth() + 1
     });
 
-    if (activeRangePreset !== 'month') {
+    if (
+      shouldResetCalendarRangeOnMonthNavigation(activeRangePreset, selectedRange)
+    ) {
       onSelectedRangeChange(null);
     }
   };
@@ -424,7 +451,7 @@ export function AnalyticsPage({
                 <strong>{formatMoney(summary.monthlyBonus, settings.incognitoEnabled)}</strong>
               </article>
               <article className="analytics-page__money-card">
-                <span>Грейдова премія</span>
+                <span>Премія за рівень</span>
                 <strong>{formatMoney(summary.gradeBonus, settings.incognitoEnabled)}</strong>
               </article>
               <article className="analytics-page__money-card">
@@ -450,7 +477,8 @@ export function AnalyticsPage({
             <header className="analytics-page__panel-header">
               <div>
                 <p className="analytics-page__eyebrow">
-                  Попередній період {formatAnalyticsRange(previousDateRange)}
+                  {formatAnalyticsRange(comparisonRanges.current)} проти{' '}
+                  {formatAnalyticsRange(previousDateRange)}
                 </p>
                 <h3 id="analytics-comparison-title">Порівняння</h3>
               </div>
@@ -477,7 +505,12 @@ export function AnalyticsPage({
                   <div className="analytics-page__comparison-values">
                     <span>
                       <small>Зараз</small>
-                      <strong>{formatMoney(summary.workSalary, settings.incognitoEnabled)}</strong>
+                      <strong>
+                        {formatMoney(
+                          comparisonCurrentSummary.workSalary,
+                          settings.incognitoEnabled
+                        )}
+                      </strong>
                     </span>
                     <span>
                       <small>Було</small>
@@ -502,7 +535,7 @@ export function AnalyticsPage({
                   <div className="analytics-page__comparison-values">
                     <span>
                       <small>Зараз</small>
-                      <strong>{formatDurationMinutes(summary.totalMinutes)}</strong>
+                      <strong>{formatDurationMinutes(comparisonCurrentSummary.totalMinutes)}</strong>
                     </span>
                     <span>
                       <small>Було</small>
@@ -522,7 +555,7 @@ export function AnalyticsPage({
                   <div className="analytics-page__comparison-values">
                     <span>
                       <small>Зараз</small>
-                      <strong>{summary.shiftCount}</strong>
+                      <strong>{comparisonCurrentSummary.shiftCount}</strong>
                     </span>
                     <span>
                       <small>Було</small>
@@ -548,7 +581,9 @@ export function AnalyticsPage({
                   <div className="analytics-page__comparison-values">
                     <span>
                       <small>Зараз</small>
-                      <strong>{formatPercent(summary.production.completionPercent)}</strong>
+                      <strong>
+                        {formatPercent(comparisonCurrentSummary.production.completionPercent)}
+                      </strong>
                     </span>
                     <span>
                       <small>Було</small>

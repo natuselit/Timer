@@ -264,6 +264,21 @@
   outline: none;
 }
 
+.settings-page__help-button {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-control);
+  background: var(--color-primary-surface);
+  color: var(--color-primary);
+  cursor: pointer;
+  font-weight: 800;
+}
+
 .settings-page__toggle {
   display: grid;
   grid-template-columns: 44px minmax(0, 1fr) 48px;
@@ -529,6 +544,38 @@
 
 .settings-page__faq details[open] summary::after {
   content: '−';
+}
+
+.settings-page__faq ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0 14px 12px 34px;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.settings-page__faq li::marker {
+  color: var(--color-primary);
+  font-weight: 800;
+}
+
+.settings-page__faq li {
+  padding-left: 2px;
+}
+
+.settings-page__faq li strong {
+  display: block;
+  color: var(--color-text-primary);
+  font-size: 0.83rem;
+  line-height: 1.35;
+}
+
+.settings-page__faq li span {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
 }
 
 .settings-page__faq p {

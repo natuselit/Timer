@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import type { CoefficientMode, Shift } from '../../../entities/shift';
@@ -93,6 +93,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   cleanup();
+  vi.useRealTimers();
   await localDb.shifts.clear();
 });
 
@@ -117,7 +118,7 @@ describe('AnalyticsPage', () => {
     expect(container.querySelector('[data-coefficient="2"]')).toBeTruthy();
     expect(container.querySelector('.analytics-page__detail-item--time-total')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Порівняння' })).toBeTruthy();
-    expect(screen.getByText('Попередній період 01.06–30.06')).toBeTruthy();
+    expect(screen.getByText('01.07–31.07 проти 01.06–30.06')).toBeTruthy();
     expect(screen.getAllByText('Зараз')).toHaveLength(4);
     expect(screen.getAllByText('Було')).toHaveLength(4);
     expect(screen.getAllByText('Різниця')).toHaveLength(4);
@@ -151,5 +152,39 @@ describe('AnalyticsPage', () => {
 
     expect(overtimeLabel.nextElementSibling?.textContent).toBe('••••');
     expect(salaryComparison?.textContent?.match(/••••/g)).toHaveLength(4);
+  });
+
+  it('compares only elapsed current-month days with the same dates last month', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 7, 4, 12));
+    await localDb.shifts.clear();
+    await localDb.shifts.bulkPut([
+      makeShift('july-1', '2026-07-01', 'x1'),
+      makeShift('july-2', '2026-07-02', 'x1'),
+      makeShift('july-later', '2026-07-20', 'x1'),
+      makeShift('august-1', '2026-08-01', 'x1'),
+      makeShift('august-2', '2026-08-02', 'x1'),
+      makeShift('august-future', '2026-08-20', 'x1')
+    ]);
+
+    render(
+      <AnalyticsPage
+        settings={settings}
+        calendarMonth={{ year: 2026, month: 8 }}
+        selectedRange={{ start: '2026-08-01', end: '2026-08-31' }}
+        onCalendarMonthChange={vi.fn()}
+        onSelectedRangeChange={vi.fn()}
+        activeRangePreset="month"
+        isAllTimePresetEnabled
+        onRangePresetSelect={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('01.08–04.08 проти 01.07–04.07')).toBeTruthy();
+
+    const shiftComparison = screen.getByText('Кількість змін').closest('article');
+
+    expect(shiftComparison).not.toBeNull();
+    expect(within(shiftComparison!).getAllByText('2')).toHaveLength(2);
   });
 });

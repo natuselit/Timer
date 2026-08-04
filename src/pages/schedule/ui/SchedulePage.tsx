@@ -48,6 +48,7 @@ import {
   countWeekdaysInDateRange,
   getNextHeldCalendarRange,
   getSingleDateRange,
+  shouldResetCalendarRangeOnMonthNavigation,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
@@ -60,6 +61,10 @@ import {
   type CalendarDateRange,
   type CalendarRangePreset
 } from '../../../shared/ui/month-calendar';
+import {
+  ENTERPRISE_SCHEDULE_IMPORT_NOTE,
+  ENTERPRISE_SCHEDULE_IMPORT_STEPS
+} from '../../../shared/config/enterpriseScheduleImportGuide';
 import {
   getImportedMonths,
   getPrimaryImportedMonth,
@@ -351,7 +356,9 @@ export function SchedulePage({
       month: next.getMonth() + 1
     });
 
-    if (activeRangePreset !== 'month') {
+    if (
+      shouldResetCalendarRangeOnMonthNavigation(activeRangePreset, selectedRange)
+    ) {
       onSelectedRangeChange(null);
     }
   };
@@ -788,8 +795,27 @@ export function SchedulePage({
         </div>
 
         <p className="schedule-page__muted">
-          Оберіть PDF із листа «Ваш табель робочого часу». Файл обробляється лише на цьому пристрої.
+          Перетворіть лист із табелем на PDF — «Таймер» розпізнає записи та покаже
+          розбіжності перед синхронізацією.
         </p>
+
+        <details className="schedule-page__import-guide">
+          <summary>
+            <span>Як підготувати та імпортувати PDF</span>
+            <ChevronDown aria-hidden="true" size={19} />
+          </summary>
+          <div>
+            <ol>
+              {ENTERPRISE_SCHEDULE_IMPORT_STEPS.map((step) => (
+                <li key={step.title}>
+                  <strong>{step.title}</strong>
+                  <span>{step.description}</span>
+                </li>
+              ))}
+            </ol>
+            <p>{ENTERPRISE_SCHEDULE_IMPORT_NOTE}</p>
+          </div>
+        </details>
 
         <input
           ref={importInputRef}

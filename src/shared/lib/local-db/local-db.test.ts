@@ -16,6 +16,7 @@ import { ShiftConstraintError, ShiftRepository } from './repositories/shiftRepos
 import {
   BackupValidationError,
   BACKUP_SCHEMA_VERSION,
+  CALENDAR_TUTORIAL_SEEN_KEY,
   adjustWorkTicketDowntime,
   addWorkTicketToActiveShift,
   completeWorkTicket,
@@ -2114,11 +2115,18 @@ describe('backup use-cases', () => {
     await settingsRepository.saveSettings(oldSettings);
     await shiftRepository.createShift(oldShift);
     await enterpriseScheduleRepository.importItems([oldScheduleItem]);
-    await db.appMeta.put({
-      key: 'stale',
-      value: 'true',
-      updatedAt: '2026-06-23T10:00:00.000Z'
-    });
+    await db.appMeta.bulkPut([
+      {
+        key: 'stale',
+        value: 'true',
+        updatedAt: '2026-06-23T10:00:00.000Z'
+      },
+      {
+        key: CALENDAR_TUTORIAL_SEEN_KEY,
+        value: 'true',
+        updatedAt: '2026-06-23T11:00:00.000Z'
+      }
+    ]);
 
     await restoreBackup(db, {
       schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -2147,6 +2155,10 @@ describe('backup use-cases', () => {
         reviewedAt: '2026-06-24T11:00:00.000Z'
       }
     ]);
+    await expect(db.appMeta.get(CALENDAR_TUTORIAL_SEEN_KEY)).resolves.toMatchObject({
+      value: 'true'
+    });
+    await expect(db.appMeta.get('stale')).resolves.toBeUndefined();
 
     await expect(
       restoreBackup(db, {

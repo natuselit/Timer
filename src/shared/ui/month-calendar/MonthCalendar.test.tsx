@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LocalDateString } from '../../../entities/shift';
+import {
+  getNextHeldCalendarRange,
+  shouldResetCalendarRangeOnMonthNavigation,
+  type CalendarDateRange
+} from '../../lib/date-time';
 import { MonthCalendar } from './MonthCalendar';
 
 const renderCalendar = ({
@@ -32,6 +38,40 @@ const renderCalendar = ({
 
   return { onDateSelect, onDateHold };
 };
+
+function CrossMonthRangeHarness() {
+  const [visibleMonth, setVisibleMonth] = useState({ year: 2026, month: 7 });
+  const [selectedRange, setSelectedRange] = useState<CalendarDateRange>({
+    start: '2026-07-01',
+    end: '2026-07-31'
+  });
+
+  const moveToNextMonth = () => {
+    setVisibleMonth({ year: 2026, month: 8 });
+
+    if (shouldResetCalendarRangeOnMonthNavigation(null, selectedRange)) {
+      setSelectedRange({ start: '2026-08-01', end: '2026-08-31' });
+    }
+  };
+
+  return (
+    <MonthCalendar
+      year={visibleMonth.year}
+      month={visibleMonth.month}
+      salaryLabel="0 ₴"
+      shiftCount={0}
+      hoursLabel="0:00"
+      shifts={[]}
+      selectedRange={selectedRange}
+      onPreviousMonth={vi.fn()}
+      onNextMonth={moveToNextMonth}
+      onDateSelect={vi.fn()}
+      onDateHold={(date) => setSelectedRange(getNextHeldCalendarRange(selectedRange, date))}
+      activeRangePreset={null}
+      onRangePresetSelect={vi.fn()}
+    />
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -77,5 +117,28 @@ describe('MonthCalendar range selection', () => {
     expect(
       screen.getByText('Для діапазону затисніть початкову й кінцеву дату.')
     ).toBeTruthy();
+  });
+
+  it('finishes a held range after navigating to another month', () => {
+    vi.useFakeTimers();
+    render(<CrossMonthRangeHarness />);
+
+    const startButton = screen.getByRole('button', { name: 'Обрати 30 число' });
+    fireEvent.pointerDown(startButton);
+    act(() => vi.advanceTimersByTime(550));
+    fireEvent.pointerUp(startButton);
+    fireEvent.click(startButton);
+
+    expect(screen.getByText('Затисніть кінцеву дату діапазону.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Наступний місяць' }));
+
+    const endButton = screen.getByRole('button', { name: 'Обрати 3 число' });
+    fireEvent.pointerDown(endButton);
+    act(() => vi.advanceTimersByTime(550));
+    fireEvent.pointerUp(endButton);
+    fireEvent.click(endButton);
+
+    expect(screen.getByText('30.07.2026 - 03.08.2026')).toBeTruthy();
   });
 });

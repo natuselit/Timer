@@ -49,6 +49,7 @@ import {
   getSingleDateRange,
   getTimeInputValue,
   normalizeTimeInput,
+  shouldResetCalendarRangeOnMonthNavigation,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
 import { INCOGNITO_FINANCIAL_MASK, formatHourlyRate, formatMoney } from '../../../shared/lib/format';
@@ -618,7 +619,9 @@ export function HistoryPage({
       month: next.getMonth() + 1
     });
 
-    if (activeRangePreset !== 'month') {
+    if (
+      shouldResetCalendarRangeOnMonthNavigation(activeRangePreset, selectedRange)
+    ) {
       onSelectedRangeChange(null);
     }
   };
@@ -1231,7 +1234,7 @@ export function HistoryPage({
 
                                 <div
                                   className="history-page__ticket-detail-targets"
-                                  aria-label={`Плани грейдів тікета ${ticketIndex + 1}`}
+                                  aria-label={`Плани рівнів тікета ${ticketIndex + 1}`}
                                 >
                                   {production.targets.map((target) => (
                                     <div
@@ -1575,9 +1578,9 @@ export function HistoryPage({
                                 {previewActualQuantity === null
                                   ? 'Факт не внесено'
                                   : production.productiveMinutes === 0
-                                    ? 'Грейд не визначено'
-                                  : production.achievedGrade
-                                    ? `Досягнуто G${production.achievedGrade}`
+                                    ? 'Рівень не визначено'
+                                    : production.achievedGrade
+                                    ? `Досягнуто рівень G${production.achievedGrade}`
                                     : 'Результат нижче G1'}
                               </strong>
                             </div>

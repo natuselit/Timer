@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AnalyticsSummary } from './analyticsSummary';
 import {
   calculateAnalyticsPeriodComparison,
-  getPreviousAnalyticsRange
+  getAnalyticsComparisonRanges
 } from './analyticsComparison';
 
 const makeSummary = (overrides: Partial<AnalyticsSummary> = {}): AnalyticsSummary => ({
@@ -63,23 +63,65 @@ const makeSummary = (overrides: Partial<AnalyticsSummary> = {}): AnalyticsSummar
   ...overrides
 });
 
-describe('getPreviousAnalyticsRange', () => {
-  it('uses the previous calendar month for a full month', () => {
+describe('getAnalyticsComparisonRanges', () => {
+  it('compares an elapsed current-month range with the same dates one month earlier', () => {
     expect(
-      getPreviousAnalyticsRange({ start: '2026-07-01', end: '2026-07-31' })
-    ).toEqual({ start: '2026-06-01', end: '2026-06-30' });
+      getAnalyticsComparisonRanges(
+        { start: '2026-08-01', end: '2026-08-31' },
+        '2026-08-04'
+      )
+    ).toEqual({
+      current: { start: '2026-08-01', end: '2026-08-04' },
+      previous: { start: '2026-07-01', end: '2026-07-04' }
+    });
   });
 
-  it('handles a previous calendar month with fewer days', () => {
+  it('uses the complete previous month for a complete past month', () => {
     expect(
-      getPreviousAnalyticsRange({ start: '2026-03-01', end: '2026-03-31' })
-    ).toEqual({ start: '2026-02-01', end: '2026-02-28' });
+      getAnalyticsComparisonRanges(
+        { start: '2026-07-01', end: '2026-07-31' },
+        '2026-08-04'
+      )
+    ).toEqual({
+      current: { start: '2026-07-01', end: '2026-07-31' },
+      previous: { start: '2026-06-01', end: '2026-06-30' }
+    });
   });
 
-  it('uses an immediately preceding range of the same duration for a custom period', () => {
+  it('compares a custom range and one day with the same dates one month earlier', () => {
     expect(
-      getPreviousAnalyticsRange({ start: '2026-07-10', end: '2026-07-16' })
-    ).toEqual({ start: '2026-07-03', end: '2026-07-09' });
+      getAnalyticsComparisonRanges(
+        { start: '2026-08-10', end: '2026-08-16' },
+        '2026-08-20'
+      ).previous
+    ).toEqual({ start: '2026-07-10', end: '2026-07-16' });
+    expect(
+      getAnalyticsComparisonRanges(
+        { start: '2026-08-04', end: '2026-08-04' },
+        '2026-08-04'
+      ).previous
+    ).toEqual({ start: '2026-07-04', end: '2026-07-04' });
+  });
+
+  it('clamps missing dates to the final day of the previous month', () => {
+    expect(
+      getAnalyticsComparisonRanges(
+        { start: '2026-03-31', end: '2026-03-31' },
+        '2026-04-01'
+      ).previous
+    ).toEqual({ start: '2026-02-28', end: '2026-02-28' });
+  });
+
+  it('shifts both boundaries of a cross-month range', () => {
+    expect(
+      getAnalyticsComparisonRanges(
+        { start: '2026-07-31', end: '2026-08-02' },
+        '2026-08-04'
+      )
+    ).toEqual({
+      current: { start: '2026-07-31', end: '2026-08-02' },
+      previous: { start: '2026-06-30', end: '2026-07-02' }
+    });
   });
 });
 

@@ -163,6 +163,12 @@ describe('SchedulePage', () => {
     expect(scheduleDetails?.open).toBe(true);
     expect(screen.getByText('06:30-14:30')).toBeTruthy();
 
+    const importGuideTitle = screen.getByText('Як підготувати та імпортувати PDF');
+    await user.click(importGuideTitle);
+    expect(screen.getByText('Відкрийте «Таймер»')).toBeTruthy();
+    expect(screen.getByText(/Натисніть ⋮/)).toBeTruthy();
+    expect(screen.getByText(/зверніться до керівництва/)).toBeTruthy();
+
     await user.click(screen.getByRole('button', { name: 'Переглянуто' }));
 
     await waitFor(() => {

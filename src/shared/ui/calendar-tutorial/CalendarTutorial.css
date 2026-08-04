@@ -1,0 +1,168 @@
+.calendar-tutorial {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  align-items: end;
+  padding:
+    max(16px, env(safe-area-inset-top))
+    max(12px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(12px, env(safe-area-inset-left));
+  background: var(--color-overlay);
+}
+
+.calendar-tutorial__panel {
+  display: grid;
+  width: min(100%, 520px);
+  max-height: calc(100dvh - 32px);
+  gap: 18px;
+  margin: 0 auto;
+  padding: 20px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 26px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-modal);
+}
+
+.calendar-tutorial__topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-tutorial__topline > span {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.calendar-tutorial__topline button {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.calendar-tutorial__progress {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.calendar-tutorial__progress span {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-border);
+}
+
+.calendar-tutorial__progress span[data-active='true'] {
+  background: var(--color-primary);
+}
+
+.calendar-tutorial__icon {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  place-items: center;
+  border: 1px solid var(--color-primary-border-muted);
+  border-radius: 20px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.calendar-tutorial__copy {
+  display: grid;
+  gap: 8px;
+}
+
+.calendar-tutorial__copy p,
+.calendar-tutorial__copy h2,
+.calendar-tutorial__panel ul {
+  margin: 0;
+}
+
+.calendar-tutorial__copy > p:first-child {
+  color: var(--color-primary);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.calendar-tutorial__copy h2 {
+  color: var(--color-text-primary);
+  font-size: clamp(1.45rem, 6vw, 1.85rem);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+}
+
+.calendar-tutorial__copy h2:focus {
+  outline: none;
+}
+
+.calendar-tutorial__copy > p:last-child,
+.calendar-tutorial__panel li {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.calendar-tutorial__panel ul {
+  display: grid;
+  gap: 10px;
+  padding-left: 22px;
+}
+
+.calendar-tutorial__panel li::marker {
+  color: var(--color-primary);
+}
+
+.calendar-tutorial__actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.calendar-tutorial__actions button {
+  display: inline-flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 16px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.calendar-tutorial__back {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.calendar-tutorial__back:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
+.calendar-tutorial__next {
+  border: 0;
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: 0 10px 24px var(--color-primary-shadow);
+}
+
+@media (min-width: 600px) {
+  .calendar-tutorial {
+    align-items: center;
+  }
+}

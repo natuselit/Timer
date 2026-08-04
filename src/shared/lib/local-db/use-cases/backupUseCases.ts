@@ -29,6 +29,7 @@ import {
 } from '../../../../entities/shift';
 import { toLocalIsoString } from '../../date-time';
 import type { ShifterDatabase } from '../database';
+import { CALENDAR_TUTORIAL_SEEN_KEY } from '../repositories/calendarTutorialRepository';
 import {
   SCHEDULE_WARNING_REVIEW_PREFIX,
   ScheduleWarningReviewRepository,
@@ -174,7 +175,7 @@ const readGrade = (record: Record<string, unknown>, key: string): Grade => {
   const value = record[key];
 
   if (!isGrade(value)) {
-    throw new BackupValidationError(`Поле ${key} має бути грейдом від 1 до 4.`);
+    throw new BackupValidationError(`Поле ${key} має бути рівнем від 1 до 4.`);
   }
 
   return value;
@@ -1018,6 +1019,7 @@ export const restoreBackup = async (
   backup: ShifterBackup
 ): Promise<Settings> => {
   const normalizedShifts = backup.shifts.map(normalizeShiftRecord);
+  const calendarTutorialSeenRecord = await db.appMeta.get(CALENDAR_TUTORIAL_SEEN_KEY);
 
   validateDomainInvariants(
     normalizedShifts,
@@ -1042,6 +1044,10 @@ export const restoreBackup = async (
       await db.enterpriseSchedule.clear();
       await db.appMeta.clear();
       await db.settings.put(settingsRecord);
+
+      if (calendarTutorialSeenRecord?.value === 'true') {
+        await db.appMeta.put(calendarTutorialSeenRecord);
+      }
 
       if (normalizedShifts.length > 0) {
         await db.shifts.bulkPut(normalizedShifts);

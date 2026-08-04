@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from '@testing-library/react';
+import 'fake-indexeddb/auto';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
+import {
+  CALENDAR_TUTORIAL_SEEN_KEY,
+  localDb
+} from '../../../shared/lib/local-db';
 import { SettingsPage } from './SettingsPage';
 
 const settings: Settings = {
@@ -27,19 +32,23 @@ const settings: Settings = {
   updatedAt: '2026-07-27T19:30:00.000+03:00'
 };
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  vi.restoreAllMocks();
+  await localDb.appMeta.clear();
 });
 
 describe('SettingsPage', () => {
   it('shows an accessible offline FAQ accordion', async () => {
     const user = userEvent.setup();
+    const onOpenCalendarTutorial = vi.fn();
 
     render(
       <SettingsPage
         settings={settings}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={onOpenCalendarTutorial}
       />
     );
 
@@ -59,7 +68,14 @@ describe('SettingsPage', () => {
     expect(
       screen.getByText(/В автоматичному режимі плановий час оплачується за x1/)
     ).toBeTruthy();
-    expect(screen.getByText(/оберіть локальний PDF табеля з текстовим шаром/i)).toBeTruthy();
+    expect(screen.getByText('Відкрийте «Таймер»')).toBeTruthy();
+    expect(screen.getByText(/Натисніть ⋮/)).toBeTruthy();
+    expect(screen.getByText(/Ваш PDF залишається на пристрої/)).toBeTruthy();
+
+    await user.click(
+      screen.getByRole('button', { name: 'Як користуватися календарем' })
+    );
+    expect(onOpenCalendarTutorial).toHaveBeenCalledTimes(1);
   });
 
   it('requests the native decimal keyboard for numeric settings', () => {
@@ -68,6 +84,7 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -94,6 +111,7 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={onSettingsChange}
         onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -113,5 +131,30 @@ describe('SettingsPage', () => {
     expect(onSettingsChange).toHaveBeenCalledWith(
       expect.objectContaining({ backupReminderIntervalDays: 30 })
     );
+  });
+
+  it('resets the calendar tutorial marker when all local data is cleared', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await localDb.appMeta.put({
+      key: CALENDAR_TUTORIAL_SEEN_KEY,
+      value: 'true',
+      updatedAt: '2026-08-04T10:00:00.000Z'
+    });
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Очистити' }));
+
+    await waitFor(async () => {
+      expect(await localDb.appMeta.get(CALENDAR_TUTORIAL_SEEN_KEY)).toBeUndefined();
+    });
   });
 });

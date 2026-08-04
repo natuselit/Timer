@@ -4,6 +4,7 @@ import {
   getCalendarPresetSelection,
   getNextHeldCalendarRange,
   getSingleDateRange,
+  shouldResetCalendarRangeOnMonthNavigation,
   type CalendarDateRange
 } from './calendarRange';
 
@@ -84,5 +85,38 @@ describe('calendar range presets', () => {
       start: '2026-07-10',
       end: '2026-07-20'
     });
+  });
+
+  it('keeps an unfinished held range while navigating to another month', () => {
+    expect(
+      shouldResetCalendarRangeOnMonthNavigation(null, {
+        start: '2026-07-30',
+        end: null
+      })
+    ).toBe(false);
+    expect(
+      getNextHeldCalendarRange(
+        { start: '2026-07-30', end: null },
+        '2026-08-03'
+      )
+    ).toEqual({
+      start: '2026-07-30',
+      end: '2026-08-03'
+    });
+  });
+
+  it('keeps the existing reset behavior for completed non-month selections', () => {
+    expect(
+      shouldResetCalendarRangeOnMonthNavigation('today', {
+        start: '2026-07-20',
+        end: '2026-07-20'
+      })
+    ).toBe(true);
+    expect(
+      shouldResetCalendarRangeOnMonthNavigation('month', {
+        start: '2026-07-01',
+        end: '2026-07-31'
+      })
+    ).toBe(false);
   });
 });

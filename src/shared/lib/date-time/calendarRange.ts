@@ -58,6 +58,12 @@ export const getNextHeldCalendarRange = (
       };
 };
 
+export const shouldResetCalendarRangeOnMonthNavigation = (
+  activePreset: CalendarRangePreset | null,
+  selectedRange: CalendarDateRange | null
+): boolean =>
+  activePreset !== 'month' && selectedRange !== null && selectedRange.end !== null;
+
 export const getCalendarPresetSelection = ({
   preset,
   calendarMonth,

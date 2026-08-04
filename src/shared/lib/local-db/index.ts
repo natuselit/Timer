@@ -1,6 +1,7 @@
 export * from './database';
 export * from './repositories/enterpriseScheduleRepository';
 export * from './repositories/backupReminderRepository';
+export * from './repositories/calendarTutorialRepository';
 export * from './repositories/scheduleWarningReviewRepository';
 export * from './repositories/settingsRepository';
 export * from './repositories/shiftRepository';

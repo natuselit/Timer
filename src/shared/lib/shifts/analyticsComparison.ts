@@ -6,6 +6,11 @@ export type AnalyticsDateRange = {
   end: LocalDateString;
 };
 
+export type AnalyticsComparisonRanges = {
+  current: AnalyticsDateRange;
+  previous: AnalyticsDateRange;
+};
+
 export type AnalyticsPeriodComparison = {
   hasPreviousData: boolean;
   salaryPercentChange: number | null;
@@ -17,60 +22,42 @@ export type AnalyticsPeriodComparison = {
   completionPercentagePointChange: number | null;
 };
 
-const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1_000;
-
-const toUtcTimestamp = (date: LocalDateString): number => {
-  const [year, month, day] = date.split('-').map(Number);
-
-  return Date.UTC(year, month - 1, day);
-};
-
-const fromUtcTimestamp = (timestamp: number): LocalDateString => {
-  const date = new Date(timestamp);
-
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(
-    date.getUTCDate()
-  ).padStart(2, '0')}`;
-};
-
 const normalizeRange = ({ start, end }: AnalyticsDateRange): AnalyticsDateRange =>
   start <= end ? { start, end } : { start: end, end: start };
 
-const isFullCalendarMonth = ({ start, end }: AnalyticsDateRange): boolean => {
-  const [year, month, day] = start.split('-').map(Number);
+const toLocalDateKey = (date: Date): LocalDateString =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`;
 
-  if (day !== 1) {
-    return false;
-  }
+const shiftToPreviousCalendarMonth = (date: LocalDateString): LocalDateString => {
+  const [year, month, day] = date.split('-').map(Number);
+  const previousMonth = new Date(Date.UTC(year, month - 2, 1));
+  const previousMonthLastDay = new Date(
+    Date.UTC(previousMonth.getUTCFullYear(), previousMonth.getUTCMonth() + 1, 0)
+  ).getUTCDate();
 
-  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-
-  return end === `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return `${previousMonth.getUTCFullYear()}-${String(
+    previousMonth.getUTCMonth() + 1
+  ).padStart(2, '0')}-${String(Math.min(day, previousMonthLastDay)).padStart(2, '0')}`;
 };
 
-export const getPreviousAnalyticsRange = (range: AnalyticsDateRange): AnalyticsDateRange => {
+export const getAnalyticsComparisonRanges = (
+  range: AnalyticsDateRange,
+  today: LocalDateString = toLocalDateKey(new Date())
+): AnalyticsComparisonRanges => {
   const normalizedRange = normalizeRange(range);
-
-  if (isFullCalendarMonth(normalizedRange)) {
-    const [year, month] = normalizedRange.start.split('-').map(Number);
-    const previousMonthStart = new Date(Date.UTC(year, month - 2, 1));
-    const previousMonthEnd = new Date(Date.UTC(year, month - 1, 0));
-
-    return {
-      start: fromUtcTimestamp(previousMonthStart.getTime()),
-      end: fromUtcTimestamp(previousMonthEnd.getTime())
-    };
-  }
-
-  const currentStart = toUtcTimestamp(normalizedRange.start);
-  const currentEnd = toUtcTimestamp(normalizedRange.end);
-  const durationDays = Math.round((currentEnd - currentStart) / DAY_IN_MILLISECONDS) + 1;
-  const previousEnd = currentStart - DAY_IN_MILLISECONDS;
-  const previousStart = previousEnd - (durationDays - 1) * DAY_IN_MILLISECONDS;
+  const current =
+    normalizedRange.start <= today && today < normalizedRange.end
+      ? { ...normalizedRange, end: today }
+      : normalizedRange;
 
   return {
-    start: fromUtcTimestamp(previousStart),
-    end: fromUtcTimestamp(previousEnd)
+    current,
+    previous: {
+      start: shiftToPreviousCalendarMonth(current.start),
+      end: shiftToPreviousCalendarMonth(current.end)
+    }
   };
 };
 

@@ -37,6 +37,7 @@ import {
   adjustWorkTicketDowntime,
   addWorkTicketToActiveShift,
   BackupReminderRepository,
+  CalendarTutorialRepository,
   completeWorkTicket,
   createShift,
   deleteWorkTicketFromActiveShift,
@@ -52,6 +53,7 @@ import {
   type BackupReminderStatus
 } from '../../../shared/lib/local-db';
 import { downloadBackup } from '../../../shared/lib/backup';
+import { CalendarTutorial } from '../../../shared/ui/calendar-tutorial';
 import {
   combineLocalDateAndTime,
   getCalendarMonthRange,
@@ -63,6 +65,8 @@ import {
   getCurrentMonth,
   getDateFromDateTime,
   getDurationMinutes,
+  getLocalDateKey,
+  getSingleDateRange,
   getTimeInputValue,
   normalizeTimeInput,
   toLocalIsoString,
@@ -118,6 +122,8 @@ const createEmptyTicketEditDraft = (): TicketEditDraft => ({
 const shiftRepository = new ShiftRepository(localDb);
 const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
 const backupReminderRepository = new BackupReminderRepository(localDb);
+const calendarTutorialRepository = new CalendarTutorialRepository(localDb);
+const calendarPageIds = new Set<NavigationItem['id']>(['history', 'analytics', 'schedule']);
 
 const getShiftTitle = (shift: Shift): string => (shift.type === 'first' ? '1 зміна' : '2 зміна');
 
@@ -279,11 +285,14 @@ export function MainPage({
   const [localDataRefreshKey, setLocalDataRefreshKey] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
   const [sharedCalendarRange, setSharedCalendarRange] = useState<CalendarDateRange | null>(
-    () => getCalendarMonthRange(getCurrentMonth())
+    () => getSingleDateRange(getLocalDateKey(new Date()))
   );
   const [allTimeRange, setAllTimeRange] = useState<CalendarDateRange | null>(null);
   const [activeCalendarRangePreset, setActiveCalendarRangePreset] =
-    useState<CalendarRangePreset | null>('month');
+    useState<CalendarRangePreset | null>('today');
+  const [isCalendarTutorialOpen, setIsCalendarTutorialOpen] = useState(false);
+  const calendarTutorialCheckRef = useRef(false);
+  const calendarTutorialDismissedRef = useRef(false);
   const ticketMenuRef = useRef<HTMLDivElement | null>(null);
   const ticketMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const completedTicketMenuRef = useRef<HTMLDivElement | null>(null);
@@ -294,6 +303,16 @@ export function MainPage({
 
   const notifyLocalDataChange = useCallback(() => {
     setLocalDataRefreshKey((current) => current + 1);
+  }, []);
+
+  const openCalendarTutorial = useCallback(() => {
+    setIsCalendarTutorialOpen(true);
+  }, []);
+
+  const dismissCalendarTutorial = useCallback(() => {
+    calendarTutorialDismissedRef.current = true;
+    setIsCalendarTutorialOpen(false);
+    void calendarTutorialRepository.markSeen(toLocalIsoString(new Date())).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -346,6 +365,36 @@ export function MainPage({
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [activePage]);
+
+  useEffect(() => {
+    if (
+      !calendarPageIds.has(activePage) ||
+      calendarTutorialCheckRef.current ||
+      calendarTutorialDismissedRef.current
+    ) {
+      return;
+    }
+
+    let isMounted = true;
+    calendarTutorialCheckRef.current = true;
+
+    calendarTutorialRepository
+      .hasSeen()
+      .then((hasSeen) => {
+        if (isMounted && !hasSeen && !calendarTutorialDismissedRef.current) {
+          setIsCalendarTutorialOpen(true);
+        }
+      })
+      .catch(() => {
+        if (isMounted && !calendarTutorialDismissedRef.current) {
+          setIsCalendarTutorialOpen(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [activePage]);
 
   useEffect(() => {
@@ -1061,7 +1110,8 @@ export function MainPage({
   );
 
   return (
-    <AppShell
+    <>
+      <AppShell
       navigationSlot={<BottomNavigation activeItem={activePage} onSelect={setActivePage} />}
       headerSlot={
         activePage === 'timer' ? (
@@ -1150,6 +1200,7 @@ export function MainPage({
           onSettingsChange={onSettingsChange}
           onLocalDataReplace={onLocalDataReplace}
           onLocalDataChange={notifyLocalDataChange}
+          onOpenCalendarTutorial={openCalendarTutorial}
         />
       ) : isLoadingShift ? (
         <section className="main-page__summary main-page__timer-screen">
@@ -1206,10 +1257,10 @@ export function MainPage({
                 <strong>{formatHourlyRate(activeShift.baseHourlyRateSnapshot, settings.incognitoEnabled)}</strong>
               </article>
               <article className="main-page__metric">
-                <span>Грейд</span>
+                <span>Рівень</span>
                 <strong>
                   {activeShift.gradeSnapshot
-                    ? `${activeShift.gradeSnapshot.currentGrade} -> ${activeShift.gradeSnapshot.desiredGrade}`
+                    ? `G${activeShift.gradeSnapshot.currentGrade} → G${activeShift.gradeSnapshot.desiredGrade}`
                     : 'Без snapshot'}
                 </strong>
               </article>
@@ -1420,7 +1471,7 @@ export function MainPage({
                           <span>План за час тікета</span>
                           <strong>Ваш G{activeTicketTargets.currentGrade}</strong>
                         </div>
-                        <div className="main-page__ticket-targets" aria-label="План для всіх грейдів">
+                        <div className="main-page__ticket-targets" aria-label="План для всіх рівнів">
                           {activeTicketTargets.targets.map((target) => (
                             <article
                               data-current={target.grade === activeTicketTargets.currentGrade ? 'true' : 'false'}
@@ -2061,7 +2112,7 @@ export function MainPage({
                         </strong>
                       </article>
                       <article className="main-page__metric main-page__metric--money">
-                        <span>Грейдова премія/міс</span>
+                        <span>Премія за рівень/міс</span>
                         <strong>{formatMoney(currentGradeBonus, settings.incognitoEnabled)}</strong>
                       </article>
                       <article className="main-page__metric main-page__metric--boosted">
@@ -2094,6 +2145,11 @@ export function MainPage({
           </section>
         </>
       )}
-    </AppShell>
+      </AppShell>
+      <CalendarTutorial
+        isOpen={isCalendarTutorialOpen}
+        onDismiss={dismissCalendarTutorial}
+      />
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
+  CalendarDays,
   ChevronDown,
   Download,
   Eraser,
@@ -43,6 +44,11 @@ import {
 } from '../../../shared/lib/local-db';
 import { downloadBackup } from '../../../shared/lib/backup';
 import { toLocalIsoString } from '../../../shared/lib/date-time';
+import {
+  ENTERPRISE_SCHEDULE_IMPORT_NOTE,
+  ENTERPRISE_SCHEDULE_IMPORT_STEPS,
+  type EnterpriseScheduleImportStep
+} from '../../../shared/config/enterpriseScheduleImportGuide';
 import './SettingsPage.css';
 
 type SettingsPageProps = {
@@ -50,6 +56,7 @@ type SettingsPageProps = {
   onSettingsChange: (settings: Settings) => Promise<void>;
   onLocalDataReplace: (settings: Settings) => void;
   onLocalDataChange?: () => void;
+  onOpenCalendarTutorial: () => void;
 };
 
 type FormValues = {
@@ -73,7 +80,11 @@ type Notice = {
 
 const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
 const delayMaxSeconds = HOLD_DELAY_MAX_MS / 1000;
-const FAQ_ITEMS = [
+const FAQ_ITEMS: Array<{
+  question: string;
+  answer: string;
+  steps?: readonly EnterpriseScheduleImportStep[];
+}> = [
   {
     question: 'Як почати й завершити зміну?',
     answer:
@@ -95,9 +106,9 @@ const FAQ_ITEMS = [
       'Одночасно активний лише один тікет. Простій додається або віднімається через меню «…» активного тікета. Під час завершення вкажіть фактичну кількість у модальному вікні.'
   },
   {
-    question: 'Як рахуються оплата та грейди?',
+    question: 'Як рахуються оплата та рівні?',
     answer:
-      'Базова погодинна ставка для нової зміни рахується з місячної ставки, робочих днів 5/2 і восьми годин. Грейдова премія додається окремо за повний календарний місяць.'
+      'Базова погодинна ставка для нової зміни рахується з місячної ставки, робочих днів 5/2 і восьми годин. Премія за рівень додається окремо за повний календарний місяць.'
   },
   {
     question: 'Що робить режим інкогніто?',
@@ -107,14 +118,14 @@ const FAQ_ITEMS = [
   {
     question: 'Як працюють backup та імпорт зі старого додатку?',
     answer:
-      'Звичайний Shifter-backup повністю відновлює налаштування, зміни й графік. Backup старого додатку замінює лише історію змін, залишаючи чинні налаштування та графік.'
+      'Звичайний backup «Таймера» повністю відновлює налаштування, зміни й графік. Backup старого додатку замінює лише історію змін, залишаючи чинні налаштування та графік.'
   },
   {
     question: 'Як імпортувати графік підприємства?',
-    answer:
-      'Відкрийте вкладку «Графік», оберіть локальний PDF табеля з текстовим шаром, перевірте розпізнані зміни й лише тоді підтвердьте імпорт. Скановані PDF без текстового шару не підтримуються.'
+    answer: ENTERPRISE_SCHEDULE_IMPORT_NOTE,
+    steps: ENTERPRISE_SCHEDULE_IMPORT_STEPS
   }
-] as const;
+];
 
 const parseNumber = (value: string): number => Number(value.replace(',', '.'));
 
@@ -171,11 +182,11 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   }
 
   if (!incognitoEnabled && (!GRADE_VALUES.includes(currentGrade as Grade))) {
-    errors.currentGrade = 'Оберіть поточний грейд.';
+    errors.currentGrade = 'Оберіть поточний рівень.';
   }
 
   if (!GRADE_VALUES.includes(desiredGrade as Grade)) {
-    errors.desiredGrade = 'Оберіть бажаний грейд.';
+    errors.desiredGrade = 'Оберіть бажаний рівень.';
   }
 
   if (
@@ -186,7 +197,7 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   }
 
   if (gradeNormPercents.some((percent) => !Number.isFinite(percent) || percent < 0)) {
-    errors.gradeNormPercents = 'Норми грейдів не можуть бути відʼємними.';
+    errors.gradeNormPercents = 'Норми рівнів не можуть бути відʼємними.';
   }
 
   if (
@@ -228,7 +239,8 @@ export function SettingsPage({
   settings,
   onSettingsChange,
   onLocalDataReplace,
-  onLocalDataChange
+  onLocalDataChange,
+  onOpenCalendarTutorial
 }: SettingsPageProps) {
   const [values, setValues] = useState<FormValues>(() => toFormValues(settings));
   const [errors, setErrors] = useState<FormErrors>({});
@@ -391,15 +403,15 @@ export function SettingsPage({
     if (gradeNormPercents.some((percent) => !Number.isFinite(percent) || percent < 0)) {
       setErrors((current) => ({
         ...current,
-        gradeNormPercents: 'Норми грейдів не можуть бути відʼємними.'
+        gradeNormPercents: 'Норми рівнів не можуть бути відʼємними.'
       }));
-      setNotice({ tone: 'error', text: 'Перевірте норми грейдів.' });
+      setNotice({ tone: 'error', text: 'Перевірте норми рівнів.' });
       return;
     }
 
     if (
       !window.confirm(
-        'Перерахувати базову ставку, грейд і ефективну ставку для всіх існуючих змін за поточними налаштуваннями? Snapshot-и в історії змін буде перезаписано.'
+        'Перерахувати базову ставку, рівень і ефективну ставку для всіх існуючих змін за поточними налаштуваннями? Збережені значення в історії змін буде перезаписано.'
       )
     ) {
       return;
@@ -436,7 +448,7 @@ export function SettingsPage({
       onLocalDataChange?.();
       setNotice({
         tone: 'success',
-        text: `Ставки і грейди перераховано за ${formatMoney(monthlySalary, false)}/міс для ${updatedCount} змін.`
+        text: `Ставки й рівні перераховано за ${formatMoney(monthlySalary, false)}/міс для ${updatedCount} змін.`
       });
     } catch {
       setNotice({ tone: 'error', text: 'Не вдалося перерахувати ставки у змінах.' });
@@ -734,7 +746,7 @@ export function SettingsPage({
             onChange={updateField('monthlySalary')}
           />
           <small>
-            Базова погодинна: {formatHourlyRate(currentHourlyRate, settings.incognitoEnabled)} · грейдова премія:{' '}
+            Базова погодинна: {formatHourlyRate(currentHourlyRate, settings.incognitoEnabled)} · премія за рівень:{' '}
             {formatMoney(currentGradeBonus, settings.incognitoEnabled)}/міс
           </small>
           {errors.monthlySalary ? (
@@ -772,10 +784,10 @@ export function SettingsPage({
       </section>
 
       <section className="settings-page__section" aria-labelledby="grade-settings-title">
-        <h2 id="grade-settings-title">Грейди</h2>
+        <h2 id="grade-settings-title">Рівні</h2>
         <div className="settings-page__grade-selects">
           <label className="settings-page__field">
-            <span>Поточний грейд</span>
+            <span>Поточний рівень</span>
             <select
               disabled={settings.incognitoEnabled}
               aria-invalid={errors.currentGrade ? 'true' : 'false'}
@@ -785,7 +797,7 @@ export function SettingsPage({
             >
               {GRADE_VALUES.map((grade) => (
                 <option value={grade} key={grade}>
-                  Грейд {grade}
+                  Рівень G{grade}
                 </option>
               ))}
             </select>
@@ -795,7 +807,7 @@ export function SettingsPage({
           </label>
 
           <label className="settings-page__field">
-            <span>Бажаний грейд</span>
+            <span>Бажаний рівень</span>
             <select
               aria-invalid={errors.desiredGrade ? 'true' : 'false'}
               aria-describedby={errors.desiredGrade ? 'desiredGrade-error' : undefined}
@@ -804,7 +816,7 @@ export function SettingsPage({
             >
               {GRADE_VALUES.map((grade) => (
                 <option value={grade} key={grade}>
-                  Грейд {grade}
+                  Рівень G{grade}
                 </option>
               ))}
             </select>
@@ -816,13 +828,13 @@ export function SettingsPage({
 
         <div className="settings-page__grade-block">
           <div className="settings-page__grade-block-header">
-            <h3>Грейдова премія від ставки</h3>
+            <h3>Премія за рівень від ставки</h3>
             <span aria-hidden="true">%</span>
           </div>
           <div className="settings-page__grade-grid">
             {values.gradeSalaryBonusPercents.map((value, index) => (
               <label className="settings-page__field settings-page__grade-field" key={`salary-grade-${index}`}>
-                <span>Грейд {index + 1}</span>
+                <span>Рівень G{index + 1}</span>
                 <span className="settings-page__grade-input">
                   <input
                     type="text"
@@ -851,7 +863,7 @@ export function SettingsPage({
           <div className="settings-page__grade-grid">
             {values.gradeNormPercents.map((value, index) => (
               <label className="settings-page__field settings-page__grade-field" key={`norm-grade-${index}`}>
-                <span>Грейд {index + 1}</span>
+                <span>Рівень G{index + 1}</span>
                 <span className="settings-page__grade-input">
                   <input
                     type="text"
@@ -930,7 +942,7 @@ export function SettingsPage({
             <small>
               {settings.incognitoEnabled
                 ? 'Фінанси приховано.'
-                : `Ставка: ${formatMoney(settings.monthlySalary, false)}/міс, грейд ${settings.currentGrade}`}
+                : `Ставка: ${formatMoney(settings.monthlySalary, false)}/міс, рівень G${settings.currentGrade}`}
             </small>
           </span>
           <span className="settings-page__switch" aria-hidden="true" />
@@ -1034,6 +1046,18 @@ export function SettingsPage({
         </div>
       </section>
 
+      <section className="settings-page__section" aria-labelledby="calendar-help-title">
+        <h2 id="calendar-help-title">Довідка</h2>
+        <button
+          className="settings-page__help-button"
+          type="button"
+          onClick={onOpenCalendarTutorial}
+        >
+          <CalendarDays size={19} aria-hidden="true" />
+          Як користуватися календарем
+        </button>
+      </section>
+
       <section
         className="settings-page__section settings-page__section--faq"
         aria-labelledby="faq-settings-title"
@@ -1055,6 +1079,16 @@ export function SettingsPage({
             {FAQ_ITEMS.map((item) => (
               <details key={item.question}>
                 <summary>{item.question}</summary>
+                {item.steps ? (
+                  <ol>
+                    {item.steps.map((step) => (
+                      <li key={step.title}>
+                        <strong>{step.title}</strong>
+                        <span>{step.description}</span>
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
                 <p>{item.answer}</p>
               </details>
             ))}
