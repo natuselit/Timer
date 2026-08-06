@@ -124,6 +124,7 @@ describe('SettingsPage', () => {
       name: /Зворотний звʼязок у Telegram/
     }) as HTMLAnchorElement;
     expect(feedbackLink.href).toBe('https://t.me/natuselit');
+    expect(feedbackLink.querySelector('svg')).toBeNull();
 
     await user.selectOptions(screen.getByLabelText(/Нагадувати про backup/), '30');
     await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));

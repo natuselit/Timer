@@ -2,6 +2,7 @@
 
 import 'fake-indexeddb/auto';
 import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import type { CoefficientMode, Shift } from '../../../entities/shift';
@@ -121,13 +122,56 @@ describe('AnalyticsPage', () => {
     expect(screen.getByText('01.07–31.07 проти 01.06–30.06')).toBeTruthy();
     expect(screen.getAllByText('Зараз')).toHaveLength(4);
     expect(screen.getAllByText('Було')).toHaveLength(4);
-    expect(screen.getAllByText('Різниця')).toHaveLength(4);
+    expect(screen.getAllByText('Різниця')).toHaveLength(3);
+    expect(screen.getByText('Різниця, в.п.')).toBeTruthy();
     expect(screen.getByText('За перепрацювання')).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Дотримання графіка' })).toBeTruthy();
     expect(screen.getByLabelText('Запізнення: 15 хв')).toBeTruthy();
     expect(screen.getByLabelText('Ранній вихід: 10 хв')).toBeTruthy();
     expect(screen.getByText('План G1')).toBeTruthy();
     expect(screen.getByText('Виконання від G1')).toBeTruthy();
+  });
+
+  it('switches comparison offsets without changing the selected calendar range', async () => {
+    const user = userEvent.setup();
+    const onCalendarMonthChange = vi.fn();
+    const onSelectedRangeChange = vi.fn();
+
+    render(
+      <AnalyticsPage
+        settings={settings}
+        calendarMonth={{ year: 2026, month: 7 }}
+        selectedRange={{ start: '2026-07-01', end: '2026-07-31' }}
+        onCalendarMonthChange={onCalendarMonthChange}
+        onSelectedRangeChange={onSelectedRangeChange}
+        activeRangePreset="month"
+        isAllTimePresetEnabled
+        onRangePresetSelect={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('01.07–31.07 проти 01.06–30.06')).toBeTruthy();
+
+    const presetGroup = screen.getByRole('group', { name: 'Період порівняння' });
+    const weekButton = within(presetGroup).getByRole('button', { name: 'Тиждень' });
+    const monthButton = within(presetGroup).getByRole('button', { name: 'Місяць' });
+
+    expect(monthButton.getAttribute('aria-pressed')).toBe('true');
+    expect(weekButton.getAttribute('aria-pressed')).toBe('false');
+
+    await user.click(weekButton);
+
+    expect(await screen.findByText('01.07–31.07 проти 24.06–24.07')).toBeTruthy();
+    expect(screen.getByText('У попередньому періоді немає змін для порівняння.')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Тиждень' }).getAttribute('aria-pressed')
+    ).toBe('true');
+
+    await user.click(screen.getByRole('button', { name: '2 місяці' }));
+
+    expect(await screen.findByText('01.07–31.07 проти 01.05–31.05')).toBeTruthy();
+    expect(onCalendarMonthChange).not.toHaveBeenCalled();
+    expect(onSelectedRangeChange).not.toHaveBeenCalled();
   });
 
   it('masks overtime income and salary comparison in incognito mode', async () => {

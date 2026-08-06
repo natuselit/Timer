@@ -88,6 +88,45 @@ describe('getAnalyticsComparisonRanges', () => {
     });
   });
 
+  it('shifts both boundaries by seven days for the week preset across a year boundary', () => {
+    expect(
+      getAnalyticsComparisonRanges(
+        { start: '2026-01-03', end: '2026-01-10' },
+        '2026-02-01',
+        'week'
+      )
+    ).toEqual({
+      current: { start: '2026-01-03', end: '2026-01-10' },
+      previous: { start: '2025-12-27', end: '2026-01-03' }
+    });
+  });
+
+  it('shifts by two calendar months and clamps missing month-end dates', () => {
+    expect(
+      getAnalyticsComparisonRanges(
+        { start: '2026-01-31', end: '2026-02-28' },
+        '2026-03-01',
+        'twoMonths'
+      )
+    ).toEqual({
+      current: { start: '2026-01-31', end: '2026-02-28' },
+      previous: { start: '2025-11-30', end: '2025-12-28' }
+    });
+  });
+
+  it('trims future dates before applying week and two-month presets', () => {
+    const range = { start: '2026-08-01', end: '2026-08-31' } as const;
+
+    expect(getAnalyticsComparisonRanges(range, '2026-08-04', 'week')).toEqual({
+      current: { start: '2026-08-01', end: '2026-08-04' },
+      previous: { start: '2026-07-25', end: '2026-07-28' }
+    });
+    expect(getAnalyticsComparisonRanges(range, '2026-08-04', 'twoMonths')).toEqual({
+      current: { start: '2026-08-01', end: '2026-08-04' },
+      previous: { start: '2026-06-01', end: '2026-06-04' }
+    });
+  });
+
   it('compares a custom range and one day with the same dates one month earlier', () => {
     expect(
       getAnalyticsComparisonRanges(
@@ -133,7 +172,7 @@ describe('calculateAnalyticsPeriodComparison', () => {
       shiftCount: 3,
       production: {
         ...makeSummary().production,
-        completionPercent: 115
+        completionPercent: 120
       }
     });
     const previous = makeSummary({
@@ -142,7 +181,7 @@ describe('calculateAnalyticsPeriodComparison', () => {
       shiftCount: 2,
       production: {
         ...makeSummary().production,
-        completionPercent: 100
+        completionPercent: 80
       }
     });
 
@@ -154,7 +193,8 @@ describe('calculateAnalyticsPeriodComparison', () => {
       workedMinutesChange: 120,
       shiftCountPercentChange: 50,
       shiftCountChange: 1,
-      completionPercentagePointChange: 15
+      completionPercentChange: 50,
+      completionPercentagePointChange: 40
     });
   });
 
@@ -171,6 +211,7 @@ describe('calculateAnalyticsPeriodComparison', () => {
       workedMinutesPercentChange: null,
       workedMinutesChange: 60,
       shiftCountPercentChange: null,
+      completionPercentChange: null,
       completionPercentagePointChange: null
     });
   });

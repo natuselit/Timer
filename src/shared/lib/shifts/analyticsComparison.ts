@@ -6,6 +6,8 @@ export type AnalyticsDateRange = {
   end: LocalDateString;
 };
 
+export type AnalyticsComparisonPreset = 'week' | 'month' | 'twoMonths';
+
 export type AnalyticsComparisonRanges = {
   current: AnalyticsDateRange;
   previous: AnalyticsDateRange;
@@ -19,6 +21,7 @@ export type AnalyticsPeriodComparison = {
   workedMinutesChange: number;
   shiftCountPercentChange: number | null;
   shiftCountChange: number;
+  completionPercentChange: number | null;
   completionPercentagePointChange: number | null;
 };
 
@@ -30,21 +33,43 @@ const toLocalDateKey = (date: Date): LocalDateString =>
     date.getDate()
   ).padStart(2, '0')}`;
 
-const shiftToPreviousCalendarMonth = (date: LocalDateString): LocalDateString => {
+const shiftByDays = (date: LocalDateString, days: number): LocalDateString => {
   const [year, month, day] = date.split('-').map(Number);
-  const previousMonth = new Date(Date.UTC(year, month - 2, 1));
-  const previousMonthLastDay = new Date(
-    Date.UTC(previousMonth.getUTCFullYear(), previousMonth.getUTCMonth() + 1, 0)
+  const shiftedDate = new Date(Date.UTC(year, month - 1, day + days));
+
+  return `${shiftedDate.getUTCFullYear()}-${String(shiftedDate.getUTCMonth() + 1).padStart(
+    2,
+    '0'
+  )}-${String(shiftedDate.getUTCDate()).padStart(2, '0')}`;
+};
+
+const shiftByCalendarMonths = (date: LocalDateString, months: number): LocalDateString => {
+  const [year, month, day] = date.split('-').map(Number);
+  const targetMonth = new Date(Date.UTC(year, month - 1 + months, 1));
+  const targetMonthLastDay = new Date(
+    Date.UTC(targetMonth.getUTCFullYear(), targetMonth.getUTCMonth() + 1, 0)
   ).getUTCDate();
 
-  return `${previousMonth.getUTCFullYear()}-${String(
-    previousMonth.getUTCMonth() + 1
-  ).padStart(2, '0')}-${String(Math.min(day, previousMonthLastDay)).padStart(2, '0')}`;
+  return `${targetMonth.getUTCFullYear()}-${String(
+    targetMonth.getUTCMonth() + 1
+  ).padStart(2, '0')}-${String(Math.min(day, targetMonthLastDay)).padStart(2, '0')}`;
+};
+
+const shiftToComparisonPeriod = (
+  date: LocalDateString,
+  preset: AnalyticsComparisonPreset
+): LocalDateString => {
+  if (preset === 'week') {
+    return shiftByDays(date, -7);
+  }
+
+  return shiftByCalendarMonths(date, preset === 'twoMonths' ? -2 : -1);
 };
 
 export const getAnalyticsComparisonRanges = (
   range: AnalyticsDateRange,
-  today: LocalDateString = toLocalDateKey(new Date())
+  today: LocalDateString = toLocalDateKey(new Date()),
+  preset: AnalyticsComparisonPreset = 'month'
 ): AnalyticsComparisonRanges => {
   const normalizedRange = normalizeRange(range);
   const current =
@@ -55,8 +80,8 @@ export const getAnalyticsComparisonRanges = (
   return {
     current,
     previous: {
-      start: shiftToPreviousCalendarMonth(current.start),
-      end: shiftToPreviousCalendarMonth(current.end)
+      start: shiftToComparisonPeriod(current.start, preset),
+      end: shiftToComparisonPeriod(current.end, preset)
     }
   };
 };
@@ -75,6 +100,13 @@ export const calculateAnalyticsPeriodComparison = (
   workedMinutesChange: current.totalMinutes - previous.totalMinutes,
   shiftCountPercentChange: calculateRelativeChange(current.shiftCount, previous.shiftCount),
   shiftCountChange: current.shiftCount - previous.shiftCount,
+  completionPercentChange:
+    current.production.completionPercent === null || previous.production.completionPercent === null
+      ? null
+      : calculateRelativeChange(
+          current.production.completionPercent,
+          previous.production.completionPercent
+        ),
   completionPercentagePointChange:
     current.production.completionPercent === null || previous.production.completionPercent === null
       ? null

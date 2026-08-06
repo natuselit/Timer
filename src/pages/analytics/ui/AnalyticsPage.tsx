@@ -30,7 +30,8 @@ import {
 } from '../../../shared/lib/format';
 import {
   calculateAnalyticsPeriodComparison,
-  getAnalyticsComparisonRanges
+  getAnalyticsComparisonRanges,
+  type AnalyticsComparisonPreset
 } from '../../../shared/lib/shifts/analyticsComparison';
 import {
   calculateAnalyticsSummary,
@@ -237,6 +238,15 @@ const shiftTypeRows: Array<{
   }
 ];
 
+const comparisonPresets: Array<{
+  value: AnalyticsComparisonPreset;
+  label: string;
+}> = [
+  { value: 'week', label: 'Тиждень' },
+  { value: 'month', label: 'Місяць' },
+  { value: 'twoMonths', label: '2 місяці' }
+];
+
 export function AnalyticsPage({
   settings,
   calendarMonth,
@@ -252,7 +262,11 @@ export function AnalyticsPage({
   const [calendarShifts, setCalendarShifts] = useState<Shift[]>([]);
   const [now, setNow] = useState(() => toLocalIsoString(new Date()));
   const [isLoading, setIsLoading] = useState(true);
+  const [isComparisonLoading, setIsComparisonLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [comparisonPreset, setComparisonPreset] =
+    useState<AnalyticsComparisonPreset>('month');
   const calendarMonthRange = useMemo(
     () => getMonthRange(calendarMonth.year, calendarMonth.month),
     [calendarMonth]
@@ -266,8 +280,8 @@ export function AnalyticsPage({
   );
   const today = getDateFromDateTime(now);
   const comparisonRanges = useMemo(
-    () => getAnalyticsComparisonRanges(loadedDateRange, today),
-    [loadedDateRange, today]
+    () => getAnalyticsComparisonRanges(loadedDateRange, today, comparisonPreset),
+    [comparisonPreset, loadedDateRange, today]
   );
   const previousDateRange = comparisonRanges.previous;
 
@@ -279,25 +293,51 @@ export function AnalyticsPage({
       const currentDate = new Date();
 
       setNow(toLocalIsoString(currentDate));
-      const [nextShifts, nextPreviousShifts, nextCalendarShifts] = await Promise.all([
+      const [nextShifts, nextCalendarShifts] = await Promise.all([
         getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
-        getShiftsBetween(shiftRepository, previousDateRange.start, previousDateRange.end),
         getShiftsBetween(shiftRepository, calendarMonthRange.start, calendarMonthRange.end)
       ]);
 
       setShifts(nextShifts);
-      setPreviousShifts(nextPreviousShifts);
       setCalendarShifts(nextCalendarShifts);
     } catch {
       setError('Не вдалося завантажити аналітику.');
     } finally {
       setIsLoading(false);
     }
-  }, [calendarMonthRange, loadedDateRange, previousDateRange]);
+  }, [calendarMonthRange, loadedDateRange]);
 
   useEffect(() => {
     void loadAnalytics();
   }, [loadAnalytics]);
+
+  useEffect(() => {
+    let isCurrentRequest = true;
+
+    setIsComparisonLoading(true);
+    setComparisonError(null);
+
+    getShiftsBetween(shiftRepository, previousDateRange.start, previousDateRange.end)
+      .then((nextPreviousShifts) => {
+        if (isCurrentRequest) {
+          setPreviousShifts(nextPreviousShifts);
+        }
+      })
+      .catch(() => {
+        if (isCurrentRequest) {
+          setComparisonError('Не вдалося завантажити порівняння.');
+        }
+      })
+      .finally(() => {
+        if (isCurrentRequest) {
+          setIsComparisonLoading(false);
+        }
+      });
+
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [previousDateRange.end, previousDateRange.start]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -485,7 +525,32 @@ export function AnalyticsPage({
               <TrendingUp aria-hidden="true" size={24} />
             </header>
 
-            {periodComparison.hasPreviousData ? (
+            <div
+              className="analytics-page__comparison-presets"
+              role="group"
+              aria-label="Період порівняння"
+            >
+              {comparisonPresets.map((preset) => (
+                <button
+                  type="button"
+                  aria-pressed={comparisonPreset === preset.value}
+                  key={preset.value}
+                  onClick={() => setComparisonPreset(preset.value)}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            {isComparisonLoading ? (
+              <p className="analytics-page__comparison-empty" aria-live="polite">
+                Завантаження порівняння...
+              </p>
+            ) : comparisonError ? (
+              <p className="analytics-page__error" role="alert">
+                {comparisonError}
+              </p>
+            ) : periodComparison.hasPreviousData ? (
               <div className="analytics-page__comparison-grid" aria-label="Зміни до попереднього періоду">
                 <article
                   data-tone={
@@ -567,13 +632,13 @@ export function AnalyticsPage({
                     <strong>{formatSignedValue(periodComparison.shiftCountChange, '')}</strong>
                   </footer>
                 </article>
-                <article data-tone={getChangeTone(periodComparison.completionPercentagePointChange)}>
+                <article data-tone={getChangeTone(periodComparison.completionPercentChange)}>
                   <header>
                     <span>Виконання G1</span>
                     <strong>
                       {formatSignedValue(
-                        periodComparison.completionPercentagePointChange,
-                        ' в.п.',
+                        periodComparison.completionPercentChange,
+                        '%',
                         1
                       )}
                     </strong>
@@ -591,7 +656,7 @@ export function AnalyticsPage({
                     </span>
                   </div>
                   <footer>
-                    <span>Різниця</span>
+                    <span>Різниця, в.п.</span>
                     <strong>
                       {formatSignedValue(
                         periodComparison.completionPercentagePointChange,

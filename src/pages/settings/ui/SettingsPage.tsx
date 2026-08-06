@@ -4,12 +4,10 @@ import {
   ChevronDown,
   Download,
   Eraser,
-  ExternalLink,
   FileUp,
   FlaskConical,
   RotateCcw,
   Save,
-  Send,
   Shield
 } from 'lucide-react';
 import appPackage from '../../../../package.json';
@@ -1105,9 +1103,7 @@ export function SettingsPage({
           rel="noreferrer noopener"
           aria-label="Зворотний звʼязок у Telegram"
         >
-          <Send size={18} aria-hidden="true" />
           <span>Зворотний звʼязок</span>
-          <ExternalLink size={16} aria-hidden="true" />
         </a>
         <div className="settings-page__readonly-row">
           <span>Версія додатку</span>
