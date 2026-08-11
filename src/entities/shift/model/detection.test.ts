@@ -57,6 +57,7 @@ describe('manual shift type override support', () => {
       hourlyRateSnapshot: 100,
       gradeSnapshot: null,
       workTickets: [],
+      note: '',
       coefficientMode: 'auto',
       isAutoClosed: false,
       createdAt: '2026-06-23T10:30:00.000+03:00',

@@ -19,6 +19,7 @@ const makeShift = (overrides: Partial<Shift> = {}): Shift => ({
   hourlyRateSnapshot: 120,
   gradeSnapshot: null,
   workTickets: [],
+  note: '',
   coefficientMode: 'auto',
   isAutoClosed: false,
   createdAt: '2026-06-01T06:30:00.000+03:00',

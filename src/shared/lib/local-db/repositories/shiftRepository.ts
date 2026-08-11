@@ -9,7 +9,10 @@ import type {
   Shift,
   WorkTicket
 } from '../../../../entities/shift';
-import { validateAndSortWorkTickets } from '../../../../entities/shift';
+import {
+  SHIFT_NOTE_MAX_LENGTH,
+  validateAndSortWorkTickets
+} from '../../../../entities/shift';
 import type { ShifterDatabase } from '../database';
 
 export class ShiftConstraintError extends Error {
@@ -123,10 +126,15 @@ export const normalizeShiftRecord = (record: LegacyShiftRecord): Shift => ({
     ? record.baseHourlyRateSnapshot
     : record.hourlyRateSnapshot,
   gradeSnapshot: normalizeGradeSnapshot(record.gradeSnapshot),
-  workTickets: normalizeWorkTickets(record.workTickets)
+  workTickets: normalizeWorkTickets(record.workTickets),
+  note: typeof record.note === 'string' ? record.note : ''
 });
 
 const prepareShiftForWrite = (record: Shift): Shift => {
+  if (typeof record.note !== 'string' || record.note.length > SHIFT_NOTE_MAX_LENGTH) {
+    throw new Error(`Нотатка має містити не більше ${SHIFT_NOTE_MAX_LENGTH} символів.`);
+  }
+
   record.workTickets.forEach((ticket) => {
     if (!Number.isFinite(ticket.normPerEightHours) || ticket.normPerEightHours <= 0) {
       throw new Error('Норма має бути більшою за 0.');

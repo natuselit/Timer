@@ -1,14 +1,32 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type ReactNode
+} from 'react';
+import {
+  CalendarClock,
   CalendarDays,
   ChevronDown,
+  CircleHelp,
+  Database,
   Download,
   Eraser,
   FileUp,
   FlaskConical,
+  Info,
+  Palette,
   RotateCcw,
   Save,
-  Shield
+  Shield,
+  TimerReset,
+  Trophy,
+  UserRound,
+  WalletCards,
+  X,
+  type LucideIcon
 } from 'lucide-react';
 import appPackage from '../../../../package.json';
 import {
@@ -17,13 +35,25 @@ import {
   GRADE_VALUES,
   HOLD_DELAY_MAX_MS,
   HOLD_DELAY_MIN_MS,
+  OVERTIME_DAILY_MAX_MINUTES_MAX,
+  OVERTIME_DAILY_MAX_MINUTES_MIN,
+  OVERTIME_LIMIT_PERCENT_MAX,
+  OVERTIME_LIMIT_PERCENT_MIN,
+  OVERTIME_SATURDAY_COUNT_MAX,
+  OVERTIME_SATURDAY_COUNT_MIN,
+  OVERTIME_STEP_MINUTES_MAX,
+  OVERTIME_STEP_MINUTES_MIN,
   calculateCumulativeGradePercent,
   calculateGradeMonthlyBonus,
   calculateHourlyRateFromMonthlySalary,
   getNextDesiredGrade,
   isBackupReminderIntervalDays,
+  isOvertimeDailyMaxMinutes,
+  isOvertimeStrategy,
+  isOvertimeUnavailableDates,
   type Grade,
   type GradePercentSet,
+  type OvertimeStrategy,
   type Settings,
   type ThemePreference
 } from '../../../entities/settings';
@@ -41,7 +71,7 @@ import {
   ShiftRepository
 } from '../../../shared/lib/local-db';
 import { downloadBackup } from '../../../shared/lib/backup';
-import { toLocalIsoString } from '../../../shared/lib/date-time';
+import { formatDate, toLocalIsoString } from '../../../shared/lib/date-time';
 import {
   ENTERPRISE_SCHEDULE_IMPORT_NOTE,
   ENTERPRISE_SCHEDULE_IMPORT_STEPS,
@@ -68,6 +98,13 @@ type FormValues = {
   gradeNormPercents: [string, string, string, string];
   holdDelaySeconds: string;
   backupReminderIntervalDays: string;
+  overtimeLimitPercent: string;
+  overtimeStepMinutes: string;
+  overtimeStrategy: OvertimeStrategy;
+  overtimeSaturdayCount: string;
+  overtimeWeekdayMaxMinutes: string;
+  overtimeSaturdayMaxMinutes: string;
+  overtimeUnavailableDates: string[];
 };
 
 type FormErrors = Partial<Record<keyof FormValues, string>>;
@@ -76,8 +113,90 @@ type Notice = {
   text: string;
 };
 
+type SettingsSectionId =
+  | 'employee'
+  | 'payment'
+  | 'overtime'
+  | 'grades'
+  | 'timer'
+  | 'appearance'
+  | 'privacy'
+  | 'data'
+  | 'help'
+  | 'information';
+
+type SettingsSectionProps = {
+  id: SettingsSectionId;
+  title: string;
+  description: string;
+  summary: string;
+  icon: LucideIcon;
+  children: ReactNode;
+};
+
+function SettingsSection({
+  id,
+  title,
+  description,
+  summary,
+  icon: Icon,
+  children
+}: SettingsSectionProps) {
+  return (
+    <details className="settings-page__section" data-settings-section={id}>
+      <summary className="settings-page__section-summary">
+        <span className="settings-page__section-icon" aria-hidden="true">
+          <Icon size={20} />
+        </span>
+        <span className="settings-page__section-copy">
+          <h2>{title}</h2>
+          <small>{description}</small>
+        </span>
+        <span className="settings-page__section-value">{summary}</span>
+        <ChevronDown className="settings-page__section-chevron" size={20} aria-hidden="true" />
+      </summary>
+      <div className="settings-page__section-content">{children}</div>
+    </details>
+  );
+}
+
+const FORM_FIELD_SECTIONS: Record<keyof FormValues, SettingsSectionId> = {
+  employeeFirstName: 'employee',
+  employeeLastName: 'employee',
+  monthlySalary: 'payment',
+  monthlyBonus: 'payment',
+  currentGrade: 'grades',
+  desiredGrade: 'grades',
+  gradeSalaryBonusPercents: 'grades',
+  gradeNormPercents: 'grades',
+  holdDelaySeconds: 'timer',
+  backupReminderIntervalDays: 'data',
+  overtimeLimitPercent: 'overtime',
+  overtimeStepMinutes: 'overtime',
+  overtimeStrategy: 'overtime',
+  overtimeSaturdayCount: 'overtime',
+  overtimeWeekdayMaxMinutes: 'overtime',
+  overtimeSaturdayMaxMinutes: 'overtime',
+  overtimeUnavailableDates: 'overtime'
+};
+
 const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
 const delayMaxSeconds = HOLD_DELAY_MAX_MS / 1000;
+const OVERTIME_STRATEGY_DESCRIPTIONS: Record<OvertimeStrategy, string> = {
+  weekdays: 'Увесь залишок розподіляється лише між доступними буднями.',
+  standard: 'Використовуються дві найближчі суботи, решта — на будні.',
+  saturdays: 'Час розподіляється між усіма доступними суботами, решта — на будні.',
+  automatic:
+    'Намагається тримати будні в межах 2 годин перепрацювання на день, а надлишок переносить на мінімально потрібну кількість субот.',
+  custom: 'Ви самі задаєте кількість субот, решта ліміту розподіляється на будні.'
+};
+const OVERTIME_STRATEGY_LABELS: Record<OvertimeStrategy, string> = {
+  weekdays: 'Лише будні',
+  standard: 'Стандарт',
+  saturdays: 'Усі суботи',
+  automatic: 'Автоматично',
+  custom: 'Власна'
+};
 const FAQ_ITEMS: Array<{
   question: string;
   answer: string;
@@ -96,7 +215,12 @@ const FAQ_ITEMS: Array<{
   {
     question: 'Як працює коефіцієнт?',
     answer:
-      'В автоматичному режимі плановий час оплачується за x1, а час до початку або після завершення планової зміни — за x1.5. Ручні x1, x1.5 або x2 діють на всю зміну.'
+      'У будні плановий час в auto оплачується за x1, а час до початку або після завершення — за x1.5. Нові суботні й недільні зміни отримують x1.5 на всю тривалість.'
+  },
+  {
+    question: 'Як працює ліміт перепрацювань?',
+    answer:
+      'Ліміт рахується як відсоток від плану 5/2 по 8 годин. У будні враховується час до або після планової зміни, а у вихідні — вся фактична тривалість. Денний максимум і недоступні дати задаються в налаштуваннях. Перевищення показується, але не блокує таймер.'
   },
   {
     question: 'Як працюють тікети та простій?',
@@ -149,7 +273,14 @@ const toFormValues = (settings: Settings): FormValues => ({
   gradeSalaryBonusPercents: toPercentFormValues(settings.gradeSalaryBonusPercents),
   gradeNormPercents: toPercentFormValues(settings.gradeNormPercents),
   holdDelaySeconds: String(settings.arriveHoldDelayMs / 1000),
-  backupReminderIntervalDays: String(settings.backupReminderIntervalDays)
+  backupReminderIntervalDays: String(settings.backupReminderIntervalDays),
+  overtimeLimitPercent: String(settings.overtimeLimitPercent),
+  overtimeStepMinutes: String(settings.overtimeStepMinutes),
+  overtimeStrategy: settings.overtimeStrategy,
+  overtimeSaturdayCount: String(settings.overtimeSaturdayCount),
+  overtimeWeekdayMaxMinutes: String(settings.overtimeWeekdayMaxMinutes),
+  overtimeSaturdayMaxMinutes: String(settings.overtimeSaturdayMaxMinutes),
+  overtimeUnavailableDates: [...settings.overtimeUnavailableDates].sort()
 });
 
 const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors => {
@@ -162,6 +293,11 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   const gradeNormPercents = parsePercentFormValues(values.gradeNormPercents);
   const holdDelay = parseNumber(values.holdDelaySeconds);
   const backupReminderIntervalDays = Number(values.backupReminderIntervalDays);
+  const overtimeLimitPercent = parseNumber(values.overtimeLimitPercent);
+  const overtimeStepMinutes = Number(values.overtimeStepMinutes);
+  const overtimeSaturdayCount = Number(values.overtimeSaturdayCount);
+  const overtimeWeekdayMaxMinutes = Number(values.overtimeWeekdayMaxMinutes);
+  const overtimeSaturdayMaxMinutes = Number(values.overtimeSaturdayMaxMinutes);
 
   if (!values.employeeFirstName.trim()) {
     errors.employeeFirstName = 'Вкажіть імʼя.';
@@ -210,6 +346,47 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
     errors.backupReminderIntervalDays = 'Оберіть 7, 14 або 30 днів.';
   }
 
+  if (
+    !Number.isFinite(overtimeLimitPercent) ||
+    overtimeLimitPercent < OVERTIME_LIMIT_PERCENT_MIN ||
+    overtimeLimitPercent > OVERTIME_LIMIT_PERCENT_MAX
+  ) {
+    errors.overtimeLimitPercent = 'Ліміт має бути від 0 до 100%.';
+  }
+
+  if (!isOvertimeStrategy(values.overtimeStrategy)) {
+    errors.overtimeStrategy = 'Оберіть стратегію перепрацювань.';
+  }
+
+  if (
+    !Number.isSafeInteger(overtimeStepMinutes) ||
+    overtimeStepMinutes < OVERTIME_STEP_MINUTES_MIN ||
+    overtimeStepMinutes > OVERTIME_STEP_MINUTES_MAX ||
+    overtimeStepMinutes % 5 !== 0
+  ) {
+    errors.overtimeStepMinutes = `Крок має бути цілим числом від ${OVERTIME_STEP_MINUTES_MIN} до ${OVERTIME_STEP_MINUTES_MAX} і кратним 5.`;
+  }
+
+  if (
+    !Number.isSafeInteger(overtimeSaturdayCount) ||
+    overtimeSaturdayCount < OVERTIME_SATURDAY_COUNT_MIN ||
+    overtimeSaturdayCount > OVERTIME_SATURDAY_COUNT_MAX
+  ) {
+    errors.overtimeSaturdayCount = `Кількість субот має бути від ${OVERTIME_SATURDAY_COUNT_MIN} до ${OVERTIME_SATURDAY_COUNT_MAX}.`;
+  }
+
+  if (!isOvertimeDailyMaxMinutes(overtimeWeekdayMaxMinutes)) {
+    errors.overtimeWeekdayMaxMinutes = `Максимум має бути від ${OVERTIME_DAILY_MAX_MINUTES_MIN} до ${OVERTIME_DAILY_MAX_MINUTES_MAX} хв і кратним 5.`;
+  }
+
+  if (!isOvertimeDailyMaxMinutes(overtimeSaturdayMaxMinutes)) {
+    errors.overtimeSaturdayMaxMinutes = `Максимум має бути від ${OVERTIME_DAILY_MAX_MINUTES_MIN} до ${OVERTIME_DAILY_MAX_MINUTES_MAX} хв і кратним 5.`;
+  }
+
+  if (!isOvertimeUnavailableDates(values.overtimeUnavailableDates)) {
+    errors.overtimeUnavailableDates = 'Перевірте список недоступних дат.';
+  }
+
   return errors;
 };
 
@@ -247,11 +424,57 @@ export function SettingsPage({
   const [isApplyingRate, setIsApplyingRate] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
+  const [overtimeUnavailableDateDraft, setOvertimeUnavailableDateDraft] = useState('');
+  const formRef = useRef<HTMLFormElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+  const syncedValuesRef = useRef<FormValues>(toFormValues(settings));
 
   useEffect(() => {
-    setValues(toFormValues(settings));
+    const nextValues = toFormValues(settings);
+
+    setValues((currentValues) =>
+      JSON.stringify(currentValues) === JSON.stringify(syncedValuesRef.current)
+        ? nextValues
+        : currentValues
+    );
+    syncedValuesRef.current = nextValues;
   }, [settings]);
+
+  const addOvertimeUnavailableDate = () => {
+    const today = toLocalIsoString(new Date()).slice(0, 10);
+
+    if (!overtimeUnavailableDateDraft || overtimeUnavailableDateDraft < today) {
+      setErrors((current) => ({
+        ...current,
+        overtimeUnavailableDates: 'Оберіть сьогоднішню або майбутню дату.'
+      }));
+      return;
+    }
+
+    setValues((current) => ({
+      ...current,
+      overtimeUnavailableDates: [
+        ...new Set([
+          ...current.overtimeUnavailableDates,
+          overtimeUnavailableDateDraft
+        ])
+      ].sort()
+    }));
+    setErrors((current) => ({ ...current, overtimeUnavailableDates: undefined }));
+    setOvertimeUnavailableDateDraft('');
+    setNotice(null);
+  };
+
+  const removeOvertimeUnavailableDate = (date: string) => {
+    setValues((current) => ({
+      ...current,
+      overtimeUnavailableDates: current.overtimeUnavailableDates.filter(
+        (item) => item !== date
+      )
+    }));
+    setErrors((current) => ({ ...current, overtimeUnavailableDates: undefined }));
+    setNotice(null);
+  };
 
   const updateField =
     (field: keyof FormValues) =>
@@ -322,6 +545,24 @@ export function SettingsPage({
     if (Object.keys(nextErrors).length > 0) {
       setErrors(nextErrors);
       setNotice({ tone: 'error', text: 'Перевірте поля з помилками.' });
+      const firstInvalidField = Object.keys(nextErrors)[0] as keyof FormValues | undefined;
+      const firstInvalidSection = firstInvalidField
+        ? FORM_FIELD_SECTIONS[firstInvalidField]
+        : undefined;
+
+      if (firstInvalidSection) {
+        const section = formRef.current?.querySelector<HTMLDetailsElement>(
+          `[data-settings-section="${firstInvalidSection}"]`
+        );
+
+        if (section) {
+          section.open = true;
+        }
+      }
+
+      window.requestAnimationFrame(() => {
+        formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      });
       return;
     }
 
@@ -329,6 +570,7 @@ export function SettingsPage({
     setNotice(null);
 
     const holdDelayMs = Math.round(parseNumber(values.holdDelaySeconds) * 1000);
+    const today = toLocalIsoString(new Date()).slice(0, 10);
     const currentGrade = settings.incognitoEnabled
       ? settings.currentGrade
       : parseGrade(values.currentGrade);
@@ -353,6 +595,15 @@ export function SettingsPage({
       backupReminderIntervalDays: Number(
         values.backupReminderIntervalDays
       ) as Settings['backupReminderIntervalDays'],
+      overtimeLimitPercent: parseNumber(values.overtimeLimitPercent),
+      overtimeStepMinutes: Number(values.overtimeStepMinutes),
+      overtimeStrategy: values.overtimeStrategy,
+      overtimeSaturdayCount: Number(values.overtimeSaturdayCount),
+      overtimeWeekdayMaxMinutes: Number(values.overtimeWeekdayMaxMinutes),
+      overtimeSaturdayMaxMinutes: Number(values.overtimeSaturdayMaxMinutes),
+      overtimeUnavailableDates: values.overtimeUnavailableDates.filter(
+        (date) => date >= today
+      ),
       updatedAt: toLocalIsoString(new Date())
     };
 
@@ -557,6 +808,9 @@ export function SettingsPage({
         const restoredSettings = await restoreBackup(localDb, backup);
         await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
 
+        setValues(toFormValues(restoredSettings));
+        setErrors({});
+        setOvertimeUnavailableDateDraft('');
         onLocalDataReplace(restoredSettings);
         setNotice({
           tone: 'success',
@@ -627,6 +881,9 @@ export function SettingsPage({
         }
       );
       await onSettingsChange(resetSettings);
+      setValues(toFormValues(resetSettings));
+      setErrors({});
+      setOvertimeUnavailableDateDraft('');
       await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
       onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'Локальні дані очищено.' });
@@ -654,6 +911,9 @@ export function SettingsPage({
       const demoData = await replaceLocalDataWithDemo(localDb, now.slice(0, 10), now);
       await backupReminderRepository.resetAnchor(now);
 
+      setValues(toFormValues(demoData.settings));
+      setErrors({});
+      setOvertimeUnavailableDateDraft('');
       onLocalDataReplace(demoData.settings);
       onLocalDataChange?.();
       setNotice({
@@ -694,11 +954,48 @@ export function SettingsPage({
       previewGradeSalaryBonusPercents
     )
   );
+  const isDirty = JSON.stringify(values) !== JSON.stringify(toFormValues(settings));
+  const employeeSummary = [values.employeeFirstName.trim(), values.employeeLastName.trim()]
+    .filter(Boolean)
+    .join(' ') || 'Не вказано';
+  const themeLabels: Record<ThemePreference, string> = {
+    system: 'Системна',
+    light: 'Світла',
+    dark: 'Темна'
+  };
+
+  const discardChanges = () => {
+    setValues(toFormValues(settings));
+    setErrors({});
+    setOvertimeUnavailableDateDraft('');
+    setNotice({ tone: 'info', text: 'Незбережені зміни скасовано.' });
+  };
 
   return (
-    <form className="settings-page" onSubmit={saveSettings} noValidate>
-      <section className="settings-page__section" aria-labelledby="employee-settings-title">
-        <h2 id="employee-settings-title">Працівник</h2>
+    <form
+      ref={formRef}
+      className={`settings-page${isDirty ? ' settings-page--dirty' : ''}`}
+      onSubmit={saveSettings}
+      noValidate
+    >
+      <div className="settings-page__intro">
+        <div>
+          <span>Оберіть розділ</span>
+          <p>Змінюйте лише потрібні параметри, не переглядаючи всю форму.</p>
+        </div>
+        <span className="settings-page__local-badge">
+          <Database size={16} aria-hidden="true" />
+          Дані на пристрої
+        </span>
+      </div>
+
+      <SettingsSection
+        id="employee"
+        title="Працівник"
+        description="Імʼя для змін і копіювання"
+        summary={employeeSummary}
+        icon={UserRound}
+      >
         <label className="settings-page__field">
           <span>Імʼя</span>
           <input
@@ -726,10 +1023,15 @@ export function SettingsPage({
             <small id="employeeLastName-error">{errors.employeeLastName}</small>
           ) : null}
         </label>
-      </section>
+      </SettingsSection>
 
-      <section className="settings-page__section" aria-labelledby="payment-settings-title">
-        <h2 id="payment-settings-title">Оплата</h2>
+      <SettingsSection
+        id="payment"
+        title="Оплата"
+        description="Місячна ставка та премія"
+        summary={formatMoney(previewMonthlySalary, settings.incognitoEnabled)}
+        icon={WalletCards}
+      >
         <label className="settings-page__field">
           <span>Ставка за місяць, ₴</span>
           <input
@@ -779,10 +1081,228 @@ export function SettingsPage({
             <small id="monthlyBonus-error">{errors.monthlyBonus}</small>
           ) : null}
         </label>
-      </section>
+      </SettingsSection>
 
-      <section className="settings-page__section" aria-labelledby="grade-settings-title">
-        <h2 id="grade-settings-title">Рівні</h2>
+      <SettingsSection
+        id="overtime"
+        title="Перепрацювання"
+        description="Ліміт, стратегія та доступні дні"
+        summary={`${values.overtimeLimitPercent}% · ${OVERTIME_STRATEGY_LABELS[values.overtimeStrategy]}`}
+        icon={CalendarClock}
+      >
+        <div className="settings-page__grid">
+          <label className="settings-page__field">
+            <span>Ліміт від планових годин, %</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              autoComplete="off"
+              pattern="[0-9]*([.,][0-9]*)?"
+              aria-invalid={errors.overtimeLimitPercent ? 'true' : 'false'}
+              aria-describedby={
+                errors.overtimeLimitPercent
+                  ? 'overtimeLimitPercent-error'
+                  : 'overtimeLimitPercent-help'
+              }
+              value={values.overtimeLimitPercent}
+              onChange={updateField('overtimeLimitPercent')}
+            />
+            <small id="overtimeLimitPercent-help">
+              0% вимикає планувальник. План місяця — будні 5/2 по 8 годин;
+              коефіцієнт впливає лише на гроші.
+            </small>
+            {errors.overtimeLimitPercent ? (
+              <small id="overtimeLimitPercent-error">{errors.overtimeLimitPercent}</small>
+            ) : null}
+          </label>
+
+          <label className="settings-page__field">
+            <span>Крок рекомендацій, хв</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={OVERTIME_STEP_MINUTES_MIN}
+              max={OVERTIME_STEP_MINUTES_MAX}
+              step={5}
+              aria-invalid={errors.overtimeStepMinutes ? 'true' : 'false'}
+              aria-describedby={
+                errors.overtimeStepMinutes
+                  ? 'overtimeStepMinutes-error'
+                  : 'overtimeStepMinutes-help'
+              }
+              value={values.overtimeStepMinutes}
+              onChange={updateField('overtimeStepMinutes')}
+            />
+            <small id="overtimeStepMinutes-help">
+              Від {OVERTIME_STEP_MINUTES_MIN} до {OVERTIME_STEP_MINUTES_MAX} хв,
+              кратно 5.
+            </small>
+            {errors.overtimeStepMinutes ? (
+              <small id="overtimeStepMinutes-error">{errors.overtimeStepMinutes}</small>
+            ) : null}
+          </label>
+
+          <label className="settings-page__field">
+            <span>Стратегія</span>
+            <select
+              aria-label="Стратегія перепрацювань"
+              aria-invalid={errors.overtimeStrategy ? 'true' : 'false'}
+              value={values.overtimeStrategy}
+              onChange={updateField('overtimeStrategy')}
+            >
+              <option value="weekdays">Лише будні</option>
+              <option value="standard">Стандарт</option>
+              <option value="saturdays">Усі суботи</option>
+              <option value="automatic">Автоматичний</option>
+              <option value="custom">Власна</option>
+            </select>
+            <small>{OVERTIME_STRATEGY_DESCRIPTIONS[values.overtimeStrategy]}</small>
+            {errors.overtimeStrategy ? (
+              <small id="overtimeStrategy-error">{errors.overtimeStrategy}</small>
+            ) : null}
+          </label>
+
+          {values.overtimeStrategy === 'custom' ? (
+            <label className="settings-page__field">
+              <span>Кількість субот у місяці</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={OVERTIME_SATURDAY_COUNT_MIN}
+                max={OVERTIME_SATURDAY_COUNT_MAX}
+                step={1}
+                aria-invalid={errors.overtimeSaturdayCount ? 'true' : 'false'}
+                aria-describedby={
+                  errors.overtimeSaturdayCount
+                    ? 'overtimeSaturdayCount-error'
+                    : 'overtimeSaturdayCount-help'
+                }
+                value={values.overtimeSaturdayCount}
+                onChange={updateField('overtimeSaturdayCount')}
+              />
+              <small id="overtimeSaturdayCount-help">
+                Від 0 до 5 найближчих доступних субот; решта — на будні.
+              </small>
+              {errors.overtimeSaturdayCount ? (
+                <small id="overtimeSaturdayCount-error">
+                  {errors.overtimeSaturdayCount}
+                </small>
+              ) : null}
+            </label>
+          ) : null}
+
+          <label className="settings-page__field">
+            <span>Максимум перепрацювання за будній день, хв</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={OVERTIME_DAILY_MAX_MINUTES_MIN}
+              max={OVERTIME_DAILY_MAX_MINUTES_MAX}
+              step={5}
+              aria-invalid={errors.overtimeWeekdayMaxMinutes ? 'true' : 'false'}
+              aria-describedby={
+                errors.overtimeWeekdayMaxMinutes
+                  ? 'overtimeWeekdayMaxMinutes-error'
+                  : 'overtimeWeekdayMaxMinutes-help'
+              }
+              value={values.overtimeWeekdayMaxMinutes}
+              onChange={updateField('overtimeWeekdayMaxMinutes')}
+            />
+            <small id="overtimeWeekdayMaxMinutes-help">
+              Замість жорсткої межі 19:00. Ліміт застосовується до кожного будня.
+            </small>
+            {errors.overtimeWeekdayMaxMinutes ? (
+              <small id="overtimeWeekdayMaxMinutes-error">
+                {errors.overtimeWeekdayMaxMinutes}
+              </small>
+            ) : null}
+          </label>
+
+          <label className="settings-page__field">
+            <span>Максимум роботи в суботу, хв</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min={OVERTIME_DAILY_MAX_MINUTES_MIN}
+              max={OVERTIME_DAILY_MAX_MINUTES_MAX}
+              step={5}
+              aria-invalid={errors.overtimeSaturdayMaxMinutes ? 'true' : 'false'}
+              aria-describedby={
+                errors.overtimeSaturdayMaxMinutes
+                  ? 'overtimeSaturdayMaxMinutes-error'
+                  : 'overtimeSaturdayMaxMinutes-help'
+              }
+              value={values.overtimeSaturdayMaxMinutes}
+              onChange={updateField('overtimeSaturdayMaxMinutes')}
+            />
+            <small id="overtimeSaturdayMaxMinutes-help">
+              Замість жорсткої межі 17:00. Наприклад, 480 хв — це 8 годин.
+            </small>
+            {errors.overtimeSaturdayMaxMinutes ? (
+              <small id="overtimeSaturdayMaxMinutes-error">
+                {errors.overtimeSaturdayMaxMinutes}
+              </small>
+            ) : null}
+          </label>
+
+          <div className="settings-page__field settings-page__overtime-availability">
+            <span>Недоступні дати</span>
+            <div className="settings-page__overtime-date-entry">
+              <input
+                type="date"
+                min={toLocalIsoString(new Date()).slice(0, 10)}
+                aria-label="Дата без перепрацювання"
+                aria-invalid={errors.overtimeUnavailableDates ? 'true' : 'false'}
+                value={overtimeUnavailableDateDraft}
+                onChange={(event) => {
+                  setOvertimeUnavailableDateDraft(event.target.value);
+                  setErrors((current) => ({
+                    ...current,
+                    overtimeUnavailableDates: undefined
+                  }));
+                }}
+              />
+              <button type="button" onClick={addOvertimeUnavailableDate}>
+                Додати
+              </button>
+            </div>
+            <small>
+              Ці дні не потраплятимуть у рекомендації жодної стратегії.
+            </small>
+            {values.overtimeUnavailableDates.length > 0 ? (
+              <ul className="settings-page__overtime-date-list">
+                {values.overtimeUnavailableDates.map((date) => (
+                  <li key={date}>
+                    <time dateTime={date}>{formatDate(date)}</time>
+                    <button
+                      type="button"
+                      aria-label={`Повернути ${formatDate(date)} у рекомендації`}
+                      onClick={() => removeOvertimeUnavailableDate(date)}
+                    >
+                      <X size={16} aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <small>Усі майбутні дні доступні.</small>
+            )}
+            {errors.overtimeUnavailableDates ? (
+              <small id="overtimeUnavailableDates-error">
+                {errors.overtimeUnavailableDates}
+              </small>
+            ) : null}
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        id="grades"
+        title="Рівні"
+        description="Премії та норми виробітку"
+        summary={`G${values.currentGrade} → G${values.desiredGrade}`}
+        icon={Trophy}
+      >
         <div className="settings-page__grade-selects">
           <label className="settings-page__field">
             <span>Поточний рівень</span>
@@ -880,10 +1400,15 @@ export function SettingsPage({
             <small className="settings-page__field-error">{errors.gradeNormPercents}</small>
           ) : null}
         </div>
-      </section>
+      </SettingsSection>
 
-      <section className="settings-page__section" aria-labelledby="timer-settings-title">
-        <h2 id="timer-settings-title">Таймер</h2>
+      <SettingsSection
+        id="timer"
+        title="Таймер"
+        description="Захист від випадкового натискання"
+        summary={`${values.holdDelaySeconds} с`}
+        icon={TimerReset}
+      >
         <div className="settings-page__grid">
           <label className="settings-page__field">
             <span>Затримка кнопок, с</span>
@@ -902,10 +1427,15 @@ export function SettingsPage({
             ) : null}
           </label>
         </div>
-      </section>
+      </SettingsSection>
 
-      <section className="settings-page__section" aria-labelledby="appearance-settings-title">
-        <h2 id="appearance-settings-title">Вигляд</h2>
+      <SettingsSection
+        id="appearance"
+        title="Вигляд"
+        description="Тема інтерфейсу"
+        summary={themeLabels[settings.themePreference]}
+        icon={Palette}
+      >
         <label className="settings-page__field">
           <span>Тема</span>
           <select
@@ -921,10 +1451,15 @@ export function SettingsPage({
             Системна тема автоматично повторює налаштування Android або iOS.
           </small>
         </label>
-      </section>
+      </SettingsSection>
 
-      <section className="settings-page__section" aria-labelledby="privacy-settings-title">
-        <h2 id="privacy-settings-title">Конфіденційність</h2>
+      <SettingsSection
+        id="privacy"
+        title="Конфіденційність"
+        description="Маскування фінансових даних"
+        summary={settings.incognitoEnabled ? 'Увімкнено' : 'Вимкнено'}
+        icon={Shield}
+      >
         <button
           className="settings-page__toggle"
           type="button"
@@ -945,10 +1480,15 @@ export function SettingsPage({
           </span>
           <span className="settings-page__switch" aria-hidden="true" />
         </button>
-      </section>
+      </SettingsSection>
 
-      <section className="settings-page__section" aria-labelledby="data-settings-title">
-        <h2 id="data-settings-title">Дані</h2>
+      <SettingsSection
+        id="data"
+        title="Дані та backup"
+        description="Експорт, імпорт і очищення"
+        summary={`Кожні ${values.backupReminderIntervalDays} днів`}
+        icon={Database}
+      >
         <label className="settings-page__field">
           <span>Нагадувати про backup</span>
           <select
@@ -1042,10 +1582,15 @@ export function SettingsPage({
             </button>
           ) : null}
         </div>
-      </section>
+      </SettingsSection>
 
-      <section className="settings-page__section" aria-labelledby="calendar-help-title">
-        <h2 id="calendar-help-title">Довідка</h2>
+      <SettingsSection
+        id="help"
+        title="Допомога"
+        description="Календар і щоденні сценарії"
+        summary={`${FAQ_ITEMS.length} відповідей`}
+        icon={CircleHelp}
+      >
         <button
           className="settings-page__help-button"
           type="button"
@@ -1054,12 +1599,7 @@ export function SettingsPage({
           <CalendarDays size={19} aria-hidden="true" />
           Як користуватися календарем
         </button>
-      </section>
 
-      <section
-        className="settings-page__section settings-page__section--faq"
-        aria-labelledby="faq-settings-title"
-      >
         <details className="settings-page__faq-dropdown">
           <summary>
             <span
@@ -1092,10 +1632,15 @@ export function SettingsPage({
             ))}
           </div>
         </details>
-      </section>
+      </SettingsSection>
 
-      <section className="settings-page__section" aria-labelledby="info-settings-title">
-        <h2 id="info-settings-title">Інформація</h2>
+      <SettingsSection
+        id="information"
+        title="Про застосунок"
+        description="Версія та зворотний звʼязок"
+        summary={`v${appPackage.version}`}
+        icon={Info}
+      >
         <a
           className="settings-page__feedback-link"
           href="https://t.me/natuselit"
@@ -1113,7 +1658,7 @@ export function SettingsPage({
           <span>Дата останнього оновлення</span>
           <strong>{formatDateTime(settings.updatedAt)}</strong>
         </div>
-      </section>
+      </SettingsSection>
 
       {notice ? (
         <p className="settings-page__notice" data-tone={notice.tone} role="status">
@@ -1121,10 +1666,27 @@ export function SettingsPage({
         </p>
       ) : null}
 
-      <button className="settings-page__submit" type="submit" disabled={isSaving}>
-        <Save size={18} aria-hidden="true" />
-        {isSaving ? 'Збереження...' : 'Зберегти налаштування'}
-      </button>
+      {isDirty ? (
+        <div className="settings-page__save-bar" aria-label="Незбережені зміни">
+          <button
+            className="settings-page__discard"
+            type="button"
+            disabled={isSaving}
+            onClick={discardChanges}
+          >
+            Скасувати
+          </button>
+          <button
+            className="settings-page__submit"
+            type="submit"
+            aria-label="Зберегти налаштування"
+            disabled={isSaving}
+          >
+            <Save size={18} aria-hidden="true" />
+            {isSaving ? 'Збереження...' : 'Зберегти'}
+          </button>
+        </div>
+      ) : null}
     </form>
   );
 }

@@ -69,7 +69,6 @@ const createMissingShiftsFromSchedule = async (
       settings.monthlySalary,
       item.date
     );
-
     await createManualShift(shiftRepository, {
       id: `shift-${item.id}`,
       date: item.date,

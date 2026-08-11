@@ -15,6 +15,7 @@ const shift: Shift & { endTime: string } = {
   hourlyRateSnapshot: 100,
   gradeSnapshot: null,
   workTickets: [],
+  note: '',
   coefficientMode: 'auto',
   isAutoClosed: false,
   createdAt: '2026-07-24T06:30:00.000+03:00',

@@ -11,6 +11,7 @@ import {
   CALENDAR_TUTORIAL_SEEN_KEY,
   localDb
 } from '../../../shared/lib/local-db';
+import { combineLocalDateAndTime, toLocalIsoString } from '../../../shared/lib/date-time';
 import { MainPage } from './MainPage';
 
 const settings: Settings = {
@@ -29,6 +30,13 @@ const settings: Settings = {
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
+  overtimeLimitPercent: 0,
+  overtimeStepMinutes: 30,
+  overtimeStrategy: 'standard',
+  overtimeSaturdayCount: 1,
+  overtimeWeekdayMaxMinutes: 240,
+  overtimeSaturdayMaxMinutes: 480,
+  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T06:00:00.000+03:00'
@@ -58,6 +66,7 @@ const activeShift: Shift = {
       updatedAt: '2026-07-27T06:15:00.000+03:00'
     }
   ],
+  note: '',
   coefficientMode: 'x2',
   isAutoClosed: false,
   createdAt: '2026-07-27T06:15:00.000+03:00',
@@ -81,6 +90,45 @@ afterEach(async () => {
 });
 
 describe('MainPage active shift', () => {
+  it('saves a local note for the active shift', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MainPage
+        settings={settings}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    const noteInput = await screen.findByLabelText('Нотатка до зміни') as HTMLTextAreaElement;
+    const saveButton = screen.getByRole('button', { name: 'Зберегти' });
+    const ticketSection = screen.getByRole('region', { name: 'Тікет зміни' });
+    const noteSection = noteInput.closest('section');
+
+    expect(noteInput.maxLength).toBe(500);
+    expect(
+      ticketSection.compareDocumentPosition(noteSection!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect((saveButton as HTMLButtonElement).disabled).toBe(true);
+
+    await user.type(noteInput, 'Перевірити партію №42');
+    expect(screen.getByLabelText('21 із 500 символів')).toBeTruthy();
+    expect((saveButton as HTMLButtonElement).disabled).toBe(false);
+
+    await user.click(saveButton);
+
+    await waitFor(async () => {
+      expect((await localDb.shifts.get(activeShift.id))?.note).toBe(
+        'Перевірити партію №42'
+      );
+    });
+    expect(
+      (screen.getByRole('button', { name: 'Збережено' }) as HTMLButtonElement).disabled
+    ).toBe(true);
+  });
+
   it('uses today as the default preset for calendar screens', async () => {
     const user = userEvent.setup();
 
@@ -483,7 +531,7 @@ describe('MainPage active shift', () => {
   it('keeps the compact coefficient badge visible in incognito mode', async () => {
     render(
       <MainPage
-        settings={{ ...settings, incognitoEnabled: true }}
+        settings={{ ...settings, overtimeLimitPercent: 10, incognitoEnabled: true }}
         dataVersion={0}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
@@ -491,6 +539,87 @@ describe('MainPage active shift', () => {
     );
 
     expect(await screen.findByLabelText('Поточний коефіцієнт: x2')).toBeTruthy();
+  });
+
+  it('shows the monthly overtime plan and saves a selected alternative', async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <MainPage
+        settings={{ ...settings, overtimeLimitPercent: 10 }}
+        dataVersion={0}
+        onSettingsChange={onSettingsChange}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Стандарт' })).toBeTruthy();
+    expect(
+      screen.getByRole('progressbar', {
+        name: 'Використання місячного ліміту перепрацювань'
+      })
+    ).toBeTruthy();
+    expect(screen.getByText('План місяця')).toBeTruthy();
+    expect(screen.getAllByText('Ліміт')).toHaveLength(1);
+    expect(
+      screen.queryByLabelText('Ліміт перепрацювань: 10% від планових годин')
+    ).toBeNull();
+    expect(screen.getByText('Використано ліміту')).toBeTruthy();
+    expect(
+      screen.getByText('Перепрацювання', {
+        selector: '.main-page__overtime-title .main-page__label'
+      })
+    ).toBeTruthy();
+    expect(screen.queryByText('Орієнтовний додатковий дохід за залишок')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Налаштування' })).toBeNull();
+    expect(screen.queryByText(/Залишок .* менший за крок рекомендації/)).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Цей день недоступний' }));
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        overtimeUnavailableDates: expect.arrayContaining([
+          expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)
+        ])
+      })
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Інші варіанти' }));
+    const dialog = screen.getByRole('dialog', { name: 'Варіанти перепрацювань' });
+    await user.click(within(dialog).getByRole('button', { name: /Лише будні/ }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ overtimeStrategy: 'weekdays' })
+    );
+    expect(screen.queryByRole('dialog', { name: 'Варіанти перепрацювань' })).toBeNull();
+  });
+
+  it('shows a separate over-limit state without blocking an inactive timer', async () => {
+    const date = toLocalIsoString(new Date()).slice(0, 10);
+    await localDb.shifts.clear();
+    await localDb.shifts.put({
+      ...activeShift,
+      id: 'completed-over-limit-shift',
+      date,
+      plannedStartTime: '06:30',
+      plannedEndTime: '14:30',
+      startTime: combineLocalDateAndTime(date, '05:30'),
+      endTime: combineLocalDateAndTime(date, '15:30'),
+      workTickets: []
+    });
+
+    render(
+      <MainPage
+        settings={{ ...settings, overtimeLimitPercent: 0.01 }}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText(/Ліміт перевищено на/)).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'План перепрацювань' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Прийшов/ })).toBeTruthy();
   });
 
   it('keeps the mandatory reminder visible until backup export succeeds', async () => {
@@ -526,87 +655,55 @@ describe('MainPage active shift', () => {
   });
 });
 
-describe('MainPage latest completed shift', () => {
-  it('shows aggregate production statistics for all completed tickets', async () => {
+describe('MainPage inactive state', () => {
+  it('hides the previous shift and moves its recommendation forward', async () => {
+    const date = toLocalIsoString(new Date()).slice(0, 10);
     await localDb.shifts.clear();
     await localDb.shifts.put({
       ...activeShift,
       id: 'completed-shift',
-      endTime: '2026-07-27T14:30:00.000+03:00',
-      gradeSnapshot: {
-        currentGrade: 2,
-        desiredGrade: 3,
-        gradeSalaryBonusPercents: [10, 10, 15, 15],
-        gradeNormPercents: [100, 120, 140, 160],
-        cumulativeSalaryBonusPercent: 20
-      },
-      workTickets: [
-        {
-          id: 'ticket-1',
-          normPerEightHours: 80,
-          startedAt: '2026-07-27T06:15:00.000+03:00',
-          endedAt: '2026-07-27T07:15:00.000+03:00',
-          actualQuantity: 10,
-          downtimeMinutes: 0,
-          createdAt: '2026-07-27T06:15:00.000+03:00',
-          updatedAt: '2026-07-27T07:15:00.000+03:00'
-        },
-        {
-          id: 'ticket-2',
-          normPerEightHours: 80,
-          startedAt: '2026-07-27T07:15:00.000+03:00',
-          endedAt: '2026-07-27T09:15:00.000+03:00',
-          actualQuantity: 20,
-          downtimeMinutes: 30,
-          createdAt: '2026-07-27T07:15:00.000+03:00',
-          updatedAt: '2026-07-27T09:15:00.000+03:00'
-        },
-        {
-          id: 'ticket-3',
-          normPerEightHours: 80,
-          startedAt: '2026-07-27T09:15:00.000+03:00',
-          endedAt: '2026-07-27T10:15:00.000+03:00',
-          actualQuantity: null,
-          downtimeMinutes: 10,
-          createdAt: '2026-07-27T09:15:00.000+03:00',
-          updatedAt: '2026-07-27T10:15:00.000+03:00'
-        }
-      ]
-    });
-
-    render(
-      <MainPage
-        settings={settings}
-        dataVersion={0}
-        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
-        onLocalDataReplace={vi.fn()}
-      />
-    );
-
-    const summary = await screen.findByLabelText(
-      'Загальна статистика тікетів останньої зміни'
-    );
-    const summaryQueries = within(summary);
-
-    expect(summaryQueries.getByText('2/3 заповнено')).toBeTruthy();
-    expect(summaryQueries.getAllByText('30 шт')).toHaveLength(2);
-    expect(summaryQueries.getByText('120%')).toBeTruthy();
-    expect(summaryQueries.getByText('Продуктивний час')).toBeTruthy();
-    expect(summaryQueries.getByText('2:30')).toBeTruthy();
-    expect(summaryQueries.getByText('0:30')).toBeTruthy();
-  });
-
-  it('shows a compact empty state when the last shift has no tickets', async () => {
-    await localDb.shifts.clear();
-    await localDb.shifts.put({
-      ...activeShift,
-      id: 'completed-without-tickets',
-      endTime: '2026-07-27T14:30:00.000+03:00',
+      date,
+      startTime: combineLocalDateAndTime(date, '06:30'),
+      endTime: combineLocalDateAndTime(date, '14:30'),
       workTickets: []
     });
 
     render(
       <MainPage
+        settings={{
+          ...settings,
+          overtimeLimitPercent: 10,
+          overtimeStrategy: 'weekdays'
+        }}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    expect(
+      await screen.findByText(
+        /Наступна рекомендована зміна|немає наступної доступної дати/
+      )
+    ).toBeTruthy();
+    expect(screen.getByText('Всього часу')).toBeTruthy();
+    expect(screen.getAllByText('Перепрацювання').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Орієнтовний додатковий дохід за залишок')).toBeNull();
+    expect(screen.queryByText('Остання зміна')).toBeNull();
+    expect(
+      screen.queryByLabelText('Загальна статистика тікетів останньої зміни')
+    ).toBeNull();
+    expect(
+      screen.getByRole('region', { name: 'План перепрацювань' })
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Прийшов/ })).toBeTruthy();
+  });
+
+  it('shows only the planner invitation when overtime planning is disabled', async () => {
+    await localDb.shifts.clear();
+
+    render(
+      <MainPage
         settings={settings}
         dataVersion={0}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
@@ -614,11 +711,10 @@ describe('MainPage latest completed shift', () => {
       />
     );
 
-    const summary = await screen.findByLabelText(
-      'Загальна статистика тікетів останньої зміни'
-    );
-
-    expect(within(summary).getByText('0/0 заповнено')).toBeTruthy();
-    expect(within(summary).getByText('У цій зміні тікетів немає.')).toBeTruthy();
+    expect(
+      await screen.findByRole('heading', { name: 'Планувальник вимкнено' })
+    ).toBeTruthy();
+    expect(screen.queryByText('Зміна не активна')).toBeNull();
+    expect(screen.queryByText('Остання зміна')).toBeNull();
   });
 });

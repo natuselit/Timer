@@ -18,6 +18,11 @@ export type ReviewedScheduleWarning = {
   reviewedAt: string;
 };
 
+export type ConfirmedSaturdayDoubleRateMonth = {
+  month: string;
+  confirmedAt: string;
+};
+
 export type LocalDatabaseSchema = {
   settings: SettingsRecord;
   shifts: Shift;

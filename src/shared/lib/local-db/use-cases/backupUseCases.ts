@@ -8,6 +8,11 @@ import {
   HOLD_DELAY_MIN_MS,
   calculateMonthlySalaryFromHourlyRate,
   isThemePreference,
+  isOvertimeDailyMaxMinutes,
+  isOvertimeSaturdayCount,
+  isOvertimeStepMinutes,
+  isOvertimeStrategy,
+  isOvertimeUnavailableDates,
   type BackupReminderIntervalDays,
   type Grade,
   type GradePercentSet,
@@ -25,6 +30,7 @@ import type {
 } from '../../../../entities/shift';
 import {
   PLANNED_SHIFTS,
+  SHIFT_NOTE_MAX_LENGTH,
   validateAndSortWorkTickets
 } from '../../../../entities/shift';
 import { toLocalIsoString } from '../../date-time';
@@ -35,10 +41,15 @@ import {
   ScheduleWarningReviewRepository,
   toScheduleWarningReviewRecord
 } from '../repositories/scheduleWarningReviewRepository';
+import {
+  OvertimeCoefficientRepository,
+  toSaturdayDoubleRateRecord
+} from '../repositories/overtimeCoefficientRepository';
 import { normalizeSettingsRecord } from '../repositories/settingsRepository';
 import { normalizeShiftRecord } from '../repositories/shiftRepository';
 import type {
   ReviewedScheduleWarning,
+  ConfirmedSaturdayDoubleRateMonth,
   SettingsRecord
 } from '../types';
 
@@ -49,7 +60,11 @@ const TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION = 5;
 const MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION = 6;
 const REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION = 7;
 const BACKUP_REMINDER_BACKUP_SCHEMA_VERSION = 8;
-export const BACKUP_SCHEMA_VERSION = BACKUP_REMINDER_BACKUP_SCHEMA_VERSION;
+const SHIFT_NOTE_BACKUP_SCHEMA_VERSION = 9;
+const OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION = 10;
+const CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION = 11;
+const OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION = 12;
+export const BACKUP_SCHEMA_VERSION = OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION;
 const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   LEGACY_BACKUP_SCHEMA_VERSION,
   2,
@@ -58,7 +73,11 @@ const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION,
   MANUAL_DOWNTIME_BACKUP_SCHEMA_VERSION,
   REVIEWED_SCHEDULE_WARNINGS_BACKUP_SCHEMA_VERSION,
-  BACKUP_SCHEMA_VERSION
+  BACKUP_REMINDER_BACKUP_SCHEMA_VERSION,
+  SHIFT_NOTE_BACKUP_SCHEMA_VERSION,
+  OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION,
+  CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION,
+  OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
 ]);
 
 type BackupSchemaVersion = typeof BACKUP_SCHEMA_VERSION;
@@ -70,6 +89,7 @@ export type ShifterBackup = {
   shifts: Shift[];
   enterpriseSchedule: EnterpriseScheduleItem[];
   reviewedScheduleWarnings: ReviewedScheduleWarning[];
+  confirmedSaturdayDoubleRateMonths: ConfirmedSaturdayDoubleRateMonth[];
 };
 
 export type ParsedBackupImport =
@@ -287,6 +307,16 @@ const parseSettings = (
       ? readGrade(value, 'desiredGrade')
       : DEFAULT_SETTINGS.desiredGrade;
   const themePreference = value.themePreference;
+  const overtimeLimitPercent = value.overtimeLimitPercent;
+  const overtimeStepMinutes = value.overtimeStepMinutes;
+  const overtimeStrategy = value.overtimeStrategy;
+  const overtimeSaturdayCount = value.overtimeSaturdayCount;
+  const overtimeWeekdayMaxMinutes = value.overtimeWeekdayMaxMinutes;
+  const overtimeSaturdayMaxMinutes = value.overtimeSaturdayMaxMinutes;
+  const overtimeUnavailableDates = value.overtimeUnavailableDates;
+  const isLegacyBalancedStrategy =
+    schemaVersion <= CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
+    overtimeStrategy === 'balanced';
 
   if (
     schemaVersion >= THEME_BACKUP_SCHEMA_VERSION &&
@@ -299,6 +329,70 @@ const parseSettings = (
 
   if (desiredGrade < currentGrade) {
     throw new BackupValidationError('settings.desiredGrade не може бути меншим за currentGrade.');
+  }
+
+  if (
+    schemaVersion >= OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
+    (!isFiniteNumber(overtimeLimitPercent) ||
+      overtimeLimitPercent < 0 ||
+      overtimeLimitPercent > 100)
+  ) {
+    throw new BackupValidationError(
+      'settings.overtimeLimitPercent має бути числом від 0 до 100.'
+    );
+  }
+
+  if (
+    schemaVersion >= OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
+    !isOvertimeStrategy(overtimeStrategy) &&
+    !isLegacyBalancedStrategy
+  ) {
+    throw new BackupValidationError('settings.overtimeStrategy має несумісне значення.');
+  }
+
+  if (
+    schemaVersion >= CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
+    !isOvertimeStepMinutes(overtimeStepMinutes)
+  ) {
+    throw new BackupValidationError(
+      'settings.overtimeStepMinutes має бути кратним 5 числом від 5 до 480.'
+    );
+  }
+
+  if (
+    schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION &&
+    !isOvertimeDailyMaxMinutes(overtimeWeekdayMaxMinutes)
+  ) {
+    throw new BackupValidationError(
+      'settings.overtimeWeekdayMaxMinutes має бути кратним 5 числом від 5 до 720.'
+    );
+  }
+
+  if (
+    schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION &&
+    !isOvertimeDailyMaxMinutes(overtimeSaturdayMaxMinutes)
+  ) {
+    throw new BackupValidationError(
+      'settings.overtimeSaturdayMaxMinutes має бути кратним 5 числом від 5 до 720.'
+    );
+  }
+
+  if (
+    schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION &&
+    !isOvertimeUnavailableDates(overtimeUnavailableDates)
+  ) {
+    throw new BackupValidationError(
+      'settings.overtimeUnavailableDates має бути списком унікальних локальних дат.'
+    );
+  }
+
+  if (
+    schemaVersion >= CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
+    !isOvertimeSaturdayCount(overtimeSaturdayCount)
+  ) {
+    throw new BackupValidationError(
+      'settings.overtimeSaturdayCount має бути цілим числом від 0 до 5.'
+    );
   }
 
   return {
@@ -345,6 +439,36 @@ const parseSettings = (
       schemaVersion >= BACKUP_REMINDER_BACKUP_SCHEMA_VERSION
         ? readBackupReminderIntervalDays(value, 'backupReminderIntervalDays')
         : DEFAULT_SETTINGS.backupReminderIntervalDays,
+    overtimeLimitPercent:
+      schemaVersion >= OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION
+        ? (overtimeLimitPercent as number)
+        : DEFAULT_SETTINGS.overtimeLimitPercent,
+    overtimeStepMinutes:
+      schemaVersion >= CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION
+        ? (overtimeStepMinutes as number)
+        : DEFAULT_SETTINGS.overtimeStepMinutes,
+    overtimeStrategy:
+      schemaVersion >= OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION
+        ? isLegacyBalancedStrategy
+          ? 'standard'
+          : (overtimeStrategy as Settings['overtimeStrategy'])
+        : DEFAULT_SETTINGS.overtimeStrategy,
+    overtimeSaturdayCount:
+      schemaVersion >= CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION
+        ? (overtimeSaturdayCount as number)
+        : DEFAULT_SETTINGS.overtimeSaturdayCount,
+    overtimeWeekdayMaxMinutes:
+      schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
+        ? (overtimeWeekdayMaxMinutes as number)
+        : DEFAULT_SETTINGS.overtimeWeekdayMaxMinutes,
+    overtimeSaturdayMaxMinutes:
+      schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
+        ? (overtimeSaturdayMaxMinutes as number)
+        : DEFAULT_SETTINGS.overtimeSaturdayMaxMinutes,
+    overtimeUnavailableDates:
+      schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
+        ? [...(overtimeUnavailableDates as string[])].sort()
+        : DEFAULT_SETTINGS.overtimeUnavailableDates,
     incognitoEnabled: readBoolean(value, 'incognitoEnabled'),
     onboardingCompleted: readBoolean(value, 'onboardingCompleted'),
     updatedAt
@@ -569,6 +693,10 @@ const parseShift = (
         ? parseGradeSnapshot(value.gradeSnapshot)
         : null,
     workTickets: parseWorkTickets(value.workTickets, schemaVersion, endTime ?? exportedAt),
+    note:
+      schemaVersion >= SHIFT_NOTE_BACKUP_SCHEMA_VERSION
+        ? readString(value, 'note')
+        : '',
     coefficientMode: coefficientMode as CoefficientMode,
     isAutoClosed: readBoolean(value, 'isAutoClosed'),
     createdAt: readString(value, 'createdAt'),
@@ -584,6 +712,12 @@ const parseShift = (
     !isIsoLikeDateTime(shift.updatedAt)
   ) {
     throw new BackupValidationError('Зміна містить невалідні дату або час.');
+  }
+
+  if (shift.note.length > SHIFT_NOTE_MAX_LENGTH) {
+    throw new BackupValidationError(
+      `Нотатка зміни має містити не більше ${SHIFT_NOTE_MAX_LENGTH} символів.`
+    );
   }
 
   if (shift.startTime.slice(0, 10) !== shift.date) {
@@ -686,10 +820,34 @@ const parseReviewedScheduleWarning = (
   return review;
 };
 
+const parseConfirmedSaturdayDoubleRateMonth = (
+  value: unknown
+): ConfirmedSaturdayDoubleRateMonth => {
+  if (!isRecord(value)) {
+    throw new BackupValidationError(
+      'Кожне підтвердження x2 для субот має бути обʼєктом.'
+    );
+  }
+
+  const month = readString(value, 'month');
+  const confirmedAt = readString(value, 'confirmedAt');
+
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw new BackupValidationError('Місяць підтвердження x2 має формат РРРР-ММ.');
+  }
+
+  if (!isIsoLikeDateTime(confirmedAt)) {
+    throw new BackupValidationError('confirmedAt для x2 має бути валідною датою.');
+  }
+
+  return { month, confirmedAt };
+};
+
 const validateDomainInvariants = (
   shifts: Shift[],
   enterpriseSchedule: EnterpriseScheduleItem[],
-  reviewedScheduleWarnings: ReviewedScheduleWarning[] = []
+  reviewedScheduleWarnings: ReviewedScheduleWarning[] = [],
+  confirmedSaturdayDoubleRateMonths: ConfirmedSaturdayDoubleRateMonth[] = []
 ): void => {
   const shiftDates = new Set<string>();
   const shiftIds = new Set<string>();
@@ -770,6 +928,18 @@ const validateDomainInvariants = (
 
     reviewedShiftIds.add(review.shiftId);
   }
+
+  const confirmedMonths = new Set<string>();
+
+  for (const confirmation of confirmedSaturdayDoubleRateMonths) {
+    if (confirmedMonths.has(confirmation.month)) {
+      throw new BackupValidationError(
+        `Backup містить два підтвердження x2 для ${confirmation.month}.`
+      );
+    }
+
+    confirmedMonths.add(confirmation.month);
+  }
 };
 
 export const parseBackupJson = (source: string): ShifterBackup => {
@@ -804,6 +974,15 @@ export const parseBackupJson = (source: string): ShifterBackup => {
     );
   }
 
+  if (
+    sourceSchemaVersion >= OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
+    !Array.isArray(parsed.confirmedSaturdayDoubleRateMonths)
+  ) {
+    throw new BackupValidationError(
+      'confirmedSaturdayDoubleRateMonths має бути масивом.'
+    );
+  }
+
   const backup: ShifterBackup = {
     schemaVersion: BACKUP_SCHEMA_VERSION,
     exportedAt: parsed.exportedAt,
@@ -817,13 +996,20 @@ export const parseBackupJson = (source: string): ShifterBackup => {
         ? (parsed.reviewedScheduleWarnings as unknown[]).map(
             parseReviewedScheduleWarning
           )
+        : [],
+    confirmedSaturdayDoubleRateMonths:
+      sourceSchemaVersion >= OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION
+        ? (parsed.confirmedSaturdayDoubleRateMonths as unknown[]).map(
+            parseConfirmedSaturdayDoubleRateMonth
+          )
         : []
   };
 
   validateDomainInvariants(
     backup.shifts,
     backup.enterpriseSchedule,
-    backup.reviewedScheduleWarnings
+    backup.reviewedScheduleWarnings,
+    backup.confirmedSaturdayDoubleRateMonths
   );
 
   return backup;
@@ -933,6 +1119,7 @@ const parseLegacyShift = (
     hourlyRateSnapshot: baseHourlyRateSnapshot,
     gradeSnapshot: null,
     workTickets: [],
+    note: '',
     coefficientMode,
     isAutoClosed: false,
     createdAt: startTime,
@@ -982,13 +1169,20 @@ export const createBackup = async (
   exportedAt = new Date().toISOString()
 ): Promise<ShifterBackup> => {
   const reviewRepository = new ScheduleWarningReviewRepository(db);
-  const [settingsRecord, shifts, enterpriseSchedule, reviewedScheduleWarnings] =
-    await Promise.all([
-      db.settings.get(SETTINGS_ID),
-      db.shifts.toArray(),
-      db.enterpriseSchedule.toArray(),
-      reviewRepository.getAll()
-    ]);
+  const overtimeRepository = new OvertimeCoefficientRepository(db);
+  const [
+    settingsRecord,
+    shifts,
+    enterpriseSchedule,
+    reviewedScheduleWarnings,
+    confirmedSaturdayDoubleRateMonths
+  ] = await Promise.all([
+    db.settings.get(SETTINGS_ID),
+    db.shifts.toArray(),
+    db.enterpriseSchedule.toArray(),
+    reviewRepository.getAll(),
+    overtimeRepository.getAllConfirmedMonths()
+  ]);
 
   const settings = settingsRecord
     ? normalizeSettingsRecord(settingsRecord, new Date(exportedAt))
@@ -1000,7 +1194,8 @@ export const createBackup = async (
     settings,
     shifts: shifts.map(normalizeShiftRecord),
     enterpriseSchedule,
-    reviewedScheduleWarnings
+    reviewedScheduleWarnings,
+    confirmedSaturdayDoubleRateMonths
   };
 };
 
@@ -1024,7 +1219,8 @@ export const restoreBackup = async (
   validateDomainInvariants(
     normalizedShifts,
     backup.enterpriseSchedule,
-    backup.reviewedScheduleWarnings
+    backup.reviewedScheduleWarnings,
+    backup.confirmedSaturdayDoubleRateMonths
   );
 
   const settingsRecord: SettingsRecord = {
@@ -1060,6 +1256,12 @@ export const restoreBackup = async (
       if (backup.reviewedScheduleWarnings.length > 0) {
         await db.appMeta.bulkPut(
           backup.reviewedScheduleWarnings.map(toScheduleWarningReviewRecord)
+        );
+      }
+
+      if (backup.confirmedSaturdayDoubleRateMonths.length > 0) {
+        await db.appMeta.bulkPut(
+          backup.confirmedSaturdayDoubleRateMonths.map(toSaturdayDoubleRateRecord)
         );
       }
     }

@@ -44,6 +44,7 @@ export type Shift = {
   hourlyRateSnapshot: number;
   gradeSnapshot: GradeSnapshot | null;
   workTickets: WorkTicket[];
+  note: string;
   coefficientMode: CoefficientMode;
   isAutoClosed: boolean;
   createdAt: ISODateTimeString;

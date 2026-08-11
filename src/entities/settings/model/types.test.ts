@@ -29,6 +29,13 @@ describe('settings domain types', () => {
       shiftDetectionMode: 'auto',
       themePreference: 'system',
       backupReminderIntervalDays: 14,
+      overtimeLimitPercent: 0,
+      overtimeStepMinutes: 30,
+      overtimeStrategy: 'standard',
+      overtimeSaturdayCount: 1,
+      overtimeWeekdayMaxMinutes: 240,
+      overtimeSaturdayMaxMinutes: 480,
+      overtimeUnavailableDates: [],
       incognitoEnabled: false,
       onboardingCompleted: true,
       updatedAt: '2026-06-23T08:00:00.000+03:00'
@@ -39,6 +46,13 @@ describe('settings domain types', () => {
     expect(settings.coefficientMode).toBe('auto');
     expect(settings.shiftDetectionMode).toBe('auto');
     expect(settings.themePreference).toBe('system');
+    expect(settings.overtimeLimitPercent).toBe(0);
+    expect(settings.overtimeStepMinutes).toBe(30);
+    expect(settings.overtimeStrategy).toBe('standard');
+    expect(settings.overtimeSaturdayCount).toBe(1);
+    expect(settings.overtimeWeekdayMaxMinutes).toBe(240);
+    expect(settings.overtimeSaturdayMaxMinutes).toBe(480);
+    expect(settings.overtimeUnavailableDates).toEqual([]);
     expect(settings.incognitoEnabled).toBe(false);
     expect(settings.onboardingCompleted).toBe(true);
   });

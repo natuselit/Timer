@@ -305,6 +305,43 @@
   color: var(--color-text-primary);
 }
 
+.history-page__shift-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid var(--color-primary-border-muted);
+  border-radius: var(--radius-compact);
+  background: var(--color-primary-soft);
+}
+
+.history-page__shift-note > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--color-primary);
+}
+
+.history-page__shift-note > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.history-page__shift-note span {
+  color: var(--color-primary);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.history-page__shift-note p {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .history-page__ticket-summary {
   display: flex;
   min-width: 0;

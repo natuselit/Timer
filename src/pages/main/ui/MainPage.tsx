@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowRight,
+  CalendarClock,
   Check,
   Clock3,
   Download,
@@ -7,17 +9,17 @@ import {
   Ellipsis,
   Eye,
   EyeOff,
-  Tickets,
+  SlidersHorizontal,
+  StickyNote,
   Trash2,
   X
 } from 'lucide-react';
 import { BottomNavigation } from '../../../widgets/bottom-navigation';
 import { AppShell } from '../../../shared/ui/app-shell';
 import {
-  calculateGradeMonthlyBonus,
-  calculateCumulativeGradePercent,
   calculateHourlyRateFromMonthlySalary,
   createGradeSnapshot,
+  type OvertimeStrategy,
   type Settings
 } from '../../../entities/settings';
 import { AnalyticsPage } from '../../analytics';
@@ -26,9 +28,9 @@ import { SchedulePage } from '../../schedule';
 import { SettingsPage } from '../../settings';
 import {
   calculateSalaryBreakdown,
-  calculateShiftProductionSummary,
   calculateTicketProductionSummary,
   getEffectiveCoefficient,
+  SHIFT_NOTE_MAX_LENGTH,
   type ISODateTimeString,
   type Shift,
   type WorkTicket
@@ -43,12 +45,13 @@ import {
   deleteWorkTicketFromActiveShift,
   EnterpriseScheduleRepository,
   getActiveShift,
-  getLatestCompletedShift,
+  getShiftsByMonth,
   getLocalDataDateBounds,
   localDb,
   ShiftConstraintError,
   ShiftRepository,
   updateWorkTicketInActiveShift,
+  updateActiveShiftNote,
   updateShift,
   type BackupReminderStatus
 } from '../../../shared/lib/local-db';
@@ -61,6 +64,7 @@ import {
   formatTimeInputDraft,
   formatDate,
   formatDurationMinutes,
+  formatShortMinuteDuration,
   formatTime,
   getCurrentMonth,
   getDateFromDateTime,
@@ -79,6 +83,13 @@ import {
   formatShiftClipboardText
 } from '../../../shared/lib/clipboard/shiftClipboard';
 import type { NavigationItem } from '../../../shared/config/navigation';
+import {
+  calculateMonthlyOvertimePlan,
+  getCoefficientModeForNewShift,
+  OVERTIME_STRATEGY_LABELS,
+  type MonthlyOvertimePlan,
+  type OvertimeScenario
+} from '../../../shared/lib/shifts/overtimePlanner';
 import './MainPage.css';
 
 type MainPageProps = {
@@ -242,6 +253,300 @@ function HoldButton({ label, delayMs, disabled = false, tone = 'default', onConf
   );
 }
 
+type OvertimePlannerCardProps = {
+  plan: MonthlyOvertimePlan;
+  settings: Settings;
+  onStrategyChange: (strategy: OvertimeStrategy) => Promise<void>;
+  onDateUnavailable: (date: string) => Promise<void>;
+  onOpenSettings: () => void;
+};
+
+const formatScenarioIncome = (
+  scenario: OvertimeScenario,
+  incognitoEnabled: boolean
+): string => {
+  if (incognitoEnabled) {
+    return formatMoney(0, true);
+  }
+
+  const minimum = formatMoney(scenario.projectedIncomeMin, false);
+  const maximum = formatMoney(scenario.projectedIncomeMax, false);
+
+  return Math.round(scenario.projectedIncomeMin) === Math.round(scenario.projectedIncomeMax)
+    ? minimum
+    : `${minimum} – ${maximum}`;
+};
+
+function OvertimePlannerCard({
+  plan,
+  settings,
+  onStrategyChange,
+  onDateUnavailable,
+  onOpenSettings
+}: OvertimePlannerCardProps) {
+  const [isOptionsOpen, setIsOptionsOpen] = useState(false);
+  const [isSavingStrategy, setIsSavingStrategy] = useState(false);
+  const [strategyError, setStrategyError] = useState<string | null>(null);
+  const [isSkippingDate, setIsSkippingDate] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+  const selectedScenario = plan.selectedScenario;
+  const progressPercent =
+    plan.limitMinutes > 0 ? Math.min(100, (plan.usedMinutes / plan.limitMinutes) * 100) : 0;
+
+  const selectStrategy = async (strategy: OvertimeStrategy) => {
+    if (strategy === settings.overtimeStrategy) {
+      setIsOptionsOpen(false);
+      return;
+    }
+
+    setIsSavingStrategy(true);
+    setStrategyError(null);
+
+    try {
+      await onStrategyChange(strategy);
+      setIsOptionsOpen(false);
+    } catch {
+      setStrategyError('Не вдалося змінити стратегію.');
+    } finally {
+      setIsSavingStrategy(false);
+    }
+  };
+
+  const skipRecommendationDate = async () => {
+    if (!plan.recommendation.date) {
+      return;
+    }
+
+    setIsSkippingDate(true);
+    setAvailabilityError(null);
+
+    try {
+      await onDateUnavailable(plan.recommendation.date);
+    } catch {
+      setAvailabilityError('Не вдалося виключити цю дату.');
+    } finally {
+      setIsSkippingDate(false);
+    }
+  };
+
+  if (settings.overtimeLimitPercent === 0) {
+    return (
+      <section className="main-page__overtime-card main-page__overtime-card--disabled">
+        <div>
+          <p className="main-page__label">Перепрацювання</p>
+          <h3>Планувальник вимкнено</h3>
+          <p>Вкажіть відсоток ліміту, щоб отримувати рекомендації на місяць.</p>
+        </div>
+        <button type="button" onClick={onOpenSettings}>
+          Налаштувати
+        </button>
+      </section>
+    );
+  }
+
+  const recommendationStatus =
+    plan.exceededMinutes > 0
+      ? `Ліміт перевищено на ${formatShortMinuteDuration(plan.exceededMinutes)}`
+      : plan.recommendation.kind === 'rest' || plan.recommendation.minutes === 0
+        ? plan.recommendation.isToday
+          ? 'Сьогодні без запланованого перепрацювання'
+          : 'До кінця місяця немає наступної доступної дати'
+        : null;
+  const hasRecommendedShift =
+    recommendationStatus === null &&
+    plan.recommendation.date !== null &&
+    plan.recommendation.recommendedStartAt !== null &&
+    plan.recommendation.recommendedEndAt !== null;
+  const recommendationEndsNextDay =
+    hasRecommendedShift && plan.recommendation.date
+      ? getDateFromDateTime(
+          toLocalIsoString(new Date(plan.recommendation.recommendedEndAt!))
+        ) > plan.recommendation.date
+      : false;
+  return (
+    <section
+      className="main-page__overtime-card"
+      data-over-limit={plan.exceededMinutes > 0 ? 'true' : 'false'}
+      aria-labelledby="overtime-plan-title"
+    >
+      <div className="main-page__overtime-heading">
+        <div className="main-page__overtime-title">
+          <span className="main-page__overtime-title-icon" aria-hidden="true">
+            <Clock3 size={19} />
+          </span>
+          <p className="main-page__label">Перепрацювання</p>
+        </div>
+        <h3 className="main-page__overtime-strategy" id="overtime-plan-title">
+          {OVERTIME_STRATEGY_LABELS[settings.overtimeStrategy]}
+        </h3>
+      </div>
+
+      <div className="main-page__overtime-progress-label">
+        <span>Використано ліміту</span>
+        <strong>{Math.round(progressPercent)}%</strong>
+      </div>
+      <div
+        className="main-page__overtime-progress"
+        role="progressbar"
+        aria-label="Використання місячного ліміту перепрацювань"
+        aria-valuemin={0}
+        aria-valuemax={plan.limitMinutes}
+        aria-valuenow={Math.min(plan.usedMinutes, plan.limitMinutes)}
+      >
+        <span style={{ width: `${progressPercent}%` }} />
+      </div>
+
+      <dl className="main-page__overtime-metrics">
+        <div>
+          <dt>План місяця</dt>
+          <dd>{formatDurationMinutes(plan.plannedMinutes)}</dd>
+        </div>
+        <div>
+          <dt>Ліміт</dt>
+          <dd>{formatDurationMinutes(plan.limitMinutes)}</dd>
+        </div>
+        <div>
+          <dt>Використано</dt>
+          <dd>{formatDurationMinutes(plan.usedMinutes)}</dd>
+        </div>
+        <div>
+          <dt>Залишилось</dt>
+          <dd>{formatDurationMinutes(plan.remainingMinutes)}</dd>
+        </div>
+      </dl>
+
+      <div className="main-page__overtime-guidance">
+        {hasRecommendedShift ? (
+          <div className="main-page__overtime-next-shift">
+            <div className="main-page__overtime-next-shift-header">
+              <span>
+                <CalendarClock size={15} aria-hidden="true" />
+                {plan.recommendation.isToday
+                  ? 'Рекомендація на сьогодні'
+                  : 'Наступна рекомендована зміна'}
+              </span>
+              <strong>{formatDate(plan.recommendation.date!)}</strong>
+            </div>
+            <div
+              className="main-page__overtime-time-range"
+              aria-label={`Рекомендований час: з ${formatTime(
+                plan.recommendation.recommendedStartAt!
+              )} до ${formatTime(plan.recommendation.recommendedEndAt!)}`}
+            >
+              <time dateTime={plan.recommendation.recommendedStartAt!}>
+                {formatTime(plan.recommendation.recommendedStartAt!)}
+              </time>
+              <span aria-hidden="true">
+                <ArrowRight size={20} />
+              </span>
+              <time dateTime={plan.recommendation.recommendedEndAt!}>
+                {formatTime(plan.recommendation.recommendedEndAt!)}
+              </time>
+              {recommendationEndsNextDay ? <small>+1 день</small> : null}
+            </div>
+            <dl className="main-page__overtime-shift-summary">
+              <div>
+                <dt>Всього часу</dt>
+                <dd>{formatDurationMinutes(plan.recommendation.totalMinutes)}</dd>
+              </div>
+              <div>
+                <dt>Перепрацювання</dt>
+                <dd>+{formatDurationMinutes(plan.recommendation.minutes)}</dd>
+              </div>
+            </dl>
+            <button
+              className="main-page__overtime-skip-date"
+              type="button"
+              disabled={isSkippingDate}
+              onClick={() => void skipRecommendationDate()}
+            >
+              <X size={15} aria-hidden="true" />
+              {isSkippingDate ? 'Оновлення…' : 'Цей день недоступний'}
+            </button>
+          </div>
+        ) : (
+          <div className="main-page__overtime-recommendation-status">
+            <Clock3 size={20} aria-hidden="true" />
+            <strong>{recommendationStatus}</strong>
+          </div>
+        )}
+
+      </div>
+
+      {availabilityError ? (
+        <p className="main-page__error" role="alert">
+          {availabilityError}
+        </p>
+      ) : null}
+
+      <div className="main-page__overtime-actions">
+        <button type="button" onClick={() => setIsOptionsOpen(true)}>
+          <SlidersHorizontal size={16} aria-hidden="true" />
+          Інші варіанти
+        </button>
+      </div>
+
+      {isOptionsOpen ? (
+        <div className="main-page__overtime-modal-overlay" role="presentation">
+          <section
+            className="main-page__overtime-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="overtime-options-title"
+          >
+            <header>
+              <div>
+                <p className="main-page__label">До кінця місяця</p>
+                <h3 id="overtime-options-title">Варіанти перепрацювань</h3>
+              </div>
+              <button
+                type="button"
+                aria-label="Закрити варіанти перепрацювань"
+                onClick={() => setIsOptionsOpen(false)}
+              >
+                <X size={20} aria-hidden="true" />
+              </button>
+            </header>
+
+            <div className="main-page__overtime-scenarios">
+              {plan.scenarios.map((scenario) => (
+                <button
+                  type="button"
+                  data-selected={scenario.strategy === settings.overtimeStrategy ? 'true' : 'false'}
+                  disabled={isSavingStrategy}
+                  key={scenario.strategy}
+                  onClick={() => void selectStrategy(scenario.strategy)}
+                >
+                  <span>
+                    <strong>{OVERTIME_STRATEGY_LABELS[scenario.strategy]}</strong>
+                    <small>
+                      Будні {formatShortMinuteDuration(scenario.weekdayMinutes)} · суботи{' '}
+                      {formatShortMinuteDuration(scenario.saturdayMinutes)}
+                    </small>
+                  </span>
+                  <span>{formatScenarioIncome(scenario, settings.incognitoEnabled)}</span>
+                  {scenario.unallocatedMinutes > 0 ? (
+                    <small>
+                      {scenario.unallocatedMinutes < settings.overtimeStepMinutes
+                        ? `Залишок менший за крок ${formatShortMinuteDuration(settings.overtimeStepMinutes)}`
+                        : `Не розподілено ${formatShortMinuteDuration(scenario.unallocatedMinutes)}`}
+                    </small>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            {strategyError ? (
+              <p className="main-page__error" role="alert">
+                {strategyError}
+              </p>
+            ) : null}
+          </section>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export function MainPage({
   settings,
   dataVersion,
@@ -250,10 +555,15 @@ export function MainPage({
 }: MainPageProps) {
   const [activePage, setActivePage] = useState<NavigationItem['id']>('timer');
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
-  const [latestCompletedShift, setLatestCompletedShift] = useState<Shift | null>(null);
+  const [overtimeMonthShifts, setOvertimeMonthShifts] = useState<Shift[]>([]);
   const [now, setNow] = useState(() => toLocalIsoString(new Date()));
   const [isLoadingShift, setIsLoadingShift] = useState(true);
   const [timerError, setTimerError] = useState<string | null>(null);
+  const [shiftNoteDraft, setShiftNoteDraft] = useState('');
+  const [shiftNoteStatus, setShiftNoteStatus] = useState<
+    'idle' | 'saving' | 'saved'
+  >('idle');
+  const [shiftNoteError, setShiftNoteError] = useState<string | null>(null);
   const [ticketNormDraft, setTicketNormDraft] = useState('');
   const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
   const [ticketEditDraft, setTicketEditDraft] = useState<TicketEditDraft>(
@@ -300,6 +610,7 @@ export function MainPage({
   const downtimeInputRef = useRef<HTMLInputElement | null>(null);
   const completeTicketButtonRef = useRef<HTMLButtonElement | null>(null);
   const actualQuantityInputRef = useRef<HTMLInputElement | null>(null);
+  const currentMonthKey = now.slice(0, 7);
 
   const notifyLocalDataChange = useCallback(() => {
     setLocalDataRefreshKey((current) => current + 1);
@@ -402,14 +713,15 @@ export function MainPage({
 
     const loadTimerData = async () => {
       try {
-        const [shift, latestShift] = await Promise.all([
+        const [year, month] = currentMonthKey.split('-').map(Number);
+        const [shift, monthShifts] = await Promise.all([
           getActiveShift(shiftRepository),
-          getLatestCompletedShift(shiftRepository)
+          getShiftsByMonth(shiftRepository, year, month)
         ]);
 
         if (isMounted) {
           setActiveShift(shift);
-          setLatestCompletedShift(latestShift);
+          setOvertimeMonthShifts(monthShifts);
         }
       } catch {
         if (isMounted) {
@@ -427,7 +739,7 @@ export function MainPage({
     return () => {
       isMounted = false;
     };
-  }, [dataVersion, localDataRefreshKey]);
+  }, [currentMonthKey, dataVersion, localDataRefreshKey]);
 
   useEffect(() => {
     if (activeCalendarRangePreset !== 'all') {
@@ -469,6 +781,12 @@ export function MainPage({
     return () => window.clearInterval(intervalId);
   }, [activeShift]);
 
+  useEffect(() => {
+    setShiftNoteDraft(activeShift?.note ?? '');
+    setShiftNoteStatus('idle');
+    setShiftNoteError(null);
+  }, [activeShift?.id]);
+
   const activeSalaryBreakdown = useMemo(() => {
     if (!activeShift) {
       return null;
@@ -479,27 +797,33 @@ export function MainPage({
       endTime: now
     });
   }, [activeShift, now]);
-  const latestCompletedSalaryBreakdown = useMemo(() => {
-    if (!latestCompletedShift?.endTime) {
-      return null;
-    }
-
-    return calculateSalaryBreakdown({
-      ...latestCompletedShift,
-      endTime: latestCompletedShift.endTime
-    });
-  }, [latestCompletedShift]);
-  const latestCompletedProduction = useMemo(() => {
-    if (!latestCompletedShift) {
-      return null;
-    }
-
-    return calculateShiftProductionSummary({
-      shift: latestCompletedShift,
-      fallbackCurrentGrade: settings.currentGrade,
-      fallbackGradeNormPercents: settings.gradeNormPercents
-    });
-  }, [latestCompletedShift, settings.currentGrade, settings.gradeNormPercents]);
+  const overtimePlan = useMemo(
+    () =>
+      calculateMonthlyOvertimePlan({
+        shifts: overtimeMonthShifts,
+        now,
+        monthlySalary: settings.monthlySalary,
+        overtimeLimitPercent: settings.overtimeLimitPercent,
+        overtimeStepMinutes: settings.overtimeStepMinutes,
+        overtimeStrategy: settings.overtimeStrategy,
+        overtimeSaturdayCount: settings.overtimeSaturdayCount,
+        overtimeWeekdayMaxMinutes: settings.overtimeWeekdayMaxMinutes,
+        overtimeSaturdayMaxMinutes: settings.overtimeSaturdayMaxMinutes,
+        overtimeUnavailableDates: settings.overtimeUnavailableDates
+      }),
+    [
+      now,
+      overtimeMonthShifts,
+      settings.monthlySalary,
+      settings.overtimeLimitPercent,
+      settings.overtimeStepMinutes,
+      settings.overtimeSaturdayCount,
+      settings.overtimeWeekdayMaxMinutes,
+      settings.overtimeSaturdayMaxMinutes,
+      settings.overtimeUnavailableDates,
+      settings.overtimeStrategy
+    ]
+  );
   const currentEarning = activeSalaryBreakdown?.totalAmount ?? 0;
   const currentCoefficient = activeShift
     ? getEffectiveCoefficient(activeShift, now)
@@ -706,7 +1030,10 @@ export function MainPage({
         baseHourlyRateSnapshot: baseHourlyRate,
         hourlyRateSnapshot: baseHourlyRate,
         gradeSnapshot: createGradeSnapshot(settings),
-        coefficientMode: settings.coefficientMode,
+        coefficientMode: getCoefficientModeForNewShift({
+          date: startedDate,
+          defaultMode: settings.coefficientMode
+        }),
         now: startedAt
       });
 
@@ -714,6 +1041,7 @@ export function MainPage({
       setActiveShift(createdShift);
       setTicketNormDraft('');
       setTicketError(null);
+      notifyLocalDataChange();
     } catch (error) {
       setTimerError(getTimerErrorMessage(error));
     }
@@ -741,7 +1069,9 @@ export function MainPage({
 
       setNow(finishedAt);
       setActiveShift(completedShift.endTime === null ? completedShift : null);
-      setLatestCompletedShift(completedShift.endTime ? completedShift : latestCompletedShift);
+      setOvertimeMonthShifts((current) =>
+        current.map((shift) => (shift.id === completedShift.id ? completedShift : shift))
+      );
       setTicketNormDraft('');
       setTicketError(null);
       notifyLocalDataChange();
@@ -762,6 +1092,35 @@ export function MainPage({
       }
     } catch (error) {
       setTimerError(getTimerErrorMessage(error));
+    }
+  };
+
+  const saveShiftNote = async () => {
+    if (!activeShift) {
+      return;
+    }
+
+    setShiftNoteStatus('saving');
+    setShiftNoteError(null);
+
+    try {
+      const updatedShift = await updateActiveShiftNote(shiftRepository, {
+        shiftId: activeShift.id,
+        note: shiftNoteDraft,
+        updatedAt: toLocalIsoString(new Date())
+      });
+
+      setActiveShift(updatedShift);
+      setShiftNoteDraft(updatedShift.note);
+      setShiftNoteStatus('saved');
+      notifyLocalDataChange();
+    } catch (error) {
+      setShiftNoteStatus('idle');
+      setShiftNoteError(
+        error instanceof Error && error.message
+          ? error.message
+          : 'Не вдалося зберегти нотатку.'
+      );
     }
   };
 
@@ -1099,15 +1458,30 @@ export function MainPage({
     },
     [allTimeRange, sharedCalendarMonth]
   );
-  const currentDate = getDateFromDateTime(now);
-  const currentHourlyRate = calculateHourlyRateFromMonthlySalary(
-    settings.monthlySalary,
-    currentDate
-  );
-  const currentGradeBonus = calculateGradeMonthlyBonus(
-    settings.monthlySalary,
-    calculateCumulativeGradePercent(settings.currentGrade, settings.gradeSalaryBonusPercents)
-  );
+  const changeOvertimeStrategy = async (overtimeStrategy: OvertimeStrategy) => {
+    await onSettingsChange({
+      ...settings,
+      overtimeStrategy,
+      updatedAt: toLocalIsoString(new Date())
+    });
+  };
+
+  const markOvertimeDateUnavailable = async (date: string) => {
+    const currentMonthStart = `${now.slice(0, 7)}-01`;
+
+    await onSettingsChange({
+      ...settings,
+      overtimeUnavailableDates: [
+        ...new Set([
+          ...settings.overtimeUnavailableDates.filter(
+            (unavailableDate) => unavailableDate >= currentMonthStart
+          ),
+          date
+        ])
+      ].sort(),
+      updatedAt: toLocalIsoString(new Date())
+    });
+  };
 
   return (
     <>
@@ -1272,6 +1646,14 @@ export function MainPage({
               </p>
             ) : null}
           </section>
+
+          <OvertimePlannerCard
+            plan={overtimePlan}
+            settings={settings}
+            onStrategyChange={changeOvertimeStrategy}
+            onDateUnavailable={markOvertimeDateUnavailable}
+            onOpenSettings={() => setActivePage('settings')}
+          />
 
           <section
             className={
@@ -1745,6 +2127,54 @@ export function MainPage({
                   ) : null}
           </section>
 
+          <section className="main-page__shift-note" aria-labelledby="shift-note-title">
+            <div className="main-page__shift-note-heading">
+              <div>
+                <p className="main-page__label">Для цієї зміни</p>
+                <h3 id="shift-note-title">
+                  <StickyNote size={18} aria-hidden="true" />
+                  Нотатка
+                </h3>
+              </div>
+              <span aria-label={`${shiftNoteDraft.length} із ${SHIFT_NOTE_MAX_LENGTH} символів`}>
+                {shiftNoteDraft.length}/{SHIFT_NOTE_MAX_LENGTH}
+              </span>
+            </div>
+            <textarea
+              aria-label="Нотатка до зміни"
+              maxLength={SHIFT_NOTE_MAX_LENGTH}
+              placeholder="Наприклад: номер партії, особливості зміни..."
+              rows={3}
+              value={shiftNoteDraft}
+              onChange={(event) => {
+                setShiftNoteDraft(event.target.value);
+                setShiftNoteStatus('idle');
+                setShiftNoteError(null);
+              }}
+            />
+            <div className="main-page__shift-note-footer">
+              <p>Зберігається локально разом зі зміною.</p>
+              <button
+                type="button"
+                disabled={
+                  shiftNoteStatus === 'saving' || shiftNoteDraft === activeShift.note
+                }
+                onClick={() => void saveShiftNote()}
+              >
+                {shiftNoteStatus === 'saving'
+                  ? 'Збереження...'
+                  : shiftNoteStatus === 'saved'
+                    ? 'Збережено'
+                    : 'Зберегти'}
+              </button>
+            </div>
+            {shiftNoteError ? (
+              <p className="main-page__error" role="alert">
+                {shiftNoteError}
+              </p>
+            ) : null}
+          </section>
+
           {!activeWorkTicket ? (
             <div className="main-page__action-bar">
               <HoldButton
@@ -1982,166 +2412,41 @@ export function MainPage({
         </>
       ) : (
         <>
-          <section className="main-page__summary main-page__timer-screen" aria-labelledby="timer-title">
-                {latestCompletedShift && latestCompletedSalaryBreakdown ? (
-                  <>
-                    <div>
-                      <p className="main-page__status main-page__status--idle">
-                        <span aria-hidden="true" />
-                        Зміна не активна
-                      </p>
-                      <h2 id="timer-title">Остання зміна</h2>
-                    </div>
-                    <div className="main-page__metrics" aria-label="Остання завершена зміна">
-                      <article className="main-page__metric main-page__metric--money">
-                        <span>Зароблено</span>
-                        <strong>
-                          {formatMoney(
-                            latestCompletedSalaryBreakdown.totalAmount,
-                            settings.incognitoEnabled
-                          )}
-                        </strong>
-                      </article>
-                      <article className="main-page__metric">
-                        <span>Дата</span>
-                        <strong>{formatDate(latestCompletedShift.date)}</strong>
-                      </article>
-                      <article className="main-page__metric">
-                        <span>Час</span>
-                        <strong>
-                          {formatTime(latestCompletedShift.startTime)} -{' '}
-                          {latestCompletedShift.endTime
-                            ? formatTime(latestCompletedShift.endTime)
-                            : 'триває'}
-                        </strong>
-                      </article>
-                      <article className="main-page__metric">
-                        <span>Тривалість</span>
-                        <strong>
-                          {formatDurationMinutes(
-                            getDurationMinutes(
-                              latestCompletedShift.startTime,
-                              latestCompletedShift.endTime ?? now
-                            )
-                          )}
-                        </strong>
-                      </article>
-                      <article className="main-page__metric">
-                        <span>Тип</span>
-                        <strong>{getShiftTitle(latestCompletedShift)}</strong>
-                      </article>
-                      <article className="main-page__metric">
-                        <span>Базова ставка</span>
-                        <strong>
-                          {formatHourlyRate(
-                            latestCompletedShift.baseHourlyRateSnapshot,
-                            settings.incognitoEnabled
-                          )}
-                        </strong>
-                      </article>
-                    </div>
-                    <div
-                      className="main-page__last-ticket-summary"
-                      aria-label="Загальна статистика тікетів останньої зміни"
-                    >
-                      <div className="main-page__last-ticket-summary-header">
-                        <span>
-                          <Tickets size={18} aria-hidden="true" />
-                          Тікети
-                        </span>
-                        <strong>
-                          {latestCompletedProduction?.filledTicketCount ?? 0}/
-                          {latestCompletedProduction?.ticketCount ?? 0} заповнено
-                        </strong>
-                      </div>
-                      {latestCompletedProduction && latestCompletedProduction.ticketCount > 0 ? (
-                        <dl className="main-page__last-ticket-metrics">
-                          <div>
-                            <dt>Факт</dt>
-                            <dd>{latestCompletedProduction.actualQuantity} шт</dd>
-                          </div>
-                          <div>
-                            <dt>
-                              План G
-                              {latestCompletedShift.gradeSnapshot?.currentGrade ?? settings.currentGrade}
-                            </dt>
-                            <dd>{latestCompletedProduction.currentGradeTarget} шт</dd>
-                          </div>
-                          <div>
-                            <dt>Виконання %</dt>
-                            <dd>
-                              {latestCompletedProduction.completionPercent === null
-                                ? '—'
-                                : `${Math.round(latestCompletedProduction.completionPercent)}%`}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Продуктивний час</dt>
-                            <dd>
-                              {formatDurationMinutes(latestCompletedProduction.productiveMinutes)}
-                            </dd>
-                          </div>
-                          <div>
-                            <dt>Простій</dt>
-                            <dd>{formatDurationMinutes(latestCompletedProduction.downtimeMinutes)}</dd>
-                          </div>
-                          <div>
-                            <dt>Без факту</dt>
-                            <dd>{latestCompletedProduction.unfilledTicketCount}</dd>
-                          </div>
-                        </dl>
-                      ) : (
-                        <p className="main-page__last-ticket-empty">У цій зміні тікетів немає.</p>
-                      )}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <p className="main-page__status main-page__status--idle">
-                        <span aria-hidden="true" />
-                        Сьогодні без активної зміни
-                      </p>
-                      <h2 id="timer-title">Зміна не активна</h2>
-                    </div>
-                    <div className="main-page__metrics" aria-label="Поточний стан таймера">
-                      <article className="main-page__metric main-page__metric--money">
-                        <span>Базова ставка</span>
-                        <strong>
-                          {formatHourlyRate(currentHourlyRate, settings.incognitoEnabled)}
-                        </strong>
-                      </article>
-                      <article className="main-page__metric main-page__metric--money">
-                        <span>Премія за рівень/міс</span>
-                        <strong>{formatMoney(currentGradeBonus, settings.incognitoEnabled)}</strong>
-                      </article>
-                      <article className="main-page__metric main-page__metric--boosted">
-                        <span>Остання зміна</span>
-                        <strong>Ще немає записів</strong>
-                      </article>
-                    </div>
-                  </>
-                )}
-                <div className="main-page__action-bar">
-                  <p className="main-page__hold-hint">Утримай “Прийшов”, щоб почати зміну</p>
-                  <HoldButton label="Прийшов" delayMs={settings.arriveHoldDelayMs} onConfirm={arrive} />
-                </div>
+          <section
+            className="main-page__summary main-page__timer-screen main-page__timer-screen--idle"
+            aria-label="План перепрацювань"
+          >
+            <OvertimePlannerCard
+              plan={overtimePlan}
+              settings={settings}
+              onStrategyChange={changeOvertimeStrategy}
+              onDateUnavailable={markOvertimeDateUnavailable}
+              onOpenSettings={() => setActivePage('settings')}
+            />
+            <div className="main-page__action-bar">
+              <p className="main-page__hold-hint">Утримай “Прийшов”, щоб почати зміну</p>
+              <HoldButton
+                label="Прийшов"
+                delayMs={settings.arriveHoldDelayMs}
+                onConfirm={arrive}
+              />
+            </div>
 
-                {timerError ? (
-                  <p className="main-page__error" role="alert">
-                    {timerError}
-                  </p>
-                ) : null}
-                {clipboardNotice ? (
-                  <p
-                    className="main-page__notice"
-                    data-tone={clipboardNotice.tone}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {clipboardNotice.message}
-                  </p>
-                ) : null}
+            {timerError ? (
+              <p className="main-page__error" role="alert">
+                {timerError}
+              </p>
+            ) : null}
+            {clipboardNotice ? (
+              <p
+                className="main-page__notice"
+                data-tone={clipboardNotice.tone}
+                role="status"
+                aria-live="polite"
+              >
+                {clipboardNotice.message}
+              </p>
+            ) : null}
           </section>
         </>
       )}

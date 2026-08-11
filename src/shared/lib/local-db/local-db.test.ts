@@ -10,6 +10,7 @@ import {
 import type { Shift } from '../../../entities/shift';
 import { ShifterDatabase } from './database';
 import { EnterpriseScheduleRepository } from './repositories/enterpriseScheduleRepository';
+import { OvertimeCoefficientRepository } from './repositories/overtimeCoefficientRepository';
 import { ScheduleWarningReviewRepository } from './repositories/scheduleWarningReviewRepository';
 import { normalizeSettingsRecord, SettingsRepository } from './repositories/settingsRepository';
 import { ShiftConstraintError, ShiftRepository } from './repositories/shiftRepository';
@@ -45,6 +46,7 @@ import {
   saveSettings,
   skipEnterpriseScheduleDiscrepancy,
   syncShiftWithEnterpriseSchedule,
+  updateActiveShiftNote,
   updateWorkTicketInActiveShift,
   updateShift
 } from './index';
@@ -54,6 +56,7 @@ let settingsRepository: SettingsRepository;
 let shiftRepository: ShiftRepository;
 let enterpriseScheduleRepository: EnterpriseScheduleRepository;
 let scheduleWarningReviewRepository: ScheduleWarningReviewRepository;
+let overtimeCoefficientRepository: OvertimeCoefficientRepository;
 
 const makeDbName = (): string => `shifter-test-${crypto.randomUUID()}`;
 
@@ -70,6 +73,7 @@ const makeShift = (overrides: Partial<Shift> = {}): Shift => ({
   hourlyRateSnapshot: 120,
   gradeSnapshot: null,
   workTickets: [],
+  note: '',
   coefficientMode: 'auto',
   isAutoClosed: false,
   createdAt: '2026-06-10T06:30:00.000Z',
@@ -93,6 +97,13 @@ const makeSettings = (overrides: Partial<Settings> = {}): Settings => ({
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
+  overtimeLimitPercent: 0,
+  overtimeStepMinutes: 30,
+  overtimeStrategy: 'standard',
+  overtimeSaturdayCount: 1,
+  overtimeWeekdayMaxMinutes: 240,
+  overtimeSaturdayMaxMinutes: 480,
+  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-06-23T10:00:00.000Z',
@@ -122,6 +133,7 @@ beforeEach(() => {
   shiftRepository = new ShiftRepository(db);
   enterpriseScheduleRepository = new EnterpriseScheduleRepository(db);
   scheduleWarningReviewRepository = new ScheduleWarningReviewRepository(db);
+  overtimeCoefficientRepository = new OvertimeCoefficientRepository(db);
 });
 
 afterEach(async () => {
@@ -306,6 +318,13 @@ describe('settings repository use-cases', () => {
       shiftDetectionMode: 'auto',
       themePreference: 'system',
       backupReminderIntervalDays: 14,
+      overtimeLimitPercent: 0,
+      overtimeStepMinutes: 30,
+      overtimeStrategy: 'standard',
+      overtimeSaturdayCount: 1,
+      overtimeWeekdayMaxMinutes: 240,
+      overtimeSaturdayMaxMinutes: 480,
+      overtimeUnavailableDates: [],
       incognitoEnabled: false,
       onboardingCompleted: false,
       updatedAt: new Date(0).toISOString()
@@ -329,6 +348,13 @@ describe('settings repository use-cases', () => {
       shiftDetectionMode: 'manual',
       themePreference: 'dark',
       backupReminderIntervalDays: 30,
+      overtimeLimitPercent: 12.5,
+      overtimeStepMinutes: 15,
+      overtimeStrategy: 'saturdays',
+      overtimeSaturdayCount: 3,
+      overtimeWeekdayMaxMinutes: 300,
+      overtimeSaturdayMaxMinutes: 600,
+      overtimeUnavailableDates: ['2026-06-27'],
       incognitoEnabled: true,
       onboardingCompleted: true,
       updatedAt: '2026-06-23T10:00:00.000Z'
@@ -371,6 +397,34 @@ describe('settings repository use-cases', () => {
     } as never);
 
     expect(normalized.themePreference).toBe('system');
+  });
+
+  it('normalizes invalid overtime planning details to safe defaults', () => {
+    const normalized = normalizeSettingsRecord({
+      ...makeSettings(),
+      id: 'default',
+      overtimeStepMinutes: 17,
+      overtimeSaturdayCount: 9,
+      overtimeWeekdayMaxMinutes: 17,
+      overtimeSaturdayMaxMinutes: 900,
+      overtimeUnavailableDates: ['not-a-date']
+    } as never);
+
+    expect(normalized.overtimeStepMinutes).toBe(30);
+    expect(normalized.overtimeSaturdayCount).toBe(1);
+    expect(normalized.overtimeWeekdayMaxMinutes).toBe(240);
+    expect(normalized.overtimeSaturdayMaxMinutes).toBe(480);
+    expect(normalized.overtimeUnavailableDates).toEqual([]);
+  });
+
+  it('migrates the stored balanced strategy to standard', () => {
+    const normalized = normalizeSettingsRecord({
+      ...makeSettings(),
+      id: 'default',
+      overtimeStrategy: 'balanced'
+    } as never);
+
+    expect(normalized.overtimeStrategy).toBe('standard');
   });
 });
 
@@ -465,9 +519,53 @@ describe('shift repository use-cases', () => {
         desiredGrade: 2,
         cumulativeSalaryBonusPercent: 10
       }),
-      workTickets: []
+      workTickets: [],
+      note: ''
     });
     await expect(getActiveShift(shiftRepository)).resolves.toEqual(shift);
+  });
+
+  it('updates a note only for an active shift and enforces its limit', async () => {
+    const activeShift = await createShift(shiftRepository, {
+      id: 'shift-with-note',
+      startTime: '2026-06-10T06:30:00.000Z',
+      hourlyRateSnapshot: 120,
+      now: '2026-06-10T06:30:00.000Z'
+    });
+
+    const updatedShift = await updateActiveShiftNote(shiftRepository, {
+      shiftId: activeShift.id,
+      note: '  Перевірити партію №42  ',
+      updatedAt: '2026-06-10T07:00:00.000Z'
+    });
+
+    expect(updatedShift.note).toBe('Перевірити партію №42');
+    await expect(shiftRepository.getShiftById(activeShift.id)).resolves.toMatchObject({
+      note: 'Перевірити партію №42',
+      updatedAt: '2026-06-10T07:00:00.000Z'
+    });
+
+    await expect(
+      updateActiveShiftNote(shiftRepository, {
+        shiftId: activeShift.id,
+        note: 'а'.repeat(501),
+        updatedAt: '2026-06-10T07:05:00.000Z'
+      })
+    ).rejects.toThrow('не більше 500 символів');
+
+    await updateShift(shiftRepository, {
+      ...updatedShift,
+      endTime: '2026-06-10T14:30:00.000Z',
+      updatedAt: '2026-06-10T14:30:00.000Z'
+    });
+
+    await expect(
+      updateActiveShiftNote(shiftRepository, {
+        shiftId: activeShift.id,
+        note: 'Пізнє редагування',
+        updatedAt: '2026-06-10T14:31:00.000Z'
+      })
+    ).rejects.toThrow('Активну зміну не знайдено');
   });
 
   it('requires each ticket to be completed with fact before starting the next one', async () => {
@@ -920,6 +1018,43 @@ describe('shift repository use-cases', () => {
       coefficientMode: 'x1.5'
     });
     await expect(getActiveShift(shiftRepository)).resolves.toBeNull();
+  });
+
+  it('applies weekend coefficients to every newly created manual shift', async () => {
+    const saturday = await createManualShift(shiftRepository, {
+      id: 'manual-saturday',
+      date: '2026-06-13',
+      type: 'first',
+      startTime: '2026-06-13T06:30:00.000Z',
+      endTime: '2026-06-13T14:30:00.000Z',
+      hourlyRateSnapshot: 180,
+      coefficientMode: 'auto',
+      now: '2026-06-13T14:30:00.000Z'
+    });
+    const sunday = await createManualShift(shiftRepository, {
+      id: 'manual-sunday',
+      date: '2026-06-14',
+      type: 'first',
+      startTime: '2026-06-14T06:30:00.000Z',
+      endTime: '2026-06-14T14:30:00.000Z',
+      hourlyRateSnapshot: 180,
+      coefficientMode: 'x2',
+      now: '2026-06-14T14:30:00.000Z'
+    });
+    const secondSaturday = await createManualShift(shiftRepository, {
+      id: 'manual-second-saturday',
+      date: '2026-06-20',
+      type: 'first',
+      startTime: '2026-06-20T06:30:00.000Z',
+      endTime: '2026-06-20T14:30:00.000Z',
+      hourlyRateSnapshot: 180,
+      coefficientMode: 'auto',
+      now: '2026-06-20T14:30:00.000Z'
+    });
+
+    expect(saturday.coefficientMode).toBe('x1.5');
+    expect(sunday.coefficientMode).toBe('x1.5');
+    expect(secondSaturday.coefficientMode).toBe('x1.5');
   });
 
   it('rejects a second active shift', async () => {
@@ -1505,6 +1640,73 @@ describe('schedule warning review repository', () => {
   });
 });
 
+describe('Saturday double-rate persistence', () => {
+  it('confirms a month transactionally and updates only Saturday x1.5 shifts', async () => {
+    const saturday = makeShift({
+      id: 'saturday-x1-5',
+      date: '2026-06-06',
+      startTime: '2026-06-06T06:30:00.000Z',
+      endTime: '2026-06-06T14:30:00.000Z',
+      coefficientMode: 'x1.5'
+    });
+    const oldSaturday = makeShift({
+      id: 'saturday-auto',
+      date: '2026-06-13',
+      startTime: '2026-06-13T06:30:00.000Z',
+      endTime: '2026-06-13T14:30:00.000Z',
+      coefficientMode: 'auto'
+    });
+    const sunday = makeShift({
+      id: 'sunday-x1-5',
+      date: '2026-06-07',
+      startTime: '2026-06-07T06:30:00.000Z',
+      endTime: '2026-06-07T14:30:00.000Z',
+      coefficientMode: 'x1.5'
+    });
+    const weekday = makeShift({
+      id: 'weekday-x1-5',
+      date: '2026-06-08',
+      startTime: '2026-06-08T06:30:00.000Z',
+      endTime: '2026-06-08T14:30:00.000Z',
+      coefficientMode: 'x1.5'
+    });
+
+    await db.shifts.bulkPut([saturday, oldSaturday, sunday, weekday]);
+
+    const result = await overtimeCoefficientRepository.confirmDoubleRate(
+      '2026-06',
+      '2026-07-01T08:00:00.000Z'
+    );
+
+    expect(result.updatedShiftCount).toBe(1);
+    await expect(overtimeCoefficientRepository.isDoubleRateConfirmed('2026-06')).resolves.toBe(true);
+    await expect(db.shifts.get(saturday.id)).resolves.toMatchObject({ coefficientMode: 'x2' });
+    await expect(db.shifts.get(oldSaturday.id)).resolves.toMatchObject({ coefficientMode: 'auto' });
+    await expect(db.shifts.get(sunday.id)).resolves.toMatchObject({ coefficientMode: 'x1.5' });
+    await expect(db.shifts.get(weekday.id)).resolves.toMatchObject({ coefficientMode: 'x1.5' });
+  });
+
+  it('rolls back shift changes if the confirmation marker cannot be saved', async () => {
+    const saturday = makeShift({
+      id: 'rollback-saturday',
+      date: '2026-06-06',
+      startTime: '2026-06-06T06:30:00.000Z',
+      endTime: '2026-06-06T14:30:00.000Z',
+      coefficientMode: 'x1.5'
+    });
+    await db.shifts.put(saturday);
+    vi.spyOn(db.appMeta, 'put').mockRejectedValueOnce(new Error('write failed'));
+
+    await expect(
+      overtimeCoefficientRepository.confirmDoubleRate(
+        '2026-06',
+        '2026-07-01T08:00:00.000Z'
+      )
+    ).rejects.toThrow('write failed');
+    await expect(db.shifts.get(saturday.id)).resolves.toMatchObject({ coefficientMode: 'x1.5' });
+  });
+});
+
 describe('backup use-cases', () => {
   it('creates and parses a valid backup', async () => {
     const settings = makeSettings({
@@ -1526,6 +1728,10 @@ describe('backup use-cases', () => {
       fingerprint: 'backup-fingerprint',
       reviewedAt: '2026-06-24T11:00:00.000Z'
     });
+    await overtimeCoefficientRepository.confirmDoubleRate(
+      '2026-06',
+      '2026-06-24T11:30:00.000Z'
+    );
 
     const backup = await createBackup(db, '2026-06-24T12:00:00.000Z');
     const parsed = parseBackupJson(serializeBackup(backup));
@@ -1542,14 +1748,21 @@ describe('backup use-cases', () => {
           fingerprint: 'backup-fingerprint',
           reviewedAt: '2026-06-24T11:00:00.000Z'
         }
+      ],
+      confirmedSaturdayDoubleRateMonths: [
+        {
+          month: '2026-06',
+          confirmedAt: '2026-06-24T11:30:00.000Z'
+        }
       ]
     });
   });
 
-  it('round-trips schema v8 ticket fact, downtime, settings and reviewed warnings', () => {
+  it('round-trips schema v12 overtime settings and existing data', () => {
     const shift = makeShift({
       id: 'production-backup-shift',
       endTime: '2026-06-10T14:30:00.000Z',
+      note: 'Передати партію наступній зміні',
       workTickets: [
         {
           id: 'production-ticket',
@@ -1575,10 +1788,24 @@ describe('backup use-cases', () => {
           fingerprint: 'round-trip-fingerprint',
           reviewedAt: '2026-06-24T11:00:00.000Z'
         }
+      ],
+      confirmedSaturdayDoubleRateMonths: [
+        {
+          month: '2026-06',
+          confirmedAt: '2026-06-24T11:30:00.000Z'
+        }
       ]
     });
 
     expect(parseBackupJson(source)).toMatchObject({
+      settings: {
+        overtimeStepMinutes: 30,
+        overtimeStrategy: 'standard',
+        overtimeSaturdayCount: 1,
+        overtimeWeekdayMaxMinutes: 240,
+        overtimeSaturdayMaxMinutes: 480,
+        overtimeUnavailableDates: []
+      },
       shifts: [shift],
       reviewedScheduleWarnings: [
         {
@@ -1588,6 +1815,89 @@ describe('backup use-cases', () => {
         }
       ]
     });
+  });
+
+  it('migrates schema v10 to the default recommendation step and Saturday count', () => {
+    const {
+      overtimeStepMinutes: _step,
+      overtimeSaturdayCount: _saturdayCount,
+      ...legacySettings
+    } = makeSettings({
+      overtimeStrategy: 'saturdays'
+    });
+    const source = JSON.stringify({
+      schemaVersion: 10,
+      exportedAt: '2026-06-24T12:00:00.000Z',
+      settings: legacySettings,
+      shifts: [],
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
+    });
+
+    expect(parseBackupJson(source).settings).toMatchObject({
+      overtimeStepMinutes: 30,
+      overtimeStrategy: 'saturdays',
+      overtimeSaturdayCount: 1,
+      overtimeWeekdayMaxMinutes: 240,
+      overtimeSaturdayMaxMinutes: 480,
+      overtimeUnavailableDates: []
+    });
+  });
+
+  it('migrates schema v11 balanced strategy and availability defaults', () => {
+    const {
+      overtimeWeekdayMaxMinutes: _weekdayMax,
+      overtimeSaturdayMaxMinutes: _saturdayMax,
+      overtimeUnavailableDates: _unavailableDates,
+      ...legacySettings
+    } = makeSettings();
+    const source = JSON.stringify({
+      schemaVersion: 11,
+      exportedAt: '2026-06-24T12:00:00.000Z',
+      settings: {
+        ...legacySettings,
+        overtimeStrategy: 'balanced'
+      },
+      shifts: [],
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
+    });
+
+    expect(parseBackupJson(source).settings).toMatchObject({
+      overtimeStrategy: 'standard',
+      overtimeWeekdayMaxMinutes: 240,
+      overtimeSaturdayMaxMinutes: 480,
+      overtimeUnavailableDates: []
+    });
+  });
+
+  it('migrates schema v8 shifts with an empty note', () => {
+    const { note: _note, ...legacyShift } = makeShift({
+      id: 'schema-v8-shift',
+      endTime: '2026-06-10T14:30:00.000Z'
+    });
+    const source = JSON.stringify({
+      schemaVersion: 8,
+      exportedAt: '2026-06-24T12:00:00.000Z',
+      settings: makeSettings(),
+      shifts: [legacyShift],
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
+    });
+
+    const parsed = parseBackupJson(source);
+
+    expect(parsed.shifts[0].note).toBe('');
+    expect(parsed.settings).toMatchObject({
+      overtimeLimitPercent: 0,
+      overtimeStepMinutes: 30,
+      overtimeStrategy: 'standard',
+      overtimeSaturdayCount: 1
+    });
+    expect(parsed.confirmedSaturdayDoubleRateMonths).toEqual([]);
   });
 
   it('migrates schema v7 to the required grade preset and default reminder interval', () => {
@@ -1601,7 +1911,8 @@ describe('backup use-cases', () => {
       settings: legacySettings,
       shifts: [],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     });
 
     expect(parseBackupJson(source).settings).toMatchObject({
@@ -1660,7 +1971,8 @@ describe('backup use-cases', () => {
       settings: makeSettings(),
       shifts: [],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     }).replace('  "employeeFirstName": "Олег",\n', '');
 
     const parsed = parseBackupJson(source);
@@ -1822,7 +2134,8 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: makeSettings(),
       shifts: [shift],
-      enterpriseSchedule: []
+      enterpriseSchedule: [],
+      confirmedSaturdayDoubleRateMonths: []
     };
 
     expect(() => parseBackupJson(JSON.stringify(baseBackup))).toThrow(
@@ -1896,7 +2209,8 @@ describe('backup use-cases', () => {
       settings: makeSettings(),
       shifts: [],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     }).replace(`"schemaVersion": ${BACKUP_SCHEMA_VERSION}`, '"schemaVersion": 999');
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1910,14 +2224,15 @@ describe('backup use-cases', () => {
       settings: makeSettings({ monthlySalary: -1 }),
       shifts: [],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     });
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
     expect(() => parseBackupJson(source)).toThrow('Поле monthlySalary не може бути відʼємним.');
   });
 
-  it('rejects an unsupported backup reminder interval in schema v8', () => {
+  it('rejects an unsupported backup reminder interval in the current schema', () => {
     const parsed = JSON.parse(
       serializeBackup({
         schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -1925,13 +2240,40 @@ describe('backup use-cases', () => {
         settings: makeSettings(),
         shifts: [],
         enterpriseSchedule: [],
-        reviewedScheduleWarnings: []
+        reviewedScheduleWarnings: [],
+        confirmedSaturdayDoubleRateMonths: []
       })
     );
     parsed.settings.backupReminderIntervalDays = 10;
 
     expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(
       'Періодичність backup має бути 7, 14 або 30 днів.'
+    );
+  });
+
+  it('rejects invalid overtime availability in the current schema', () => {
+    const parsed = JSON.parse(
+      serializeBackup({
+        schemaVersion: BACKUP_SCHEMA_VERSION,
+        exportedAt: '2026-08-01T08:00:00.000Z',
+        settings: makeSettings(),
+        shifts: [],
+        enterpriseSchedule: [],
+        reviewedScheduleWarnings: [],
+        confirmedSaturdayDoubleRateMonths: []
+      })
+    );
+    parsed.settings.overtimeWeekdayMaxMinutes = 17;
+
+    expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(
+      'settings.overtimeWeekdayMaxMinutes'
+    );
+
+    parsed.settings.overtimeWeekdayMaxMinutes = 240;
+    parsed.settings.overtimeUnavailableDates = ['2026-08-12', '2026-08-12'];
+
+    expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(
+      'settings.overtimeUnavailableDates'
     );
   });
 
@@ -1942,7 +2284,8 @@ describe('backup use-cases', () => {
       settings: makeSettings(),
       shifts: [],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     }).replace('"themePreference": "system"', '"themePreference": "contrast"');
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1960,7 +2303,8 @@ describe('backup use-cases', () => {
       }),
       shifts: [],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     });
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -1990,7 +2334,8 @@ describe('backup use-cases', () => {
         })
       ],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     });
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -2024,7 +2369,8 @@ describe('backup use-cases', () => {
         })
       ],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     });
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
@@ -2037,7 +2383,8 @@ describe('backup use-cases', () => {
       settings: makeSettings(),
       shifts: [],
       enterpriseSchedule: [makeScheduleItem({ date: '2026-02-30' })],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     });
     const reversedShiftSource = serializeBackup({
       schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -2050,7 +2397,8 @@ describe('backup use-cases', () => {
         })
       ],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     });
 
     expect(() => parseBackupJson(invalidDateSource)).toThrow('невалідні дату або час');
@@ -2074,7 +2422,8 @@ describe('backup use-cases', () => {
         })
       ],
       enterpriseSchedule: [],
-      reviewedScheduleWarnings: []
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
     });
 
     expect(() => parseBackupJson(source)).toThrow('Backup містить дубль ID зміни duplicate-id.');
@@ -2140,6 +2489,12 @@ describe('backup use-cases', () => {
           fingerprint: 'restored-fingerprint',
           reviewedAt: '2026-06-24T11:00:00.000Z'
         }
+      ],
+      confirmedSaturdayDoubleRateMonths: [
+        {
+          month: '2026-06',
+          confirmedAt: '2026-06-24T11:30:00.000Z'
+        }
       ]
     });
 
@@ -2155,6 +2510,9 @@ describe('backup use-cases', () => {
         reviewedAt: '2026-06-24T11:00:00.000Z'
       }
     ]);
+    await expect(overtimeCoefficientRepository.isDoubleRateConfirmed('2026-06')).resolves.toBe(
+      true
+    );
     await expect(db.appMeta.get(CALENDAR_TUTORIAL_SEEN_KEY)).resolves.toMatchObject({
       value: 'true'
     });
@@ -2183,7 +2541,8 @@ describe('backup use-cases', () => {
           })
         ],
         enterpriseSchedule: [],
-        reviewedScheduleWarnings: []
+        reviewedScheduleWarnings: [],
+        confirmedSaturdayDoubleRateMonths: []
       })
     ).rejects.toThrow();
 
@@ -2221,7 +2580,8 @@ describe('backup use-cases', () => {
           })
         ],
         enterpriseSchedule: [],
-        reviewedScheduleWarnings: []
+        reviewedScheduleWarnings: [],
+        confirmedSaturdayDoubleRateMonths: []
       })
     ).rejects.toThrow('Backup містить більше однієї активної зміни.');
 

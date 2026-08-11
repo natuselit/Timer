@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, ChevronDown, Edit3, Plus, Tickets, Trash2, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronDown,
+  Edit3,
+  Plus,
+  StickyNote,
+  Tickets,
+  Trash2,
+  X
+} from 'lucide-react';
 import type {
   CoefficientMode,
   ISODateTimeString,
@@ -1122,6 +1132,16 @@ export function HistoryPage({
                       <dd>{formatHourlyRate(shift.baseHourlyRateSnapshot, settings.incognitoEnabled)}</dd>
                     </div>
                   </dl>
+
+                  {shift.note ? (
+                    <div className="history-page__shift-note">
+                      <StickyNote size={16} aria-hidden="true" />
+                      <div>
+                        <span>Нотатка</span>
+                        <p>{shift.note}</p>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {coefficientEarnings.length > 1 ? (
                     <ul

@@ -49,6 +49,7 @@ describe('shift domain types', () => {
       hourlyRateSnapshot: 100,
       gradeSnapshot: null,
       workTickets: [],
+      note: '',
       coefficientMode: 'auto',
       isAutoClosed: false,
       createdAt: '2026-06-23T06:31:00.000+03:00',

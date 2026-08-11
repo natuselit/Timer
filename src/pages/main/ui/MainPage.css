@@ -173,6 +173,28 @@
   padding-bottom: 18px;
 }
 
+.main-page__timer-screen--idle {
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.main-page__timer-screen--idle::before {
+  display: none;
+}
+
+.main-page__timer-screen--idle .main-page__overtime-card {
+  gap: 12px;
+  padding: 14px;
+}
+
+.main-page__timer-screen--idle .main-page__overtime-next-shift {
+  gap: 10px;
+  padding: 12px;
+}
+
 .main-page__timer-screen--active {
   gap: 8px;
   padding: 14px;
@@ -385,68 +407,538 @@
   color: var(--color-text-primary);
 }
 
-.main-page__last-ticket-summary {
+.main-page__shift-note {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.main-page__overtime-card {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 22px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-panel);
+}
+
+.main-page__overtime-card::before {
+  position: absolute;
+  top: 0;
+  right: 24px;
+  left: 24px;
+  height: 3px;
+  border-radius: 0 0 999px 999px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-strong));
+  content: '';
+}
+
+.main-page__overtime-card[data-over-limit='true'] {
+  border-color: var(--color-error-border);
+  background: color-mix(in srgb, var(--color-error-surface) 34%, var(--color-surface));
+}
+
+.main-page__overtime-card[data-over-limit='true']::before {
+  background: var(--color-error);
+}
+
+.main-page__overtime-card--disabled {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  border-color: var(--color-border);
+  background: var(--color-surface);
+}
+
+.main-page__overtime-card--disabled::before {
+  display: none;
+}
+
+.main-page__overtime-card h3,
+.main-page__overtime-modal h3 {
+  margin: 2px 0 0;
+  color: var(--color-text-primary);
+  font-size: 1rem;
+}
+
+.main-page__overtime-card--disabled p:not(.main-page__label) {
+  margin: 5px 0 0;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.main-page__overtime-card button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-background);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 850;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    color 140ms ease;
+}
+
+.main-page__overtime-card button:hover:not(:disabled),
+.main-page__overtime-card button:focus-visible {
+  border-color: var(--color-primary-border);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.main-page__overtime-card button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.main-page__overtime-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.main-page__overtime-modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.main-page__overtime-title {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.main-page__overtime-title-icon {
+  display: inline-grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--color-primary-border-muted);
+  border-radius: 12px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.main-page__overtime-card .main-page__overtime-strategy {
+  grid-column: 1 / -1;
+  margin: -4px 0 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.main-page__overtime-title .main-page__label {
+  color: var(--color-text-primary);
+  font-size: 1.05rem;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.main-page__overtime-progress-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: -8px;
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.main-page__overtime-progress-label strong {
+  color: var(--color-primary);
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.main-page__overtime-progress {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+}
+
+.main-page__overtime-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-primary);
+  transition: width 180ms ease;
+}
+
+.main-page__overtime-card[data-over-limit='true'] .main-page__overtime-progress > span {
+  background: var(--color-error);
+}
+
+.main-page__overtime-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 3px 0;
+}
+
+.main-page__overtime-metrics > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.main-page__overtime-metrics > div:nth-child(odd) {
+  padding-left: 0;
+  border-right: 1px solid var(--color-border);
+}
+
+.main-page__overtime-metrics > div:nth-child(even) {
+  padding-right: 0;
+}
+
+.main-page__overtime-metrics > div:nth-child(n + 3) {
+  padding-top: 8px;
+  padding-bottom: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.main-page__overtime-metrics dt,
+.main-page__overtime-metrics dd {
+  margin: 0;
+}
+
+.main-page__overtime-metrics dt {
+  color: var(--color-text-secondary);
+  font-size: 0.62rem;
+  font-weight: 750;
+  line-height: 1.15;
+}
+
+.main-page__overtime-metrics dd {
+  color: var(--color-text-primary);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.main-page__overtime-guidance {
+  display: grid;
+  gap: 8px;
+}
+
+.main-page__overtime-next-shift {
   display: grid;
   gap: 10px;
   padding: 12px;
-  border: 1px solid var(--color-primary-border);
-  border-radius: var(--radius-panel);
-  background: var(--color-primary-soft);
+  border: 1px solid var(--color-primary-border-muted);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--color-primary-soft) 62%, var(--color-surface));
 }
 
-.main-page__last-ticket-summary-header {
+.main-page__overtime-next-shift-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 4px 10px;
+}
+
+.main-page__overtime-next-shift-header span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-primary);
+  font-size: 0.67rem;
+  font-weight: 850;
+}
+
+.main-page__overtime-next-shift-header strong {
+  color: var(--color-text-primary);
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.main-page__overtime-time-range {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   gap: 8px;
 }
 
-.main-page__last-ticket-summary-header > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--color-primary);
-  font-weight: 850;
-}
-
-.main-page__last-ticket-summary-header > strong {
+.main-page__overtime-time-range time {
   color: var(--color-text-primary);
-  font-size: 0.82rem;
+  font-size: clamp(1.35rem, 7vw, 1.7rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 950;
+  letter-spacing: -0.04em;
 }
 
-.main-page__last-ticket-metrics {
+.main-page__overtime-time-range > span {
+  display: inline-grid;
+  place-items: center;
+  color: var(--color-primary);
+}
+
+.main-page__overtime-time-range small {
+  position: absolute;
+  right: 0;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 0.62rem;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.main-page__overtime-shift-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
+  gap: 10px;
+  margin: 0;
+  border-top: 1px solid var(--color-primary-border-muted);
+}
+
+.main-page__overtime-shift-summary > div {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 3px;
+  padding: 8px 0 0;
+}
+
+.main-page__overtime-shift-summary > div + div {
+  padding-left: 10px;
+  border-left: 1px solid var(--color-primary-border-muted);
+}
+
+.main-page__overtime-shift-summary dt,
+.main-page__overtime-shift-summary dd {
   margin: 0;
 }
 
-.main-page__last-ticket-metrics div {
-  display: grid;
-  gap: 3px;
-  padding: 9px;
+.main-page__overtime-shift-summary dt {
+  color: var(--color-text-secondary);
+  font-size: 0.64rem;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.main-page__overtime-shift-summary dd {
+  color: var(--color-text-primary);
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+}
+
+.main-page__overtime-next-shift .main-page__overtime-skip-date {
+  min-height: 38px;
+  border-color: var(--color-primary-border-muted);
+  background: transparent;
+  font-size: 0.7rem;
+}
+
+.main-page__overtime-recommendation-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-control);
   background: var(--color-surface);
+  color: var(--color-primary);
 }
 
-.main-page__last-ticket-metrics dt {
+.main-page__overtime-recommendation-status strong {
+  color: var(--color-text-primary);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.main-page__overtime-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.main-page__overtime-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  align-items: end;
+  padding: max(14px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+    calc(var(--app-navigation-height) + max(12px, env(safe-area-inset-bottom)))
+    max(12px, env(safe-area-inset-left));
+  background: var(--color-overlay);
+}
+
+.main-page__overtime-modal {
+  display: grid;
+  width: min(100%, 480px);
+  max-height: min(82dvh, 620px);
+  gap: 14px;
+  margin: 0 auto;
+  padding: 14px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-modal);
+}
+
+.main-page__overtime-modal header > button {
+  display: inline-grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  padding: 0;
+  place-items: center;
+  border-color: var(--color-border);
+  background: var(--color-background);
+  color: var(--color-text-primary);
+}
+
+.main-page__overtime-scenarios {
+  display: grid;
+  gap: 8px;
+}
+
+.main-page__overtime-scenarios > button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 72px;
+  gap: 7px 12px;
+  padding: 11px;
+  border-color: var(--color-border);
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  text-align: left;
+}
+
+.main-page__overtime-scenarios > button[data-selected='true'] {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-ring);
+}
+
+.main-page__overtime-scenarios > button > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.main-page__overtime-scenarios > button > span:nth-child(2) {
+  color: var(--color-primary);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.main-page__overtime-scenarios small {
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.main-page__overtime-scenarios > button > small {
+  grid-column: 1 / -1;
+  color: var(--color-warning);
+}
+
+.main-page__shift-note-heading,
+.main-page__shift-note-footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.main-page__shift-note-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 0;
+  color: var(--color-text-primary);
+  font-size: 0.98rem;
+}
+
+.main-page__shift-note-heading h3 svg {
+  color: var(--color-primary);
+}
+
+.main-page__shift-note-heading > span {
+  color: var(--color-text-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
+.main-page__shift-note textarea {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  padding: 10px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.main-page__shift-note textarea:focus-visible {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-ring);
+  outline: none;
+}
+
+.main-page__shift-note-footer p {
+  margin: 0;
   color: var(--color-text-secondary);
   font-size: 0.72rem;
+  line-height: 1.3;
 }
 
-.main-page__last-ticket-metrics dd {
-  margin: 0;
-  color: var(--color-text-primary);
-  font-size: 0.9rem;
+.main-page__shift-note-footer button {
+  min-height: 40px;
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--radius-compact);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.84rem;
   font-weight: 850;
 }
 
-.main-page__last-ticket-empty {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: 0.84rem;
+.main-page__shift-note-footer button:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .main-page__tasker {
@@ -1394,6 +1886,10 @@
     padding: 14px;
   }
 
+  .main-page__timer-screen--idle {
+    padding: 0;
+  }
+
   .main-page__timer-screen {
     padding-bottom: 14px;
   }
@@ -1443,6 +1939,64 @@
   .main-page__ticket-edit-form input {
     padding-inline: 3px;
     font-size: 0.78rem;
+  }
+}
+
+@media (max-width: 340px) {
+  .main-page__timer-screen--idle .main-page__overtime-card {
+    padding: 12px;
+  }
+
+  .main-page__overtime-heading {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+  }
+
+  .main-page__overtime-title {
+    grid-row: 1;
+    grid-column: 1 / -1;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 7px;
+  }
+
+  .main-page__overtime-title-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+  }
+
+  .main-page__overtime-title-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .main-page__overtime-title .main-page__label {
+    font-size: 0.95rem;
+  }
+
+  .main-page__overtime-card .main-page__overtime-strategy {
+    align-self: center;
+    margin: 0;
+    font-size: 0.98rem;
+  }
+
+  .main-page__overtime-metrics dt {
+    font-size: 0.62rem;
+  }
+
+  .main-page__overtime-metrics > div {
+    display: grid;
+    justify-content: stretch;
+    gap: 2px;
+  }
+
+  .main-page__overtime-shift-summary dt {
+    font-size: 0.58rem;
+  }
+
+  .main-page__overtime-shift-summary dd {
+    font-size: 0.76rem;
   }
 
 }

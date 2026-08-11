@@ -3,6 +3,11 @@ import {
   DEFAULT_SETTINGS,
   GRADE_VALUES,
   isBackupReminderIntervalDays,
+  isOvertimeDailyMaxMinutes,
+  isOvertimeSaturdayCount,
+  isOvertimeStepMinutes,
+  isOvertimeStrategy,
+  isOvertimeUnavailableDates,
   isThemePreference,
   type Grade,
   type GradePercentSet,
@@ -13,8 +18,9 @@ import type { SettingsRecord } from '../types';
 
 const SETTINGS_ID: SettingsRecord['id'] = 'default';
 
-type LegacySettingsRecord = Partial<SettingsRecord> & {
+type LegacySettingsRecord = Omit<Partial<SettingsRecord>, 'overtimeStrategy'> & {
   hourlyRate?: unknown;
+  overtimeStrategy?: unknown;
 };
 
 const isFiniteNumber = (value: unknown): value is number =>
@@ -81,7 +87,40 @@ export const normalizeSettingsRecord = (
       storedSettings.backupReminderIntervalDays
     )
       ? storedSettings.backupReminderIntervalDays
-      : DEFAULT_SETTINGS.backupReminderIntervalDays
+      : DEFAULT_SETTINGS.backupReminderIntervalDays,
+    overtimeLimitPercent:
+      isFiniteNumber(storedSettings.overtimeLimitPercent) &&
+      storedSettings.overtimeLimitPercent >= 0 &&
+      storedSettings.overtimeLimitPercent <= 100
+        ? storedSettings.overtimeLimitPercent
+        : DEFAULT_SETTINGS.overtimeLimitPercent,
+    overtimeStepMinutes: isOvertimeStepMinutes(storedSettings.overtimeStepMinutes)
+      ? storedSettings.overtimeStepMinutes
+      : DEFAULT_SETTINGS.overtimeStepMinutes,
+    overtimeStrategy:
+      storedSettings.overtimeStrategy === 'balanced'
+        ? 'standard'
+        : isOvertimeStrategy(storedSettings.overtimeStrategy)
+          ? storedSettings.overtimeStrategy
+          : DEFAULT_SETTINGS.overtimeStrategy,
+    overtimeSaturdayCount: isOvertimeSaturdayCount(storedSettings.overtimeSaturdayCount)
+      ? storedSettings.overtimeSaturdayCount
+      : DEFAULT_SETTINGS.overtimeSaturdayCount,
+    overtimeWeekdayMaxMinutes: isOvertimeDailyMaxMinutes(
+      storedSettings.overtimeWeekdayMaxMinutes
+    )
+      ? storedSettings.overtimeWeekdayMaxMinutes
+      : DEFAULT_SETTINGS.overtimeWeekdayMaxMinutes,
+    overtimeSaturdayMaxMinutes: isOvertimeDailyMaxMinutes(
+      storedSettings.overtimeSaturdayMaxMinutes
+    )
+      ? storedSettings.overtimeSaturdayMaxMinutes
+      : DEFAULT_SETTINGS.overtimeSaturdayMaxMinutes,
+    overtimeUnavailableDates: isOvertimeUnavailableDates(
+      storedSettings.overtimeUnavailableDates
+    )
+      ? [...storedSettings.overtimeUnavailableDates].sort()
+      : DEFAULT_SETTINGS.overtimeUnavailableDates
   };
 };
 

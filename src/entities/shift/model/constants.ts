@@ -4,6 +4,7 @@ export const FIRST_SHIFT_START = '06:30';
 export const FIRST_SHIFT_END = '14:30';
 export const SECOND_SHIFT_START = '14:30';
 export const SECOND_SHIFT_END = '22:30';
+export const SHIFT_NOTE_MAX_LENGTH = 500;
 
 export const PLANNED_SHIFTS: Record<
   ShiftType,

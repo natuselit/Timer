@@ -1,6 +1,7 @@
 import {
   detectShiftType,
   getPlannedShiftWindow,
+  SHIFT_NOTE_MAX_LENGTH,
   validateAndSortWorkTickets,
   type CoefficientMode,
   type GradeSnapshot,
@@ -11,6 +12,7 @@ import {
   type WorkTicket
 } from '../../../../entities/shift';
 import type { Settings } from '../../../../entities/settings';
+import { getCoefficientModeForNewShift } from '../../shifts/overtimePlanner';
 import type { ShiftRepository } from '../repositories/shiftRepository';
 
 export type CreateShiftInput = {
@@ -105,6 +107,7 @@ export const createShift = (
     hourlyRateSnapshot: input.hourlyRateSnapshot,
     gradeSnapshot: input.gradeSnapshot ?? null,
     workTickets: input.workTickets ?? [],
+    note: '',
     coefficientMode: input.coefficientMode ?? 'auto',
     isAutoClosed: false,
     createdAt: now,
@@ -132,7 +135,11 @@ export const createManualShift = (
     hourlyRateSnapshot: input.hourlyRateSnapshot,
     gradeSnapshot: input.gradeSnapshot ?? null,
     workTickets: input.workTickets ?? [],
-    coefficientMode: input.coefficientMode,
+    note: '',
+    coefficientMode: getCoefficientModeForNewShift({
+      date: input.date,
+      defaultMode: input.coefficientMode
+    }),
     isAutoClosed: false,
     createdAt: now,
     updatedAt: now
@@ -143,6 +150,33 @@ export const updateShift = (
   repository: ShiftRepository,
   shift: Shift
 ): Promise<Shift> => repository.updateShift(shift);
+
+export const updateActiveShiftNote = async (
+  repository: ShiftRepository,
+  input: {
+    shiftId: string;
+    note: string;
+    updatedAt: ISODateTimeString;
+  }
+): Promise<Shift> => {
+  const note = input.note.trim();
+
+  if (note.length > SHIFT_NOTE_MAX_LENGTH) {
+    throw new Error(`Нотатка має містити не більше ${SHIFT_NOTE_MAX_LENGTH} символів.`);
+  }
+
+  const shift = await repository.getShiftById(input.shiftId);
+
+  if (!shift || shift.endTime !== null) {
+    throw new Error('Активну зміну не знайдено.');
+  }
+
+  return repository.updateShift({
+    ...shift,
+    note,
+    updatedAt: input.updatedAt
+  });
+};
 
 export const recalculateHourlyRateSnapshotsForAllShifts = (
   repository: ShiftRepository,

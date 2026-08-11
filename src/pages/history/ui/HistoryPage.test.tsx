@@ -24,6 +24,13 @@ const settings: Settings = {
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
+  overtimeLimitPercent: 0,
+  overtimeStepMinutes: 30,
+  overtimeStrategy: 'standard',
+  overtimeSaturdayCount: 1,
+  overtimeWeekdayMaxMinutes: 240,
+  overtimeSaturdayMaxMinutes: 480,
+  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T06:00:00.000+03:00'
@@ -42,6 +49,7 @@ const makeShift = (overrides: Partial<Shift>): Shift => ({
   hourlyRateSnapshot: 280,
   gradeSnapshot: null,
   workTickets: [],
+  note: '',
   coefficientMode: 'auto',
   isAutoClosed: false,
   createdAt: '2026-07-27T06:30:00.000+03:00',
@@ -56,6 +64,7 @@ beforeEach(async () => {
     makeShift({
       id: 'mixed-coefficients',
       startTime: '2026-07-27T06:20:00.000+03:00',
+      note: 'Передати партію наступній зміні',
       gradeSnapshot: {
         currentGrade: 2,
         desiredGrade: 3,
@@ -99,6 +108,23 @@ afterEach(async () => {
 });
 
 describe('HistoryPage', () => {
+  it('shows a saved shift note', async () => {
+    render(
+      <HistoryPage
+        settings={settings}
+        calendarMonth={{ year: 2026, month: 7 }}
+        selectedRange={{ start: '2026-07-01', end: '2026-07-31' }}
+        onCalendarMonthChange={vi.fn()}
+        onSelectedRangeChange={vi.fn()}
+        activeRangePreset="month"
+        isAllTimePresetEnabled
+        onRangePresetSelect={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('Передати партію наступній зміні')).toBeTruthy();
+  });
+
   it('shows coefficient earnings only for mixed coefficients and marks the active badge', async () => {
     render(
       <HistoryPage

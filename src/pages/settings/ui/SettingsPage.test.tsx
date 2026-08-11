@@ -27,6 +27,13 @@ const settings: Settings = {
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
+  overtimeLimitPercent: 0,
+  overtimeStepMinutes: 30,
+  overtimeStrategy: 'standard',
+  overtimeSaturdayCount: 1,
+  overtimeWeekdayMaxMinutes: 240,
+  overtimeSaturdayMaxMinutes: 480,
+  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T19:30:00.000+03:00'
@@ -36,9 +43,41 @@ afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
   await localDb.appMeta.clear();
+  await localDb.shifts.clear();
 });
 
 describe('SettingsPage', () => {
+  it('keeps groups compact and shows save actions only for draft changes', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
+      />
+    );
+
+    const paymentSection = screen.getByRole('heading', { name: 'Оплата' }).closest('details');
+
+    expect(paymentSection?.open).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Зберегти налаштування' })).toBeNull();
+
+    await user.click(paymentSection!.querySelector('summary')!);
+    expect(paymentSection?.open).toBe(true);
+
+    const monthlySalary = screen.getByLabelText(/Ставка за місяць/) as HTMLInputElement;
+    await user.clear(monthlySalary);
+    await user.type(monthlySalary, '51000');
+
+    expect(screen.getByRole('button', { name: 'Зберегти налаштування' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Скасувати' }));
+
+    expect(monthlySalary.value).toBe('50800');
+    expect(screen.queryByRole('button', { name: 'Зберегти налаштування' })).toBeNull();
+  });
+
   it('shows an accessible offline FAQ accordion', async () => {
     const user = userEvent.setup();
     const onOpenCalendarTutorial = vi.fn();
@@ -66,8 +105,9 @@ describe('SettingsPage', () => {
     await user.click(coefficientQuestion);
     expect(details?.open).toBe(true);
     expect(
-      screen.getByText(/В автоматичному режимі плановий час оплачується за x1/)
+      screen.getByText(/Нові суботні й недільні зміни отримують x1.5/)
     ).toBeTruthy();
+    expect(screen.getByText(/Ліміт рахується як відсоток від плану 5\/2/)).toBeTruthy();
     expect(screen.getByText('Відкрийте «Таймер»')).toBeTruthy();
     expect(screen.getByText(/Натисніть ⋮/)).toBeTruthy();
     expect(screen.getByText(/Ваш PDF залишається на пристрої/)).toBeTruthy();
@@ -132,6 +172,85 @@ describe('SettingsPage', () => {
     expect(onSettingsChange).toHaveBeenCalledWith(
       expect.objectContaining({ backupReminderIntervalDays: 30 })
     );
+  });
+
+  it('validates and saves the overtime limit, step and custom strategy', async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
+      />
+    );
+
+    const limitInput = screen.getByLabelText(/Ліміт від планових годин/) as HTMLInputElement;
+    const stepInput = screen.getByLabelText(/Крок рекомендацій, хв/) as HTMLInputElement;
+    const weekdayMaxInput = screen.getByLabelText(
+      /Максимум перепрацювання за будній день/
+    ) as HTMLInputElement;
+    const saturdayMaxInput = screen.getByLabelText(
+      /Максимум роботи в суботу/
+    ) as HTMLInputElement;
+    expect(screen.getByRole('option', { name: 'Автоматичний' })).toBeTruthy();
+    await user.clear(limitInput);
+    await user.type(limitInput, '12,5');
+    await user.clear(stepInput);
+    await user.type(stepInput, '15');
+    await user.selectOptions(screen.getByLabelText('Стратегія перепрацювань'), 'custom');
+    const saturdayCountInput = screen.getByLabelText(
+      /Кількість субот у місяці/
+    ) as HTMLInputElement;
+    await user.clear(saturdayCountInput);
+    await user.type(saturdayCountInput, '3');
+    await user.clear(weekdayMaxInput);
+    await user.type(weekdayMaxInput, '300');
+    await user.clear(saturdayMaxInput);
+    await user.type(saturdayMaxInput, '600');
+    await user.type(screen.getByLabelText('Дата без перепрацювання'), '2099-01-01');
+    await user.click(screen.getByRole('button', { name: 'Додати' }));
+    await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        overtimeLimitPercent: 12.5,
+        overtimeStepMinutes: 15,
+        overtimeStrategy: 'custom',
+        overtimeSaturdayCount: 3,
+        overtimeWeekdayMaxMinutes: 300,
+        overtimeSaturdayMaxMinutes: 600,
+        overtimeUnavailableDates: ['2099-01-01']
+      })
+    );
+
+    await user.clear(limitInput);
+    await user.type(limitInput, '101');
+    await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
+    expect(screen.getByText('Ліміт має бути від 0 до 100%.')).toBeTruthy();
+
+    await user.clear(limitInput);
+    await user.type(limitInput, '10');
+    await user.clear(stepInput);
+    await user.type(stepInput, '17');
+    await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
+    expect(screen.getByText(/Крок має бути цілим числом.*кратним 5/)).toBeTruthy();
+  });
+
+  it('does not show the removed monthly Saturday x2 feature', () => {
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('Коефіцієнт субот')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Встановити x2/ })).toBeNull();
   });
 
   it('resets the calendar tutorial marker when all local data is cleared', async () => {
