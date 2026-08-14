@@ -143,6 +143,40 @@ describe('getEffectiveCoefficient', () => {
       )
     ).toBe(expected);
   });
+
+  it('uses x1.5 for auto mode throughout Saturday and Sunday', () => {
+    expect(
+      getEffectiveCoefficient(
+        createShift({
+          date: '2026-06-20',
+          startTime: '2026-06-20T06:30:00.000+03:00'
+        }),
+        '2026-06-20T10:00:00.000+03:00'
+      )
+    ).toBe(1.5);
+    expect(
+      getEffectiveCoefficient(
+        createShift({
+          date: '2026-06-21',
+          startTime: '2026-06-21T06:30:00.000+03:00'
+        }),
+        '2026-06-21T10:00:00.000+03:00'
+      )
+    ).toBe(1.5);
+  });
+
+  it('keeps a manual weekend override instead of applying automatic x1.5', () => {
+    expect(
+      getEffectiveCoefficient(
+        createShift({
+          date: '2026-06-20',
+          startTime: '2026-06-20T06:30:00.000+03:00',
+          coefficientMode: 'x1'
+        }),
+        '2026-06-20T10:00:00.000+03:00'
+      )
+    ).toBe(1);
+  });
 });
 
 describe('calculateSalaryBreakdown', () => {
@@ -242,6 +276,32 @@ describe('calculateSalaryBreakdown', () => {
           minutes: 480,
           coefficient: 1,
           amount: 800
+        }
+      ]
+    });
+  });
+
+  it('pays the whole auto weekend shift at x1.5', () => {
+    expect(
+      calculateSalaryBreakdown(
+        createShift({
+          date: '2026-06-20',
+          startTime: '2026-06-20T06:30:00.000+03:00',
+          endTime: '2026-06-20T14:30:00.000+03:00',
+          baseHourlyRateSnapshot: 100
+        })
+      )
+    ).toMatchObject({
+      mode: 'auto',
+      totalMinutes: 480,
+      totalAmount: 1_200,
+      lines: [
+        {
+          key: 'whole-shift',
+          label: 'Вихідний день x1.5',
+          minutes: 480,
+          coefficient: 1.5,
+          amount: 1_200
         }
       ]
     });

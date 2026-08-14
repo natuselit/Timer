@@ -38,7 +38,7 @@ import {
   importParsedEnterpriseSchedule,
   parseBackupJson,
   parseBackupImportJson,
-  recalculateHourlyRateSnapshotsForAllShifts,
+  recalculateHourlyRateSnapshotsForPeriod,
   replaceShiftsFromLegacyBackup,
   replaceLocalDataWithDemo,
   restoreBackup,
@@ -93,7 +93,6 @@ const makeSettings = (overrides: Partial<Settings> = {}): Settings => ({
   forecastDays: 30,
   arriveHoldDelayMs: 1200,
   leaveHoldDelayMs: 1800,
-  coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
@@ -103,7 +102,6 @@ const makeSettings = (overrides: Partial<Settings> = {}): Settings => ({
   overtimeSaturdayCount: 1,
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
-  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-06-23T10:00:00.000Z',
@@ -298,6 +296,41 @@ describe('database migrations', () => {
       await migratedDatabase.delete();
     }
   });
+
+  it('removes legacy global defaults without rewriting saved shift coefficients', async () => {
+    const databaseName = makeDbName();
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase.version(4).stores({
+      settings: '&id',
+      shifts: '&id,&date,updatedAt,createdAt',
+      enterpriseSchedule: '&id,&date,createdAt',
+      appMeta: '&key'
+    });
+    const legacyShift = makeShift({ coefficientMode: 'x2' });
+
+    await legacyDatabase.table('settings').put({
+      ...makeSettings(),
+      id: 'default',
+      coefficientMode: 'x1.5',
+      overtimeUnavailableDates: ['2026-06-20']
+    });
+    await legacyDatabase.table('shifts').put(legacyShift);
+    legacyDatabase.close();
+
+    const migratedDatabase = new ShifterDatabase(databaseName);
+
+    try {
+      const migratedSettings = await migratedDatabase.settings.get('default');
+      const migratedShift = await migratedDatabase.shifts.get(legacyShift.id);
+
+      expect(migratedSettings).not.toHaveProperty('coefficientMode');
+      expect(migratedSettings).not.toHaveProperty('overtimeUnavailableDates');
+      expect(migratedShift?.coefficientMode).toBe('x2');
+    } finally {
+      migratedDatabase.close();
+      await migratedDatabase.delete();
+    }
+  });
 });
 
 describe('settings repository use-cases', () => {
@@ -314,7 +347,6 @@ describe('settings repository use-cases', () => {
       forecastDays: 30,
       arriveHoldDelayMs: 1500,
       leaveHoldDelayMs: 1500,
-      coefficientMode: 'auto',
       shiftDetectionMode: 'auto',
       themePreference: 'system',
       backupReminderIntervalDays: 14,
@@ -324,7 +356,6 @@ describe('settings repository use-cases', () => {
       overtimeSaturdayCount: 1,
       overtimeWeekdayMaxMinutes: 240,
       overtimeSaturdayMaxMinutes: 480,
-      overtimeUnavailableDates: [],
       incognitoEnabled: false,
       onboardingCompleted: false,
       updatedAt: new Date(0).toISOString()
@@ -344,7 +375,6 @@ describe('settings repository use-cases', () => {
       forecastDays: 30,
       arriveHoldDelayMs: 1200,
       leaveHoldDelayMs: 1800,
-      coefficientMode: 'x1.5',
       shiftDetectionMode: 'manual',
       themePreference: 'dark',
       backupReminderIntervalDays: 30,
@@ -354,7 +384,6 @@ describe('settings repository use-cases', () => {
       overtimeSaturdayCount: 3,
       overtimeWeekdayMaxMinutes: 300,
       overtimeSaturdayMaxMinutes: 600,
-      overtimeUnavailableDates: ['2026-06-27'],
       incognitoEnabled: true,
       onboardingCompleted: true,
       updatedAt: '2026-06-23T10:00:00.000Z'
@@ -399,10 +428,11 @@ describe('settings repository use-cases', () => {
     expect(normalized.themePreference).toBe('system');
   });
 
-  it('normalizes invalid overtime planning details to safe defaults', () => {
+  it('normalizes invalid overtime planning details and drops removed defaults', () => {
     const normalized = normalizeSettingsRecord({
       ...makeSettings(),
       id: 'default',
+      coefficientMode: 'x2',
       overtimeStepMinutes: 17,
       overtimeSaturdayCount: 9,
       overtimeWeekdayMaxMinutes: 17,
@@ -414,7 +444,8 @@ describe('settings repository use-cases', () => {
     expect(normalized.overtimeSaturdayCount).toBe(1);
     expect(normalized.overtimeWeekdayMaxMinutes).toBe(240);
     expect(normalized.overtimeSaturdayMaxMinutes).toBe(480);
-    expect(normalized.overtimeUnavailableDates).toEqual([]);
+    expect('coefficientMode' in normalized).toBe(false);
+    expect('overtimeUnavailableDates' in normalized).toBe(false);
   });
 
   it('migrates the stored balanced strategy to standard', () => {
@@ -520,7 +551,8 @@ describe('shift repository use-cases', () => {
         cumulativeSalaryBonusPercent: 10
       }),
       workTickets: [],
-      note: ''
+      note: '',
+      coefficientMode: 'auto'
     });
     await expect(getActiveShift(shiftRepository)).resolves.toEqual(shift);
   });
@@ -1020,7 +1052,7 @@ describe('shift repository use-cases', () => {
     await expect(getActiveShift(shiftRepository)).resolves.toBeNull();
   });
 
-  it('applies weekend coefficients to every newly created manual shift', async () => {
+  it('keeps auto as the weekend default and preserves an explicit manual override', async () => {
     const saturday = await createManualShift(shiftRepository, {
       id: 'manual-saturday',
       date: '2026-06-13',
@@ -1052,9 +1084,9 @@ describe('shift repository use-cases', () => {
       now: '2026-06-20T14:30:00.000Z'
     });
 
-    expect(saturday.coefficientMode).toBe('x1.5');
-    expect(sunday.coefficientMode).toBe('x1.5');
-    expect(secondSaturday.coefficientMode).toBe('x1.5');
+    expect(saturday.coefficientMode).toBe('auto');
+    expect(sunday.coefficientMode).toBe('x2');
+    expect(secondSaturday.coefficientMode).toBe('auto');
   });
 
   it('rejects a second active shift', async () => {
@@ -1260,7 +1292,7 @@ describe('shift repository use-cases', () => {
     await expect(getActiveShift(shiftRepository)).resolves.toBeNull();
   });
 
-  it('recalculates hourly rate snapshots for existing shifts by each shift month', async () => {
+  it('recalculates snapshots only inside an inclusive date period', async () => {
     await shiftRepository.createShift(
       makeShift({
         id: 'completed-1',
@@ -1277,12 +1309,13 @@ describe('shift repository use-cases', () => {
         type: 'second',
         plannedStartTime: '14:30',
         plannedEndTime: '22:30',
+        baseHourlyRateSnapshot: 160,
         hourlyRateSnapshot: 160
       })
     );
 
     await expect(
-      recalculateHourlyRateSnapshotsForAllShifts(
+      recalculateHourlyRateSnapshotsForPeriod(
         shiftRepository,
         17_600,
         {
@@ -1291,9 +1324,10 @@ describe('shift repository use-cases', () => {
           gradeSalaryBonusPercents: [10, 10, 10, 10],
           gradeNormPercents: [100, 120, 140, 160]
         },
+        { start: '2026-06-10', end: '2026-06-10' },
         '2026-07-31T12:00:00.000Z'
       )
-    ).resolves.toBe(2);
+    ).resolves.toBe(1);
 
     const updatedShifts = await getShiftsBetween(shiftRepository, '2026-06-01', '2026-07-31');
 
@@ -1310,10 +1344,9 @@ describe('shift repository use-cases', () => {
     expect(updatedShifts[0].hourlyRateSnapshot).toBeCloseTo(100, 6);
     expect(updatedShifts[1]).toMatchObject({
       id: 'completed-2',
-      updatedAt: '2026-07-31T12:00:00.000Z'
+      baseHourlyRateSnapshot: 160,
+      hourlyRateSnapshot: 160
     });
-    expect(updatedShifts[1].baseHourlyRateSnapshot).toBeCloseTo(95.652_173_913, 6);
-    expect(updatedShifts[1].hourlyRateSnapshot).toBeCloseTo(95.652_173_913, 6);
   });
 });
 
@@ -1424,7 +1457,7 @@ Total: 08:00`,
       '2026-06-23T10:00:00.000+03:00',
       {
         shiftRepository,
-        settings: makeSettings({ monthlySalary: 36_960, coefficientMode: 'x1.5' })
+        settings: makeSettings({ monthlySalary: 36_960 })
       }
     );
 
@@ -1445,7 +1478,7 @@ Total: 08:00`,
         desiredGrade: 2,
         cumulativeSalaryBonusPercent: 10
       }),
-      coefficientMode: 'x1.5'
+      coefficientMode: 'auto'
     });
     expect(createdShifts[0].hourlyRateSnapshot).toBeCloseTo(210, 6);
     expect(createdShifts[1]).toEqual(existingShift);
@@ -1518,7 +1551,8 @@ Total: 10:55`,
         id: 'sync-shift',
         date: '2026-06-01',
         startTime: '2026-06-01T06:30:00.000+03:00',
-        endTime: '2026-06-01T14:30:00.000+03:00'
+        endTime: '2026-06-01T14:30:00.000+03:00',
+        coefficientMode: 'x2'
       })
     );
     await importEnterpriseScheduleText(
@@ -1543,6 +1577,7 @@ Total: 10:55`,
         id: 'sync-shift',
         startTime: '2026-06-01T05:57:00.000+03:00',
         endTime: '2026-06-01T16:52:00.000+03:00',
+        coefficientMode: 'x2',
         updatedAt: '2026-06-23T11:00:00.000+03:00'
       })
     ]);
@@ -1758,10 +1793,11 @@ describe('backup use-cases', () => {
     });
   });
 
-  it('round-trips schema v12 overtime settings and existing data', () => {
+  it('round-trips schema v13 without removed settings and preserves shift coefficients', () => {
     const shift = makeShift({
       id: 'production-backup-shift',
       endTime: '2026-06-10T14:30:00.000Z',
+      coefficientMode: 'x2',
       note: 'Передати партію наступній зміні',
       workTickets: [
         {
@@ -1797,14 +1833,15 @@ describe('backup use-cases', () => {
       ]
     });
 
-    expect(parseBackupJson(source)).toMatchObject({
+    const parsed = parseBackupJson(source);
+
+    expect(parsed).toMatchObject({
       settings: {
         overtimeStepMinutes: 30,
         overtimeStrategy: 'standard',
         overtimeSaturdayCount: 1,
         overtimeWeekdayMaxMinutes: 240,
-        overtimeSaturdayMaxMinutes: 480,
-        overtimeUnavailableDates: []
+        overtimeSaturdayMaxMinutes: 480
       },
       shifts: [shift],
       reviewedScheduleWarnings: [
@@ -1815,6 +1852,37 @@ describe('backup use-cases', () => {
         }
       ]
     });
+    expect(parsed.shifts[0]?.coefficientMode).toBe('x2');
+    expect(parsed.settings).not.toHaveProperty('coefficientMode');
+    expect(parsed.settings).not.toHaveProperty('overtimeUnavailableDates');
+  });
+
+  it('imports schema v12 while discarding removed settings and preserving shift mode', () => {
+    const shift = makeShift({
+      id: 'legacy-v12-shift',
+      endTime: '2026-06-10T14:30:00.000Z',
+      coefficientMode: 'x1'
+    });
+    const source = JSON.stringify({
+      schemaVersion: 12,
+      exportedAt: '2026-06-24T12:00:00.000Z',
+      settings: {
+        ...makeSettings(),
+        coefficientMode: 'x2',
+        overtimeUnavailableDates: ['2026-06-20']
+      },
+      shifts: [shift],
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
+    });
+
+    const parsed = parseBackupJson(source);
+
+    expect(parsed.schemaVersion).toBe(BACKUP_SCHEMA_VERSION);
+    expect(parsed.settings).not.toHaveProperty('coefficientMode');
+    expect(parsed.settings).not.toHaveProperty('overtimeUnavailableDates');
+    expect(parsed.shifts[0]?.coefficientMode).toBe('x1');
   });
 
   it('migrates schema v10 to the default recommendation step and Saturday count', () => {
@@ -1840,8 +1908,7 @@ describe('backup use-cases', () => {
       overtimeStrategy: 'saturdays',
       overtimeSaturdayCount: 1,
       overtimeWeekdayMaxMinutes: 240,
-      overtimeSaturdayMaxMinutes: 480,
-      overtimeUnavailableDates: []
+      overtimeSaturdayMaxMinutes: 480
     });
   });
 
@@ -1849,7 +1916,6 @@ describe('backup use-cases', () => {
     const {
       overtimeWeekdayMaxMinutes: _weekdayMax,
       overtimeSaturdayMaxMinutes: _saturdayMax,
-      overtimeUnavailableDates: _unavailableDates,
       ...legacySettings
     } = makeSettings();
     const source = JSON.stringify({
@@ -1868,8 +1934,7 @@ describe('backup use-cases', () => {
     expect(parseBackupJson(source).settings).toMatchObject({
       overtimeStrategy: 'standard',
       overtimeWeekdayMaxMinutes: 240,
-      overtimeSaturdayMaxMinutes: 480,
-      overtimeUnavailableDates: []
+      overtimeSaturdayMaxMinutes: 480
     });
   });
 
@@ -2251,7 +2316,7 @@ describe('backup use-cases', () => {
     );
   });
 
-  it('rejects invalid overtime availability in the current schema', () => {
+  it('rejects invalid overtime maximums and validates removed dates in schema v12', () => {
     const parsed = JSON.parse(
       serializeBackup({
         schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -2269,10 +2334,13 @@ describe('backup use-cases', () => {
       'settings.overtimeWeekdayMaxMinutes'
     );
 
-    parsed.settings.overtimeWeekdayMaxMinutes = 240;
-    parsed.settings.overtimeUnavailableDates = ['2026-08-12', '2026-08-12'];
+    const legacyV12 = structuredClone(parsed);
+    legacyV12.schemaVersion = 12;
+    legacyV12.settings.overtimeWeekdayMaxMinutes = 240;
+    legacyV12.settings.coefficientMode = 'auto';
+    legacyV12.settings.overtimeUnavailableDates = ['2026-08-12', '2026-08-12'];
 
-    expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(
+    expect(() => parseBackupJson(JSON.stringify(legacyV12))).toThrow(
       'settings.overtimeUnavailableDates'
     );
   });

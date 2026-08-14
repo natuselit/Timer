@@ -85,7 +85,6 @@ import {
 import type { NavigationItem } from '../../../shared/config/navigation';
 import {
   calculateMonthlyOvertimePlan,
-  getCoefficientModeForNewShift,
   OVERTIME_STRATEGY_LABELS,
   type MonthlyOvertimePlan,
   type OvertimeScenario
@@ -257,7 +256,6 @@ type OvertimePlannerCardProps = {
   plan: MonthlyOvertimePlan;
   settings: Settings;
   onStrategyChange: (strategy: OvertimeStrategy) => Promise<void>;
-  onDateUnavailable: (date: string) => Promise<void>;
   onOpenSettings: () => void;
 };
 
@@ -281,14 +279,11 @@ function OvertimePlannerCard({
   plan,
   settings,
   onStrategyChange,
-  onDateUnavailable,
   onOpenSettings
 }: OvertimePlannerCardProps) {
   const [isOptionsOpen, setIsOptionsOpen] = useState(false);
   const [isSavingStrategy, setIsSavingStrategy] = useState(false);
   const [strategyError, setStrategyError] = useState<string | null>(null);
-  const [isSkippingDate, setIsSkippingDate] = useState(false);
-  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const selectedScenario = plan.selectedScenario;
   const progressPercent =
     plan.limitMinutes > 0 ? Math.min(100, (plan.usedMinutes / plan.limitMinutes) * 100) : 0;
@@ -309,23 +304,6 @@ function OvertimePlannerCard({
       setStrategyError('Не вдалося змінити стратегію.');
     } finally {
       setIsSavingStrategy(false);
-    }
-  };
-
-  const skipRecommendationDate = async () => {
-    if (!plan.recommendation.date) {
-      return;
-    }
-
-    setIsSkippingDate(true);
-    setAvailabilityError(null);
-
-    try {
-      await onDateUnavailable(plan.recommendation.date);
-    } catch {
-      setAvailabilityError('Не вдалося виключити цю дату.');
-    } finally {
-      setIsSkippingDate(false);
     }
   };
 
@@ -454,15 +432,6 @@ function OvertimePlannerCard({
                 <dd>+{formatDurationMinutes(plan.recommendation.minutes)}</dd>
               </div>
             </dl>
-            <button
-              className="main-page__overtime-skip-date"
-              type="button"
-              disabled={isSkippingDate}
-              onClick={() => void skipRecommendationDate()}
-            >
-              <X size={15} aria-hidden="true" />
-              {isSkippingDate ? 'Оновлення…' : 'Цей день недоступний'}
-            </button>
           </div>
         ) : (
           <div className="main-page__overtime-recommendation-status">
@@ -472,12 +441,6 @@ function OvertimePlannerCard({
         )}
 
       </div>
-
-      {availabilityError ? (
-        <p className="main-page__error" role="alert">
-          {availabilityError}
-        </p>
-      ) : null}
 
       <div className="main-page__overtime-actions">
         <button type="button" onClick={() => setIsOptionsOpen(true)}>
@@ -808,8 +771,7 @@ export function MainPage({
         overtimeStrategy: settings.overtimeStrategy,
         overtimeSaturdayCount: settings.overtimeSaturdayCount,
         overtimeWeekdayMaxMinutes: settings.overtimeWeekdayMaxMinutes,
-        overtimeSaturdayMaxMinutes: settings.overtimeSaturdayMaxMinutes,
-        overtimeUnavailableDates: settings.overtimeUnavailableDates
+        overtimeSaturdayMaxMinutes: settings.overtimeSaturdayMaxMinutes
       }),
     [
       now,
@@ -820,7 +782,6 @@ export function MainPage({
       settings.overtimeSaturdayCount,
       settings.overtimeWeekdayMaxMinutes,
       settings.overtimeSaturdayMaxMinutes,
-      settings.overtimeUnavailableDates,
       settings.overtimeStrategy
     ]
   );
@@ -1030,10 +991,6 @@ export function MainPage({
         baseHourlyRateSnapshot: baseHourlyRate,
         hourlyRateSnapshot: baseHourlyRate,
         gradeSnapshot: createGradeSnapshot(settings),
-        coefficientMode: getCoefficientModeForNewShift({
-          date: startedDate,
-          defaultMode: settings.coefficientMode
-        }),
         now: startedAt
       });
 
@@ -1466,23 +1423,6 @@ export function MainPage({
     });
   };
 
-  const markOvertimeDateUnavailable = async (date: string) => {
-    const currentMonthStart = `${now.slice(0, 7)}-01`;
-
-    await onSettingsChange({
-      ...settings,
-      overtimeUnavailableDates: [
-        ...new Set([
-          ...settings.overtimeUnavailableDates.filter(
-            (unavailableDate) => unavailableDate >= currentMonthStart
-          ),
-          date
-        ])
-      ].sort(),
-      updatedAt: toLocalIsoString(new Date())
-    });
-  };
-
   return (
     <>
       <AppShell
@@ -1651,7 +1591,6 @@ export function MainPage({
             plan={overtimePlan}
             settings={settings}
             onStrategyChange={changeOvertimeStrategy}
-            onDateUnavailable={markOvertimeDateUnavailable}
             onOpenSettings={() => setActivePage('settings')}
           />
 
@@ -2420,7 +2359,6 @@ export function MainPage({
               plan={overtimePlan}
               settings={settings}
               onStrategyChange={changeOvertimeStrategy}
-              onDateUnavailable={markOvertimeDateUnavailable}
               onOpenSettings={() => setActivePage('settings')}
             />
             <div className="main-page__action-bar">

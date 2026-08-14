@@ -18,6 +18,11 @@ type LegacyShift = Omit<Shift, 'workTickets'> & {
   workTickets?: LegacyWorkTicket[];
 };
 
+type SettingsWithRemovedDefaults = SettingsRecord & {
+  coefficientMode?: unknown;
+  overtimeUnavailableDates?: unknown;
+};
+
 const getLegacyOpenDowntimeMinutes = (
   ticket: LegacyWorkTicket,
   shift: LegacyShift,
@@ -143,6 +148,23 @@ export class ShifterDatabase extends Dexie {
             settings.gradeSalaryBonusPercents = [
               ...DEFAULT_GRADE_SALARY_BONUS_PERCENTS
             ];
+          });
+      });
+
+    this.version(5)
+      .stores({
+        settings: '&id',
+        shifts: '&id,&date,updatedAt,createdAt',
+        enterpriseSchedule: '&id,&date,createdAt',
+        appMeta: '&key'
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table<SettingsWithRemovedDefaults, 'default'>('settings')
+          .toCollection()
+          .modify((settings) => {
+            delete settings.coefficientMode;
+            delete settings.overtimeUnavailableDates;
           });
       });
   }

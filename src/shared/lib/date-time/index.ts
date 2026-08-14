@@ -86,6 +86,35 @@ export const formatShortMinuteDuration = (durationMinutes: number): string => {
   return hours === 0 ? `${minutes} хв` : `${hours}:${padTimePart(minutes)}`;
 };
 
+export const addMinutesToLocalTime = (
+  time: LocalTimeString,
+  durationMinutes: number
+): { time: LocalTimeString; dayOffset: number } => {
+  const [hours, minutes] = time.split(':').map(Number);
+
+  if (
+    !Number.isSafeInteger(hours) ||
+    !Number.isSafeInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59 ||
+    !Number.isSafeInteger(durationMinutes) ||
+    durationMinutes < 0
+  ) {
+    throw new Error('Некоректний час або кількість хвилин.');
+  }
+
+  const totalMinutes = hours * 60 + minutes + durationMinutes;
+  const dayOffset = Math.floor(totalMinutes / (24 * 60));
+  const minutesInDay = totalMinutes % (24 * 60);
+
+  return {
+    time: `${padTimePart(Math.floor(minutesInDay / 60))}:${padTimePart(minutesInDay % 60)}`,
+    dayOffset
+  };
+};
+
 export const getDurationMinutes = (
   startTime: ISODateTimeString,
   endTime: ISODateTimeString

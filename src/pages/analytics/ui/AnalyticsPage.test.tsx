@@ -21,7 +21,6 @@ const settings: Settings = {
   forecastDays: 30,
   arriveHoldDelayMs: 1_500,
   leaveHoldDelayMs: 1_500,
-  coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
@@ -31,7 +30,6 @@ const settings: Settings = {
   overtimeSaturdayCount: 1,
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
-  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T06:00:00.000+03:00'
@@ -69,9 +67,9 @@ beforeEach(async () => {
   await localDb.shifts.clear();
   await localDb.shifts.bulkPut([
     makeShift('previous-period', '2026-06-15', 'x1'),
-    makeShift('auto-overtime', '2026-07-25', 'auto', {
-      startTime: '2026-07-25T06:20:00.000+03:00',
-      endTime: '2026-07-25T14:40:00.000+03:00',
+    makeShift('auto-overtime', '2026-07-28', 'auto', {
+      startTime: '2026-07-28T06:20:00.000+03:00',
+      endTime: '2026-07-28T14:40:00.000+03:00',
       gradeSnapshot: {
         currentGrade: 2,
         desiredGrade: 3,
@@ -83,12 +81,12 @@ beforeEach(async () => {
         {
           id: 'filled-ticket',
           normPerEightHours: 48,
-          startedAt: '2026-07-25T07:00:00.000+03:00',
-          endedAt: '2026-07-25T08:00:00.000+03:00',
+          startedAt: '2026-07-28T07:00:00.000+03:00',
+          endedAt: '2026-07-28T08:00:00.000+03:00',
           actualQuantity: 12,
           downtimeMinutes: 0,
-          createdAt: '2026-07-25T07:00:00.000+03:00',
-          updatedAt: '2026-07-25T08:00:00.000+03:00'
+          createdAt: '2026-07-28T07:00:00.000+03:00',
+          updatedAt: '2026-07-28T08:00:00.000+03:00'
         }
       ]
     }),

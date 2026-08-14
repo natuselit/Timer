@@ -146,7 +146,6 @@ export const createDemoDataSet = (
     forecastDays: 30,
     arriveHoldDelayMs: 900,
     leaveHoldDelayMs: 900,
-    coefficientMode: 'auto',
     shiftDetectionMode: 'auto',
     themePreference: 'system',
     backupReminderIntervalDays: 14,
@@ -156,7 +155,6 @@ export const createDemoDataSet = (
     overtimeSaturdayCount: 1,
     overtimeWeekdayMaxMinutes: 240,
     overtimeSaturdayMaxMinutes: 480,
-    overtimeUnavailableDates: [],
     incognitoEnabled: false,
     onboardingCompleted: true,
     updatedAt

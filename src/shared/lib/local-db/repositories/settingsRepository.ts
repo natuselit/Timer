@@ -7,7 +7,6 @@ import {
   isOvertimeSaturdayCount,
   isOvertimeStepMinutes,
   isOvertimeStrategy,
-  isOvertimeUnavailableDates,
   isThemePreference,
   type Grade,
   type GradePercentSet,
@@ -21,6 +20,8 @@ const SETTINGS_ID: SettingsRecord['id'] = 'default';
 type LegacySettingsRecord = Omit<Partial<SettingsRecord>, 'overtimeStrategy'> & {
   hourlyRate?: unknown;
   overtimeStrategy?: unknown;
+  coefficientMode?: unknown;
+  overtimeUnavailableDates?: unknown;
 };
 
 const isFiniteNumber = (value: unknown): value is number =>
@@ -53,7 +54,13 @@ export const normalizeSettingsRecord = (
   record: LegacySettingsRecord,
   migrationDate = new Date()
 ): Settings => {
-  const { id: _id, hourlyRate: legacyHourlyRate, ...storedSettings } = record;
+  const {
+    id: _id,
+    hourlyRate: legacyHourlyRate,
+    coefficientMode: _legacyCoefficientMode,
+    overtimeUnavailableDates: _legacyUnavailableDates,
+    ...storedSettings
+  } = record;
   const monthlySalary = isFiniteNumber(storedSettings.monthlySalary)
     ? storedSettings.monthlySalary
     : isFiniteNumber(legacyHourlyRate)
@@ -115,12 +122,7 @@ export const normalizeSettingsRecord = (
       storedSettings.overtimeSaturdayMaxMinutes
     )
       ? storedSettings.overtimeSaturdayMaxMinutes
-      : DEFAULT_SETTINGS.overtimeSaturdayMaxMinutes,
-    overtimeUnavailableDates: isOvertimeUnavailableDates(
-      storedSettings.overtimeUnavailableDates
-    )
-      ? [...storedSettings.overtimeUnavailableDates].sort()
-      : DEFAULT_SETTINGS.overtimeUnavailableDates
+      : DEFAULT_SETTINGS.overtimeSaturdayMaxMinutes
   };
 };
 

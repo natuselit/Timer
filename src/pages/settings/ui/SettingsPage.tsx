@@ -35,8 +35,6 @@ import {
   GRADE_VALUES,
   HOLD_DELAY_MAX_MS,
   HOLD_DELAY_MIN_MS,
-  OVERTIME_DAILY_MAX_MINUTES_MAX,
-  OVERTIME_DAILY_MAX_MINUTES_MIN,
   OVERTIME_LIMIT_PERCENT_MAX,
   OVERTIME_LIMIT_PERCENT_MIN,
   OVERTIME_SATURDAY_COUNT_MAX,
@@ -50,7 +48,6 @@ import {
   isBackupReminderIntervalDays,
   isOvertimeDailyMaxMinutes,
   isOvertimeStrategy,
-  isOvertimeUnavailableDates,
   type Grade,
   type GradePercentSet,
   type OvertimeStrategy,
@@ -63,7 +60,7 @@ import {
   BackupReminderRepository,
   localDb,
   parseBackupImportJson,
-  recalculateHourlyRateSnapshotsForAllShifts,
+  recalculateHourlyRateSnapshotsForPeriod,
   replaceShiftsFromLegacyBackup,
   replaceLocalDataWithDemo,
   restoreBackup,
@@ -71,7 +68,19 @@ import {
   ShiftRepository
 } from '../../../shared/lib/local-db';
 import { downloadBackup } from '../../../shared/lib/backup';
-import { formatDate, toLocalIsoString } from '../../../shared/lib/date-time';
+import {
+  addMinutesToLocalTime,
+  formatTimeInputDraft,
+  formatDate,
+  getNextHeldCalendarRange,
+  getSingleDateRange,
+  normalizeTimeInput,
+  toLocalIsoString
+} from '../../../shared/lib/date-time';
+import {
+  MonthCalendar,
+  type CalendarDateRange
+} from '../../../shared/ui/month-calendar';
 import {
   ENTERPRISE_SCHEDULE_IMPORT_NOTE,
   ENTERPRISE_SCHEDULE_IMPORT_STEPS,
@@ -102,15 +111,38 @@ type FormValues = {
   overtimeStepMinutes: string;
   overtimeStrategy: OvertimeStrategy;
   overtimeSaturdayCount: string;
-  overtimeWeekdayMaxMinutes: string;
-  overtimeSaturdayMaxMinutes: string;
-  overtimeUnavailableDates: string[];
+  overtimeWeekdayEndTime: string;
+  overtimeSaturdayEndTime: string;
 };
 
 type FormErrors = Partial<Record<keyof FormValues, string>>;
 type Notice = {
   tone: 'success' | 'error' | 'info';
   text: string;
+};
+
+type RecalculationPeriod = {
+  start: string;
+  end: string;
+};
+
+type RecalculationCalendarMonth = {
+  year: number;
+  month: number;
+};
+
+const EMPTY_RECALCULATION_PERIOD: RecalculationPeriod = {
+  start: '',
+  end: ''
+};
+
+const getCurrentCalendarMonth = (): RecalculationCalendarMonth => {
+  const today = new Date();
+
+  return {
+    year: today.getFullYear(),
+    month: today.getMonth() + 1
+  };
 };
 
 type SettingsSectionId =
@@ -175,17 +207,16 @@ const FORM_FIELD_SECTIONS: Record<keyof FormValues, SettingsSectionId> = {
   overtimeStepMinutes: 'overtime',
   overtimeStrategy: 'overtime',
   overtimeSaturdayCount: 'overtime',
-  overtimeWeekdayMaxMinutes: 'overtime',
-  overtimeSaturdayMaxMinutes: 'overtime',
-  overtimeUnavailableDates: 'overtime'
+  overtimeWeekdayEndTime: 'overtime',
+  overtimeSaturdayEndTime: 'overtime'
 };
 
 const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
 const delayMaxSeconds = HOLD_DELAY_MAX_MS / 1000;
 const OVERTIME_STRATEGY_DESCRIPTIONS: Record<OvertimeStrategy, string> = {
-  weekdays: 'Увесь залишок розподіляється лише між доступними буднями.',
+  weekdays: 'Увесь залишок розподіляється лише між майбутніми буднями.',
   standard: 'Використовуються дві найближчі суботи, решта — на будні.',
-  saturdays: 'Час розподіляється між усіма доступними суботами, решта — на будні.',
+  saturdays: 'Час розподіляється між усіма майбутніми суботами, решта — на будні.',
   automatic:
     'Намагається тримати будні в межах 2 годин перепрацювання на день, а надлишок переносить на мінімально потрібну кількість субот.',
   custom: 'Ви самі задаєте кількість субот, решта ліміту розподіляється на будні.'
@@ -215,12 +246,12 @@ const FAQ_ITEMS: Array<{
   {
     question: 'Як працює коефіцієнт?',
     answer:
-      'У будні плановий час в auto оплачується за x1, а час до початку або після завершення — за x1.5. Нові суботні й недільні зміни отримують x1.5 на всю тривалість.'
+      'У будні плановий час в auto оплачується за x1, а час до початку або після завершення — за x1.5. У суботу й неділю режим auto оплачує всю фактичну тривалість за x1.5.'
   },
   {
     question: 'Як працює ліміт перепрацювань?',
     answer:
-      'Ліміт рахується як відсоток від плану 5/2 по 8 годин. У будні враховується час до або після планової зміни, а у вихідні — вся фактична тривалість. Денний максимум і недоступні дати задаються в налаштуваннях. Перевищення показується, але не блокує таймер.'
+      'Ліміт рахується як відсоток від плану 5/2 по 8 годин. У будні враховується час до або після планової зміни, а у вихідні — вся фактична тривалість. Денний максимум задається в налаштуваннях. Перевищення показується, але не блокує таймер.'
   },
   {
     question: 'Як працюють тікети та простій?',
@@ -251,6 +282,27 @@ const FAQ_ITEMS: Array<{
 
 const parseNumber = (value: string): number => Number(value.replace(',', '.'));
 
+const WEEKDAY_OVERTIME_START_TIME = '14:30';
+const SATURDAY_WORK_START_TIME = '06:00';
+const COMPLETE_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+
+const formatOvertimeEndTime = (startTime: string, minutes: number): string =>
+  addMinutesToLocalTime(startTime, minutes).time;
+
+const getMinutesUntilTime = (startTime: string, endTime: string): number => {
+  if (!COMPLETE_TIME_PATTERN.test(endTime)) {
+    return Number.NaN;
+  }
+
+  const [startHours, startMinutes] = startTime.split(':').map(Number);
+  const [endHours, endMinutes] = endTime.split(':').map(Number);
+  const startTotal = startHours * 60 + startMinutes;
+  const endTotal = endHours * 60 + endMinutes;
+  const sameDayDifference = endTotal - startTotal;
+
+  return sameDayDifference > 0 ? sameDayDifference : sameDayDifference + 24 * 60;
+};
+
 const toPercentFormValues = (percents: GradePercentSet): [string, string, string, string] =>
   percents.map(String) as [string, string, string, string];
 
@@ -278,9 +330,14 @@ const toFormValues = (settings: Settings): FormValues => ({
   overtimeStepMinutes: String(settings.overtimeStepMinutes),
   overtimeStrategy: settings.overtimeStrategy,
   overtimeSaturdayCount: String(settings.overtimeSaturdayCount),
-  overtimeWeekdayMaxMinutes: String(settings.overtimeWeekdayMaxMinutes),
-  overtimeSaturdayMaxMinutes: String(settings.overtimeSaturdayMaxMinutes),
-  overtimeUnavailableDates: [...settings.overtimeUnavailableDates].sort()
+  overtimeWeekdayEndTime: formatOvertimeEndTime(
+    WEEKDAY_OVERTIME_START_TIME,
+    settings.overtimeWeekdayMaxMinutes
+  ),
+  overtimeSaturdayEndTime: formatOvertimeEndTime(
+    SATURDAY_WORK_START_TIME,
+    settings.overtimeSaturdayMaxMinutes
+  )
 });
 
 const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors => {
@@ -296,8 +353,14 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   const overtimeLimitPercent = parseNumber(values.overtimeLimitPercent);
   const overtimeStepMinutes = Number(values.overtimeStepMinutes);
   const overtimeSaturdayCount = Number(values.overtimeSaturdayCount);
-  const overtimeWeekdayMaxMinutes = Number(values.overtimeWeekdayMaxMinutes);
-  const overtimeSaturdayMaxMinutes = Number(values.overtimeSaturdayMaxMinutes);
+  const overtimeWeekdayMaxMinutes = getMinutesUntilTime(
+    WEEKDAY_OVERTIME_START_TIME,
+    values.overtimeWeekdayEndTime
+  );
+  const overtimeSaturdayMaxMinutes = getMinutesUntilTime(
+    SATURDAY_WORK_START_TIME,
+    values.overtimeSaturdayEndTime
+  );
 
   if (!values.employeeFirstName.trim()) {
     errors.employeeFirstName = 'Вкажіть імʼя.';
@@ -376,15 +439,11 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   }
 
   if (!isOvertimeDailyMaxMinutes(overtimeWeekdayMaxMinutes)) {
-    errors.overtimeWeekdayMaxMinutes = `Максимум має бути від ${OVERTIME_DAILY_MAX_MINUTES_MIN} до ${OVERTIME_DAILY_MAX_MINUTES_MAX} хв і кратним 5.`;
+    errors.overtimeWeekdayEndTime = 'Вкажіть час від 14:35 до 02:30 наступного дня з кроком 5 хв.';
   }
 
   if (!isOvertimeDailyMaxMinutes(overtimeSaturdayMaxMinutes)) {
-    errors.overtimeSaturdayMaxMinutes = `Максимум має бути від ${OVERTIME_DAILY_MAX_MINUTES_MIN} до ${OVERTIME_DAILY_MAX_MINUTES_MAX} хв і кратним 5.`;
-  }
-
-  if (!isOvertimeUnavailableDates(values.overtimeUnavailableDates)) {
-    errors.overtimeUnavailableDates = 'Перевірте список недоступних дат.';
+    errors.overtimeSaturdayEndTime = 'Вкажіть час від 06:05 до 18:00 з кроком 5 хв.';
   }
 
   return errors;
@@ -422,9 +481,18 @@ export function SettingsPage({
   const [notice, setNotice] = useState<Notice | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isApplyingRate, setIsApplyingRate] = useState(false);
+  const [isRecalculationOpen, setIsRecalculationOpen] = useState(false);
+  const [recalculationPeriod, setRecalculationPeriod] = useState<RecalculationPeriod>(
+    EMPTY_RECALCULATION_PERIOD
+  );
+  const [recalculationPreviewCount, setRecalculationPreviewCount] = useState<number | null>(
+    null
+  );
+  const [recalculationError, setRecalculationError] = useState<string | null>(null);
+  const [recalculationCalendarMonth, setRecalculationCalendarMonth] =
+    useState<RecalculationCalendarMonth>(getCurrentCalendarMonth);
   const [isClearing, setIsClearing] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
-  const [overtimeUnavailableDateDraft, setOvertimeUnavailableDateDraft] = useState('');
   const formRef = useRef<HTMLFormElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const syncedValuesRef = useRef<FormValues>(toFormValues(settings));
@@ -440,41 +508,37 @@ export function SettingsPage({
     syncedValuesRef.current = nextValues;
   }, [settings]);
 
-  const addOvertimeUnavailableDate = () => {
-    const today = toLocalIsoString(new Date()).slice(0, 10);
-
-    if (!overtimeUnavailableDateDraft || overtimeUnavailableDateDraft < today) {
-      setErrors((current) => ({
-        ...current,
-        overtimeUnavailableDates: 'Оберіть сьогоднішню або майбутню дату.'
-      }));
+  useEffect(() => {
+    if (
+      !isRecalculationOpen ||
+      !recalculationPeriod.start ||
+      !recalculationPeriod.end ||
+      recalculationPeriod.start > recalculationPeriod.end
+    ) {
+      setRecalculationPreviewCount(null);
       return;
     }
 
-    setValues((current) => ({
-      ...current,
-      overtimeUnavailableDates: [
-        ...new Set([
-          ...current.overtimeUnavailableDates,
-          overtimeUnavailableDateDraft
-        ])
-      ].sort()
-    }));
-    setErrors((current) => ({ ...current, overtimeUnavailableDates: undefined }));
-    setOvertimeUnavailableDateDraft('');
-    setNotice(null);
-  };
+    let isCancelled = false;
+    setRecalculationPreviewCount(null);
 
-  const removeOvertimeUnavailableDate = (date: string) => {
-    setValues((current) => ({
-      ...current,
-      overtimeUnavailableDates: current.overtimeUnavailableDates.filter(
-        (item) => item !== date
-      )
-    }));
-    setErrors((current) => ({ ...current, overtimeUnavailableDates: undefined }));
-    setNotice(null);
-  };
+    void shiftRepository
+      .getShiftsBetween(recalculationPeriod.start, recalculationPeriod.end)
+      .then((shifts) => {
+        if (!isCancelled) {
+          setRecalculationPreviewCount(shifts.length);
+        }
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setRecalculationError('Не вдалося підрахувати зміни у вибраному періоді.');
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [isRecalculationOpen, recalculationPeriod]);
 
   const updateField =
     (field: keyof FormValues) =>
@@ -488,6 +552,25 @@ export function SettingsPage({
         [field]: undefined
       }));
       setNotice(null);
+    };
+
+  const updateTimeField =
+    (field: 'overtimeWeekdayEndTime' | 'overtimeSaturdayEndTime') =>
+    (event: ChangeEvent<HTMLInputElement>) => {
+      setValues((current) => ({
+        ...current,
+        [field]: formatTimeInputDraft(event.target.value)
+      }));
+      setErrors((current) => ({ ...current, [field]: undefined }));
+      setNotice(null);
+    };
+
+  const normalizeTimeField =
+    (field: 'overtimeWeekdayEndTime' | 'overtimeSaturdayEndTime') => () => {
+      setValues((current) => ({
+        ...current,
+        [field]: current[field] ? normalizeTimeInput(current[field]) : ''
+      }));
     };
 
   const updateGradeValue =
@@ -570,7 +653,14 @@ export function SettingsPage({
     setNotice(null);
 
     const holdDelayMs = Math.round(parseNumber(values.holdDelaySeconds) * 1000);
-    const today = toLocalIsoString(new Date()).slice(0, 10);
+    const overtimeWeekdayMaxMinutes = getMinutesUntilTime(
+      WEEKDAY_OVERTIME_START_TIME,
+      values.overtimeWeekdayEndTime
+    );
+    const overtimeSaturdayMaxMinutes = getMinutesUntilTime(
+      SATURDAY_WORK_START_TIME,
+      values.overtimeSaturdayEndTime
+    );
     const currentGrade = settings.incognitoEnabled
       ? settings.currentGrade
       : parseGrade(values.currentGrade);
@@ -599,11 +689,8 @@ export function SettingsPage({
       overtimeStepMinutes: Number(values.overtimeStepMinutes),
       overtimeStrategy: values.overtimeStrategy,
       overtimeSaturdayCount: Number(values.overtimeSaturdayCount),
-      overtimeWeekdayMaxMinutes: Number(values.overtimeWeekdayMaxMinutes),
-      overtimeSaturdayMaxMinutes: Number(values.overtimeSaturdayMaxMinutes),
-      overtimeUnavailableDates: values.overtimeUnavailableDates.filter(
-        (date) => date >= today
-      ),
+      overtimeWeekdayMaxMinutes,
+      overtimeSaturdayMaxMinutes,
       updatedAt: toLocalIsoString(new Date())
     };
 
@@ -617,9 +704,7 @@ export function SettingsPage({
     }
   };
 
-  const recalculateExistingShiftRates = async () => {
-    const monthlySalary = parseNumber(values.monthlySalary);
-
+  const openRateRecalculation = () => {
     if (settings.incognitoEnabled) {
       setNotice({
         tone: 'error',
@@ -628,12 +713,89 @@ export function SettingsPage({
       return;
     }
 
+    setRecalculationPeriod(EMPTY_RECALCULATION_PERIOD);
+    setRecalculationCalendarMonth(getCurrentCalendarMonth());
+    setRecalculationPreviewCount(null);
+    setRecalculationError(null);
+    setNotice(null);
+    setIsRecalculationOpen(true);
+  };
+
+  const moveRecalculationCalendarMonth = (direction: -1 | 1) => {
+    const next = new Date(
+      recalculationCalendarMonth.year,
+      recalculationCalendarMonth.month - 1 + direction,
+      1
+    );
+
+    setRecalculationCalendarMonth({
+      year: next.getFullYear(),
+      month: next.getMonth() + 1
+    });
+  };
+
+  const syncRecalculationCalendarMonth = (date: string) => {
+    const [year, month] = date.split('-').map(Number);
+
+    if (
+      year !== recalculationCalendarMonth.year ||
+      month !== recalculationCalendarMonth.month
+    ) {
+      setRecalculationCalendarMonth({ year, month });
+    }
+  };
+
+  const selectRecalculationDate = (date: string) => {
+    const range = getSingleDateRange(date);
+
+    syncRecalculationCalendarMonth(date);
+    setRecalculationPeriod({ start: range.start, end: range.end ?? '' });
+    setRecalculationError(null);
+  };
+
+  const holdRecalculationDate = (date: string) => {
+    const selectedRange: CalendarDateRange | null = recalculationPeriod.start
+      ? {
+          start: recalculationPeriod.start,
+          end: recalculationPeriod.end || null
+        }
+      : null;
+    const range = getNextHeldCalendarRange(selectedRange, date);
+
+    syncRecalculationCalendarMonth(date);
+    setRecalculationPeriod({ start: range.start, end: range.end ?? '' });
+    setRecalculationError(null);
+  };
+
+  const closeRateRecalculation = () => {
+    if (isApplyingRate) {
+      return;
+    }
+
+    setIsRecalculationOpen(false);
+    setRecalculationPreviewCount(null);
+    setRecalculationError(null);
+  };
+
+  const recalculateExistingShiftRates = async () => {
+    if (!recalculationPeriod.start || !recalculationPeriod.end) {
+      setRecalculationError('Вкажіть початок і завершення періоду.');
+      return;
+    }
+
+    if (recalculationPeriod.start > recalculationPeriod.end) {
+      setRecalculationError('Дата початку не може бути пізніше дати завершення.');
+      return;
+    }
+
+    const monthlySalary = parseNumber(values.monthlySalary);
+
     if (!Number.isFinite(monthlySalary) || monthlySalary < 0) {
       setErrors((current) => ({
         ...current,
         monthlySalary: 'Ставка за місяць не може бути відʼємною.'
       }));
-      setNotice({ tone: 'error', text: 'Перевірте ставку за місяць.' });
+      setRecalculationError('Перевірте ставку за місяць у налаштуваннях.');
       return;
     }
 
@@ -645,7 +807,7 @@ export function SettingsPage({
         ...current,
         gradeSalaryBonusPercents: 'Надбавки до ЗП не можуть бути відʼємними.'
       }));
-      setNotice({ tone: 'error', text: 'Перевірте надбавки до ЗП.' });
+      setRecalculationError('Перевірте надбавки до ЗП у налаштуваннях.');
       return;
     }
 
@@ -654,19 +816,12 @@ export function SettingsPage({
         ...current,
         gradeNormPercents: 'Норми рівнів не можуть бути відʼємними.'
       }));
-      setNotice({ tone: 'error', text: 'Перевірте норми рівнів.' });
-      return;
-    }
-
-    if (
-      !window.confirm(
-        'Перерахувати базову ставку, рівень і ефективну ставку для всіх існуючих змін за поточними налаштуваннями? Збережені значення в історії змін буде перезаписано.'
-      )
-    ) {
+      setRecalculationError('Перевірте норми рівнів у налаштуваннях.');
       return;
     }
 
     setIsApplyingRate(true);
+    setRecalculationError(null);
     setNotice(null);
 
     const updatedAt = toLocalIsoString(new Date());
@@ -687,20 +842,23 @@ export function SettingsPage({
 
     try {
       await onSettingsChange(nextSettings);
-      const updatedCount = await recalculateHourlyRateSnapshotsForAllShifts(
+      const updatedCount = await recalculateHourlyRateSnapshotsForPeriod(
         shiftRepository,
         monthlySalary,
         nextGradeSettings,
+        recalculationPeriod,
         updatedAt
       );
 
       onLocalDataChange?.();
+      setIsRecalculationOpen(false);
+      setRecalculationPeriod(EMPTY_RECALCULATION_PERIOD);
       setNotice({
         tone: 'success',
-        text: `Ставки й рівні перераховано за ${formatMoney(monthlySalary, false)}/міс для ${updatedCount} змін.`
+        text: `Ставки й рівні перераховано за ${formatMoney(monthlySalary, false)}/міс. Перераховано змін: ${updatedCount}. Період: ${formatDate(recalculationPeriod.start)} — ${formatDate(recalculationPeriod.end)}.`
       });
     } catch {
-      setNotice({ tone: 'error', text: 'Не вдалося перерахувати ставки у змінах.' });
+      setRecalculationError('Не вдалося перерахувати ставки у вибраному періоді.');
     } finally {
       setIsApplyingRate(false);
     }
@@ -810,7 +968,6 @@ export function SettingsPage({
 
         setValues(toFormValues(restoredSettings));
         setErrors({});
-        setOvertimeUnavailableDateDraft('');
         onLocalDataReplace(restoredSettings);
         setNotice({
           tone: 'success',
@@ -883,7 +1040,6 @@ export function SettingsPage({
       await onSettingsChange(resetSettings);
       setValues(toFormValues(resetSettings));
       setErrors({});
-      setOvertimeUnavailableDateDraft('');
       await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
       onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'Локальні дані очищено.' });
@@ -913,7 +1069,6 @@ export function SettingsPage({
 
       setValues(toFormValues(demoData.settings));
       setErrors({});
-      setOvertimeUnavailableDateDraft('');
       onLocalDataReplace(demoData.settings);
       onLocalDataChange?.();
       setNotice({
@@ -967,7 +1122,6 @@ export function SettingsPage({
   const discardChanges = () => {
     setValues(toFormValues(settings));
     setErrors({});
-    setOvertimeUnavailableDateDraft('');
     setNotice({ tone: 'info', text: 'Незбережені зміни скасовано.' });
   };
 
@@ -983,10 +1137,6 @@ export function SettingsPage({
           <span>Оберіть розділ</span>
           <p>Змінюйте лише потрібні параметри, не переглядаючи всю форму.</p>
         </div>
-        <span className="settings-page__local-badge">
-          <Database size={16} aria-hidden="true" />
-          Дані на пристрої
-        </span>
       </div>
 
       <SettingsSection
@@ -1058,7 +1208,7 @@ export function SettingsPage({
           className="settings-page__secondary-action"
           type="button"
           disabled={settings.incognitoEnabled || isApplyingRate}
-          onClick={() => void recalculateExistingShiftRates()}
+          onClick={openRateRecalculation}
         >
           <RotateCcw size={18} aria-hidden="true" />
           {isApplyingRate ? 'Перерахунок...' : 'Перерахувати історію'}
@@ -1086,7 +1236,7 @@ export function SettingsPage({
       <SettingsSection
         id="overtime"
         title="Перепрацювання"
-        description="Ліміт, стратегія та доступні дні"
+        description="Ліміт, стратегія та денні максимуми"
         summary={`${values.overtimeLimitPercent}% · ${OVERTIME_STRATEGY_LABELS[values.overtimeStrategy]}`}
         icon={CalendarClock}
       >
@@ -1181,7 +1331,7 @@ export function SettingsPage({
                 onChange={updateField('overtimeSaturdayCount')}
               />
               <small id="overtimeSaturdayCount-help">
-                Від 0 до 5 найближчих доступних субот; решта — на будні.
+                Від 0 до 5 найближчих субот; решта — на будні.
               </small>
               {errors.overtimeSaturdayCount ? (
                 <small id="overtimeSaturdayCount-error">
@@ -1192,107 +1342,55 @@ export function SettingsPage({
           ) : null}
 
           <label className="settings-page__field">
-            <span>Максимум перепрацювання за будній день, хв</span>
+            <span>Перепрацювання до</span>
             <input
-              type="number"
+              type="text"
               inputMode="numeric"
-              min={OVERTIME_DAILY_MAX_MINUTES_MIN}
-              max={OVERTIME_DAILY_MAX_MINUTES_MAX}
-              step={5}
-              aria-invalid={errors.overtimeWeekdayMaxMinutes ? 'true' : 'false'}
+              autoComplete="off"
+              maxLength={5}
+              placeholder="ГГ:ХХ"
+              aria-invalid={errors.overtimeWeekdayEndTime ? 'true' : 'false'}
               aria-describedby={
-                errors.overtimeWeekdayMaxMinutes
-                  ? 'overtimeWeekdayMaxMinutes-error'
-                  : 'overtimeWeekdayMaxMinutes-help'
+                errors.overtimeWeekdayEndTime
+                  ? 'overtimeWeekdayEndTime-error'
+                  : undefined
               }
-              value={values.overtimeWeekdayMaxMinutes}
-              onChange={updateField('overtimeWeekdayMaxMinutes')}
+              value={values.overtimeWeekdayEndTime}
+              onBlur={normalizeTimeField('overtimeWeekdayEndTime')}
+              onChange={updateTimeField('overtimeWeekdayEndTime')}
             />
-            <small id="overtimeWeekdayMaxMinutes-help">
-              Замість жорсткої межі 19:00. Ліміт застосовується до кожного будня.
-            </small>
-            {errors.overtimeWeekdayMaxMinutes ? (
-              <small id="overtimeWeekdayMaxMinutes-error">
-                {errors.overtimeWeekdayMaxMinutes}
+            {errors.overtimeWeekdayEndTime ? (
+              <small id="overtimeWeekdayEndTime-error">
+                {errors.overtimeWeekdayEndTime}
               </small>
             ) : null}
           </label>
 
           <label className="settings-page__field">
-            <span>Максимум роботи в суботу, хв</span>
+            <span>Робота в суботу до</span>
             <input
-              type="number"
+              type="text"
               inputMode="numeric"
-              min={OVERTIME_DAILY_MAX_MINUTES_MIN}
-              max={OVERTIME_DAILY_MAX_MINUTES_MAX}
-              step={5}
-              aria-invalid={errors.overtimeSaturdayMaxMinutes ? 'true' : 'false'}
+              autoComplete="off"
+              maxLength={5}
+              placeholder="ГГ:ХХ"
+              aria-invalid={errors.overtimeSaturdayEndTime ? 'true' : 'false'}
               aria-describedby={
-                errors.overtimeSaturdayMaxMinutes
-                  ? 'overtimeSaturdayMaxMinutes-error'
-                  : 'overtimeSaturdayMaxMinutes-help'
+                errors.overtimeSaturdayEndTime
+                  ? 'overtimeSaturdayEndTime-error'
+                  : undefined
               }
-              value={values.overtimeSaturdayMaxMinutes}
-              onChange={updateField('overtimeSaturdayMaxMinutes')}
+              value={values.overtimeSaturdayEndTime}
+              onBlur={normalizeTimeField('overtimeSaturdayEndTime')}
+              onChange={updateTimeField('overtimeSaturdayEndTime')}
             />
-            <small id="overtimeSaturdayMaxMinutes-help">
-              Замість жорсткої межі 17:00. Наприклад, 480 хв — це 8 годин.
-            </small>
-            {errors.overtimeSaturdayMaxMinutes ? (
-              <small id="overtimeSaturdayMaxMinutes-error">
-                {errors.overtimeSaturdayMaxMinutes}
+            {errors.overtimeSaturdayEndTime ? (
+              <small id="overtimeSaturdayEndTime-error">
+                {errors.overtimeSaturdayEndTime}
               </small>
             ) : null}
           </label>
 
-          <div className="settings-page__field settings-page__overtime-availability">
-            <span>Недоступні дати</span>
-            <div className="settings-page__overtime-date-entry">
-              <input
-                type="date"
-                min={toLocalIsoString(new Date()).slice(0, 10)}
-                aria-label="Дата без перепрацювання"
-                aria-invalid={errors.overtimeUnavailableDates ? 'true' : 'false'}
-                value={overtimeUnavailableDateDraft}
-                onChange={(event) => {
-                  setOvertimeUnavailableDateDraft(event.target.value);
-                  setErrors((current) => ({
-                    ...current,
-                    overtimeUnavailableDates: undefined
-                  }));
-                }}
-              />
-              <button type="button" onClick={addOvertimeUnavailableDate}>
-                Додати
-              </button>
-            </div>
-            <small>
-              Ці дні не потраплятимуть у рекомендації жодної стратегії.
-            </small>
-            {values.overtimeUnavailableDates.length > 0 ? (
-              <ul className="settings-page__overtime-date-list">
-                {values.overtimeUnavailableDates.map((date) => (
-                  <li key={date}>
-                    <time dateTime={date}>{formatDate(date)}</time>
-                    <button
-                      type="button"
-                      aria-label={`Повернути ${formatDate(date)} у рекомендації`}
-                      onClick={() => removeOvertimeUnavailableDate(date)}
-                    >
-                      <X size={16} aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <small>Усі майбутні дні доступні.</small>
-            )}
-            {errors.overtimeUnavailableDates ? (
-              <small id="overtimeUnavailableDates-error">
-                {errors.overtimeUnavailableDates}
-              </small>
-            ) : null}
-          </div>
         </div>
       </SettingsSection>
 
@@ -1659,6 +1757,104 @@ export function SettingsPage({
           <strong>{formatDateTime(settings.updatedAt)}</strong>
         </div>
       </SettingsSection>
+
+      {isRecalculationOpen ? (
+        <div
+          className="settings-page__modal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeRateRecalculation();
+            }
+          }}
+        >
+          <section
+            className="settings-page__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rate-recalculation-title"
+          >
+            <header className="settings-page__modal-header">
+              <div>
+                <p>Оплата</p>
+                <h2 id="rate-recalculation-title">Перерахувати історію</h2>
+              </div>
+              <button
+                type="button"
+                aria-label="Закрити перерахунок історії"
+                disabled={isApplyingRate}
+                onClick={closeRateRecalculation}
+              >
+                <X size={20} aria-hidden="true" />
+              </button>
+            </header>
+
+            <p className="settings-page__modal-copy">
+              Оберіть включний період. Базова ставка та рівні будуть перезаписані лише
+              у змінах із цього діапазону.
+            </p>
+
+            <div className="settings-page__recalculation-calendar">
+              <MonthCalendar
+                year={recalculationCalendarMonth.year}
+                month={recalculationCalendarMonth.month}
+                salaryLabel=""
+                shiftCount={0}
+                hoursLabel=""
+                shifts={[]}
+                selectedRange={
+                  recalculationPeriod.start
+                    ? {
+                        start: recalculationPeriod.start,
+                        end: recalculationPeriod.end || null
+                      }
+                    : null
+                }
+                onPreviousMonth={() => moveRecalculationCalendarMonth(-1)}
+                onNextMonth={() => moveRecalculationCalendarMonth(1)}
+                onDateSelect={selectRecalculationDate}
+                onDateHold={holdRecalculationDate}
+                titleId="rate-recalculation-calendar-title"
+                hideSummary
+              />
+            </div>
+
+            {recalculationPeriod.start &&
+            recalculationPeriod.end &&
+            recalculationPeriod.start <= recalculationPeriod.end ? (
+              <p className="settings-page__recalculation-preview" aria-live="polite">
+                {recalculationPreviewCount === null
+                  ? 'Підрахунок змін…'
+                  : `Період: ${formatDate(recalculationPeriod.start)} — ${formatDate(recalculationPeriod.end)}. Буде перераховано змін: ${recalculationPreviewCount}.`}
+              </p>
+            ) : null}
+
+            {recalculationError ? (
+              <p className="settings-page__modal-error" role="alert">
+                {recalculationError}
+              </p>
+            ) : null}
+
+            <div className="settings-page__modal-actions">
+              <button type="button" disabled={isApplyingRate} onClick={closeRateRecalculation}>
+                Скасувати
+              </button>
+              <button
+                type="button"
+                disabled={
+                  isApplyingRate ||
+                  (Boolean(recalculationPeriod.start && recalculationPeriod.end) &&
+                    recalculationPeriod.start <= recalculationPeriod.end &&
+                    recalculationPreviewCount === null)
+                }
+                onClick={() => void recalculateExistingShiftRates()}
+              >
+                <RotateCcw size={18} aria-hidden="true" />
+                {isApplyingRate ? 'Перерахунок...' : 'Перерахувати'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {notice ? (
         <p className="settings-page__notice" data-tone={notice.tone} role="status">

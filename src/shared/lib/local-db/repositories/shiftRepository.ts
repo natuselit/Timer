@@ -228,25 +228,29 @@ export class ShiftRepository {
     await this.db.shifts.delete(id);
   }
 
-  async recalculateHourlyRateSnapshotsForAllShifts(
+  async recalculateHourlyRateSnapshotsForPeriod(
     monthlySalary: number,
     gradeSettings: GradeSettings,
+    period: { start: LocalDateString; end: LocalDateString },
     updatedAt: string
   ): Promise<number> {
     const gradeSnapshot = createGradeSnapshot(gradeSettings);
 
-    return this.db.shifts.toCollection().modify((shift) => {
-      const baseHourlyRate = calculateHourlyRateFromMonthlySalary(
-        monthlySalary,
-        shift.date
-      );
+    return this.db.shifts
+      .where('date')
+      .between(period.start, period.end, true, true)
+      .modify((shift) => {
+        const baseHourlyRate = calculateHourlyRateFromMonthlySalary(
+          monthlySalary,
+          shift.date
+        );
 
-      shift.baseHourlyRateSnapshot = baseHourlyRate;
-      shift.hourlyRateSnapshot = baseHourlyRate;
-      shift.gradeSnapshot = gradeSnapshot;
-      shift.workTickets = normalizeWorkTickets(shift.workTickets);
-      shift.updatedAt = updatedAt;
-    });
+        shift.baseHourlyRateSnapshot = baseHourlyRate;
+        shift.hourlyRateSnapshot = baseHourlyRate;
+        shift.gradeSnapshot = gradeSnapshot;
+        shift.workTickets = normalizeWorkTickets(shift.workTickets);
+        shift.updatedAt = updatedAt;
+      });
   }
 
   async getShiftsByMonth(year: number, month: number): Promise<Shift[]> {

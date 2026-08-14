@@ -753,13 +753,6 @@
   font-weight: 900;
 }
 
-.main-page__overtime-next-shift .main-page__overtime-skip-date {
-  min-height: 38px;
-  border-color: var(--color-primary-border-muted);
-  background: transparent;
-  font-size: 0.7rem;
-}
-
 .main-page__overtime-recommendation-status {
   display: flex;
   align-items: center;

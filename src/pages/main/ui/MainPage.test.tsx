@@ -26,7 +26,6 @@ const settings: Settings = {
   forecastDays: 30,
   arriveHoldDelayMs: 1_500,
   leaveHoldDelayMs: 1_500,
-  coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
@@ -36,7 +35,6 @@ const settings: Settings = {
   overtimeSaturdayCount: 1,
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
-  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T06:00:00.000+03:00'
@@ -575,14 +573,7 @@ describe('MainPage active shift', () => {
     expect(screen.queryByRole('button', { name: 'Налаштування' })).toBeNull();
     expect(screen.queryByText(/Залишок .* менший за крок рекомендації/)).toBeNull();
 
-    await user.click(screen.getByRole('button', { name: 'Цей день недоступний' }));
-    expect(onSettingsChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        overtimeUnavailableDates: expect.arrayContaining([
-          expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)
-        ])
-      })
-    );
+    expect(screen.queryByRole('button', { name: 'Цей день недоступний' })).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Інші варіанти' }));
     const dialog = screen.getByRole('dialog', { name: 'Варіанти перепрацювань' });

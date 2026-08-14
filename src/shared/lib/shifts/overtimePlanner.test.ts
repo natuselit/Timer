@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Shift } from '../../../entities/shift';
 import {
   calculateMonthlyOvertimePlan,
-  calculateShiftLimitOvertimeMinutes,
-  getCoefficientModeForNewShift
+  calculateShiftLimitOvertimeMinutes
 } from './overtimePlanner';
 
 const makeShift = (overrides: Partial<Shift> = {}): Shift => ({
@@ -40,7 +39,6 @@ const calculatePlan = (
     overtimeSaturdayCount: 1,
     overtimeWeekdayMaxMinutes: 240,
     overtimeSaturdayMaxMinutes: 480,
-    overtimeUnavailableDates: [],
     ...overrides
   });
 
@@ -281,20 +279,6 @@ describe('monthly overtime planner', () => {
     expect(plan.selectedScenario.weekdayMinutes).toBeGreaterThan(0);
   });
 
-  it('excludes unavailable dates from every recommendation', () => {
-    const plan = calculatePlan({
-      overtimeStrategy: 'weekdays',
-      overtimeUnavailableDates: ['2026-08-11', '2026-08-12']
-    });
-
-    expect(plan.recommendation.date).toBe('2026-08-13');
-    expect(
-      plan.selectedScenario.allocations.some(
-        ({ date }) => date === '2026-08-11' || date === '2026-08-12'
-      )
-    ).toBe(false);
-  });
-
   it('respects configurable weekday and Saturday daily maximums', () => {
     const weekdayPlan = calculatePlan({
       overtimeLimitPercent: 50,
@@ -344,24 +328,4 @@ describe('monthly overtime planner', () => {
     );
   });
 
-  it('sets coefficients only for newly created weekend shifts', () => {
-    expect(
-      getCoefficientModeForNewShift({
-        date: '2026-08-08',
-        defaultMode: 'auto'
-      })
-    ).toBe('x1.5');
-    expect(
-      getCoefficientModeForNewShift({
-        date: '2026-08-09',
-        defaultMode: 'auto'
-      })
-    ).toBe('x1.5');
-    expect(
-      getCoefficientModeForNewShift({
-        date: '2026-08-10',
-        defaultMode: 'x1'
-      })
-    ).toBe('x1');
-  });
 });

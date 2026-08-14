@@ -31,21 +31,6 @@
   line-height: 1.4;
 }
 
-.settings-page__local-badge {
-  display: inline-flex;
-  width: fit-content;
-  min-height: 32px;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  border: 1px solid var(--color-success-border);
-  border-radius: 999px;
-  background: var(--color-success-surface);
-  color: var(--color-success);
-  font-size: 0.75rem;
-  font-weight: 800;
-}
-
 .settings-page__section {
   overflow: hidden;
   border: 1px solid var(--color-border);
@@ -216,63 +201,137 @@
   gap: 14px;
 }
 
-.settings-page__overtime-availability {
-  padding-top: 4px;
-}
-
-.settings-page__overtime-date-entry {
+.settings-page__modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
+  align-items: end;
+  padding: 16px max(12px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  background: rgb(0 0 0 / 58%);
 }
 
-.settings-page__overtime-date-entry button {
-  min-height: 52px;
-  padding: 0 15px;
-  border: 1px solid var(--color-primary-border);
-  border-radius: var(--radius-control);
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font: inherit;
-  font-weight: 800;
-}
-
-.settings-page__overtime-date-list {
+.settings-page__modal {
   display: grid;
-  gap: 7px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.settings-page__overtime-date-list li {
-  display: flex;
-  min-height: 44px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 8px 7px 12px;
+  width: min(100%, 560px);
+  max-height: min(88dvh, 720px);
+  gap: 16px;
+  margin: 0 auto;
+  padding: 18px;
+  overflow-y: auto;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-compact);
-  background: var(--color-background);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
 }
 
-.settings-page__overtime-date-list time {
-  color: var(--color-text-primary);
-  font-size: 0.88rem;
-  font-weight: 750;
+.settings-page__modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.settings-page__overtime-date-list button {
+.settings-page__modal-header > div {
   display: grid;
-  width: 34px;
-  height: 34px;
+  gap: 3px;
+}
+
+.settings-page__modal-header p,
+.settings-page__modal-header h2,
+.settings-page__modal-copy,
+.settings-page__recalculation-preview,
+.settings-page__modal-error {
+  margin: 0;
+}
+
+.settings-page__modal-header p {
+  color: var(--color-primary);
+  font-size: 0.72rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.settings-page__modal-header h2 {
+  color: var(--color-text-primary);
+  font-size: 1.15rem;
+}
+
+.settings-page__modal-header button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
   place-items: center;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: transparent;
+  background: var(--color-background);
   color: var(--color-text-secondary);
+}
+
+.settings-page__modal-copy {
+  color: var(--color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.settings-page__recalculation-preview {
+  padding: 10px 12px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-compact);
+  background: var(--color-primary-soft);
+  color: var(--color-text-primary);
+  font-size: 0.84rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.settings-page__recalculation-calendar {
+  min-width: 0;
+}
+
+.settings-page__recalculation-calendar .month-calendar {
+  box-shadow: none;
+}
+
+.settings-page__modal-error {
+  color: var(--color-error);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.settings-page__modal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-page__modal-actions button {
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  background: var(--color-background);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-weight: 800;
+}
+
+.settings-page__modal-actions button:last-child {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+@media (min-width: 640px) {
+  .settings-page__modal-overlay {
+    align-items: center;
+  }
 }
 
 .settings-page__grade-selects {

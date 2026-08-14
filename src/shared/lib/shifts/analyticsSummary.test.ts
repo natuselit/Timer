@@ -300,6 +300,36 @@ describe('calculateAnalyticsSummary', () => {
     ]);
   });
 
+  it('counts the whole auto weekend shift as x1.5 overtime income', () => {
+    const summary = calculateAnalyticsSummary({
+      now: '2026-06-20T20:00:00.000+03:00',
+      periodStart: '2026-06-20',
+      periodEnd: '2026-06-20',
+      monthlyBonus: 0,
+      includeMonthlyBonus: false,
+      shifts: [
+        makeShift({
+          date: '2026-06-20',
+          startTime: '2026-06-20T06:30:00.000+03:00',
+          endTime: '2026-06-20T14:30:00.000+03:00'
+        })
+      ]
+    });
+
+    expect(summary).toMatchObject({
+      workSalary: 1_440,
+      overtimeMinutes: 480,
+      overtimeIncome: 1_440,
+      coefficientBreakdown: [
+        {
+          coefficient: 1.5,
+          minutes: 480,
+          amount: 1_440
+        }
+      ]
+    });
+  });
+
   it('uses the latest historical monthly grade snapshot and weights mixed ticket targets', () => {
     const summary = calculateAnalyticsSummary({
       now: '2026-07-15T20:00:00.000+03:00',
@@ -337,9 +367,9 @@ describe('calculateAnalyticsSummary', () => {
         }),
         makeShift({
           id: 'latest-grade-shift',
-          date: '2026-06-20',
-          startTime: '2026-06-20T06:30:00.000+03:00',
-          endTime: '2026-06-20T14:30:00.000+03:00',
+          date: '2026-06-19',
+          startTime: '2026-06-19T06:30:00.000+03:00',
+          endTime: '2026-06-19T14:30:00.000+03:00',
           baseHourlyRateSnapshot: 100,
           hourlyRateSnapshot: 120,
           gradeSnapshot: {
@@ -353,22 +383,22 @@ describe('calculateAnalyticsSummary', () => {
             {
               id: 'filled-ticket',
               normPerEightHours: 48,
-              startedAt: '2026-06-20T07:00:00.000+03:00',
-              endedAt: '2026-06-20T09:00:00.000+03:00',
+              startedAt: '2026-06-19T07:00:00.000+03:00',
+              endedAt: '2026-06-19T09:00:00.000+03:00',
               actualQuantity: 15,
               downtimeMinutes: 20,
-              createdAt: '2026-06-20T07:00:00.000+03:00',
-              updatedAt: '2026-06-20T09:00:00.000+03:00'
+              createdAt: '2026-06-19T07:00:00.000+03:00',
+              updatedAt: '2026-06-19T09:00:00.000+03:00'
             },
             {
               id: 'legacy-ticket',
               normPerEightHours: 48,
-              startedAt: '2026-06-20T09:00:00.000+03:00',
-              endedAt: '2026-06-20T10:00:00.000+03:00',
+              startedAt: '2026-06-19T09:00:00.000+03:00',
+              endedAt: '2026-06-19T10:00:00.000+03:00',
               actualQuantity: null,
               downtimeMinutes: 0,
-              createdAt: '2026-06-20T09:00:00.000+03:00',
-              updatedAt: '2026-06-20T10:00:00.000+03:00'
+              createdAt: '2026-06-19T09:00:00.000+03:00',
+              updatedAt: '2026-06-19T10:00:00.000+03:00'
             }
           ]
         })

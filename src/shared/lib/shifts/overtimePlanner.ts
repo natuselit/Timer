@@ -2,7 +2,6 @@ import {
   calculateShiftTimeBreakdown,
   detectShiftType,
   getPlannedShiftWindow,
-  type CoefficientMode,
   type ISODateTimeString,
   type LocalDateString,
   type Shift
@@ -17,7 +16,6 @@ import {
   isOvertimeDailyMaxMinutes,
   isOvertimeSaturdayCount,
   isOvertimeStepMinutes,
-  isOvertimeUnavailableDates,
   type OvertimeStrategy
 } from '../../../entities/settings';
 
@@ -83,7 +81,6 @@ export type CalculateMonthlyOvertimePlanInput = {
   overtimeSaturdayCount: number;
   overtimeWeekdayMaxMinutes: number;
   overtimeSaturdayMaxMinutes: number;
-  overtimeUnavailableDates: string[];
 };
 
 type DateCapacity = {
@@ -112,22 +109,6 @@ const getWeekday = (date: LocalDateString): number => {
 export const isWeekendDate = (date: LocalDateString): boolean => {
   const weekday = getWeekday(date);
   return weekday === 0 || weekday === 6;
-};
-
-export const getCoefficientModeForNewShift = ({
-  date,
-  defaultMode
-}: {
-  date: LocalDateString;
-  defaultMode: CoefficientMode;
-}): CoefficientMode => {
-  const weekday = getWeekday(date);
-
-  if (weekday === 6 || weekday === 0) {
-    return 'x1.5';
-  }
-
-  return defaultMode;
 };
 
 const getActualDurationMinutes = (
@@ -474,8 +455,7 @@ export const calculateMonthlyOvertimePlan = ({
   overtimeStrategy,
   overtimeSaturdayCount,
   overtimeWeekdayMaxMinutes,
-  overtimeSaturdayMaxMinutes,
-  overtimeUnavailableDates
+  overtimeSaturdayMaxMinutes
 }: CalculateMonthlyOvertimePlanInput): MonthlyOvertimePlan => {
   const today = now.slice(0, 10);
   const { year, month } = parseLocalDate(today);
@@ -495,11 +475,6 @@ export const calculateMonthlyOvertimePlan = ({
   const safeSaturdayMaxMinutes = isOvertimeDailyMaxMinutes(overtimeSaturdayMaxMinutes)
     ? overtimeSaturdayMaxMinutes
     : DEFAULT_OVERTIME_SATURDAY_MAX_MINUTES;
-  const unavailableDates = new Set(
-    isOvertimeUnavailableDates(overtimeUnavailableDates)
-      ? overtimeUnavailableDates
-      : []
-  );
   const limitMinutes = Math.floor(plannedMinutes * (safeLimitPercent / 100));
   const usedMinutes = monthShifts.reduce(
     (total, shift) => total + calculateShiftLimitOvertimeMinutes(shift, now),
@@ -518,7 +493,7 @@ export const calculateMonthlyOvertimePlan = ({
       .sort((left, right) => right.date.localeCompare(left.date))[0] ??
     null;
   const availableDates = getMonthDates(year, month).filter((date) => {
-    if (date < today || unavailableDates.has(date)) {
+    if (date < today) {
       return false;
     }
 

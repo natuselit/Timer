@@ -1,4 +1,4 @@
-import type { CoefficientMode, ShiftDetectionMode } from '../../shift';
+import type { ShiftDetectionMode } from '../../shift';
 
 export type Grade = 1 | 2 | 3 | 4;
 
@@ -27,7 +27,6 @@ export type Settings = {
   forecastDays: number;
   arriveHoldDelayMs: number;
   leaveHoldDelayMs: number;
-  coefficientMode: CoefficientMode;
   shiftDetectionMode: ShiftDetectionMode;
   themePreference: ThemePreference;
   backupReminderIntervalDays: BackupReminderIntervalDays;
@@ -37,7 +36,6 @@ export type Settings = {
   overtimeSaturdayCount: number;
   overtimeWeekdayMaxMinutes: number;
   overtimeSaturdayMaxMinutes: number;
-  overtimeUnavailableDates: string[];
   incognitoEnabled: boolean;
   onboardingCompleted: boolean;
   updatedAt: string;

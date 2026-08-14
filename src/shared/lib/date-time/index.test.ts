@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addMinutesToLocalTime,
   formatDurationClock,
   formatDurationMinutes,
   formatShortMinuteDuration,
@@ -25,5 +26,20 @@ describe('date-time formatters', () => {
 
   it('formats short numeric dates without month text', () => {
     expect(formatShortNumericDate('2026-06-03')).toBe('03.06');
+  });
+
+  it('adds minutes to a local time and reports crossing midnight', () => {
+    expect(addMinutesToLocalTime('14:30', 240)).toEqual({
+      time: '18:30',
+      dayOffset: 0
+    });
+    expect(addMinutesToLocalTime('14:30', 720)).toEqual({
+      time: '02:30',
+      dayOffset: 1
+    });
+    expect(addMinutesToLocalTime('06:00', 480)).toEqual({
+      time: '14:00',
+      dayOffset: 0
+    });
   });
 });

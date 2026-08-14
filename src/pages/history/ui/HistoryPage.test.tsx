@@ -20,7 +20,6 @@ const settings: Settings = {
   forecastDays: 30,
   arriveHoldDelayMs: 1_500,
   leaveHoldDelayMs: 1_500,
-  coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
@@ -30,7 +29,6 @@ const settings: Settings = {
   overtimeSaturdayCount: 1,
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
-  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T06:00:00.000+03:00'

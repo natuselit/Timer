@@ -25,7 +25,6 @@ type EnterpriseScheduleImportOptions = {
   settings?: Pick<
     Settings,
     | 'monthlySalary'
-    | 'coefficientMode'
     | 'currentGrade'
     | 'desiredGrade'
     | 'gradeSalaryBonusPercents'
@@ -78,7 +77,7 @@ const createMissingShiftsFromSchedule = async (
       baseHourlyRateSnapshot: baseHourlyRate,
       hourlyRateSnapshot: baseHourlyRate,
       gradeSnapshot: createGradeSnapshot(settings),
-      coefficientMode: settings.coefficientMode,
+      coefficientMode: 'auto',
       now
     });
     createdCount += 1;

@@ -12,7 +12,6 @@ import {
   type WorkTicket
 } from '../../../../entities/shift';
 import type { Settings } from '../../../../entities/settings';
-import { getCoefficientModeForNewShift } from '../../shifts/overtimePlanner';
 import type { ShiftRepository } from '../repositories/shiftRepository';
 
 export type CreateShiftInput = {
@@ -21,7 +20,6 @@ export type CreateShiftInput = {
   hourlyRateSnapshot: number;
   gradeSnapshot?: GradeSnapshot | null;
   workTickets?: WorkTicket[];
-  coefficientMode?: CoefficientMode;
   id?: string;
   now?: ISODateTimeString;
 };
@@ -108,7 +106,7 @@ export const createShift = (
     gradeSnapshot: input.gradeSnapshot ?? null,
     workTickets: input.workTickets ?? [],
     note: '',
-    coefficientMode: input.coefficientMode ?? 'auto',
+    coefficientMode: 'auto',
     isAutoClosed: false,
     createdAt: now,
     updatedAt: now
@@ -136,10 +134,7 @@ export const createManualShift = (
     gradeSnapshot: input.gradeSnapshot ?? null,
     workTickets: input.workTickets ?? [],
     note: '',
-    coefficientMode: getCoefficientModeForNewShift({
-      date: input.date,
-      defaultMode: input.coefficientMode
-    }),
+    coefficientMode: input.coefficientMode,
     isAutoClosed: false,
     createdAt: now,
     updatedAt: now
@@ -178,13 +173,24 @@ export const updateActiveShiftNote = async (
   });
 };
 
-export const recalculateHourlyRateSnapshotsForAllShifts = (
+export const recalculateHourlyRateSnapshotsForPeriod = (
   repository: ShiftRepository,
   monthlySalary: number,
   gradeSettings: GradeSettings,
+  period: { start: LocalDateString; end: LocalDateString },
   updatedAt: ISODateTimeString
-): Promise<number> =>
-  repository.recalculateHourlyRateSnapshotsForAllShifts(monthlySalary, gradeSettings, updatedAt);
+): Promise<number> => {
+  if (!period.start || !period.end || period.start > period.end) {
+    throw new Error('Некоректний період перерахунку.');
+  }
+
+  return repository.recalculateHourlyRateSnapshotsForPeriod(
+    monthlySalary,
+    gradeSettings,
+    period,
+    updatedAt
+  );
+};
 
 export const deleteShift = (repository: ShiftRepository, id: string): Promise<void> =>
   repository.deleteShift(id);

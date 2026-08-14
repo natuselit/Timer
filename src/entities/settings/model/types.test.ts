@@ -12,7 +12,7 @@ import {
 import type { Settings } from './types';
 
 describe('settings domain types', () => {
-  it('accepts salary, coefficient, detection and incognito settings', () => {
+  it('accepts salary, detection and incognito settings', () => {
     const settings = {
       employeeFirstName: 'Тарас',
       employeeLastName: 'Шевченко',
@@ -25,7 +25,6 @@ describe('settings domain types', () => {
       forecastDays: 30,
       arriveHoldDelayMs: 1500,
       leaveHoldDelayMs: 1500,
-      coefficientMode: 'auto',
       shiftDetectionMode: 'auto',
       themePreference: 'system',
       backupReminderIntervalDays: 14,
@@ -35,7 +34,6 @@ describe('settings domain types', () => {
       overtimeSaturdayCount: 1,
       overtimeWeekdayMaxMinutes: 240,
       overtimeSaturdayMaxMinutes: 480,
-      overtimeUnavailableDates: [],
       incognitoEnabled: false,
       onboardingCompleted: true,
       updatedAt: '2026-06-23T08:00:00.000+03:00'
@@ -43,7 +41,6 @@ describe('settings domain types', () => {
 
     expect(settings.employeeFirstName).toBe('Тарас');
     expect(settings.employeeLastName).toBe('Шевченко');
-    expect(settings.coefficientMode).toBe('auto');
     expect(settings.shiftDetectionMode).toBe('auto');
     expect(settings.themePreference).toBe('system');
     expect(settings.overtimeLimitPercent).toBe(0);
@@ -52,7 +49,6 @@ describe('settings domain types', () => {
     expect(settings.overtimeSaturdayCount).toBe(1);
     expect(settings.overtimeWeekdayMaxMinutes).toBe(240);
     expect(settings.overtimeSaturdayMaxMinutes).toBe(480);
-    expect(settings.overtimeUnavailableDates).toEqual([]);
     expect(settings.incognitoEnabled).toBe(false);
     expect(settings.onboardingCompleted).toBe(true);
   });

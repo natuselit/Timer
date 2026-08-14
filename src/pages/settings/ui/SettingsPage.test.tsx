@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
+import type { Shift } from '../../../entities/shift';
 import {
   CALENDAR_TUTORIAL_SEEN_KEY,
   localDb
@@ -23,7 +24,6 @@ const settings: Settings = {
   forecastDays: 30,
   arriveHoldDelayMs: 1_500,
   leaveHoldDelayMs: 1_500,
-  coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: 'system',
   backupReminderIntervalDays: 14,
@@ -33,13 +33,33 @@ const settings: Settings = {
   overtimeSaturdayCount: 1,
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
-  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T19:30:00.000+03:00'
 };
 
+const makeShift = (id: string, date: string): Shift => ({
+  id,
+  date,
+  type: 'first',
+  detectionMode: 'auto',
+  plannedStartTime: '06:30',
+  plannedEndTime: '14:30',
+  startTime: `${date}T06:30:00.000+03:00`,
+  endTime: `${date}T14:30:00.000+03:00`,
+  baseHourlyRateSnapshot: 100,
+  hourlyRateSnapshot: 100,
+  gradeSnapshot: null,
+  workTickets: [],
+  note: '',
+  coefficientMode: 'auto',
+  isAutoClosed: false,
+  createdAt: `${date}T06:30:00.000+03:00`,
+  updatedAt: `${date}T14:30:00.000+03:00`
+});
+
 afterEach(async () => {
+  vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
   await localDb.appMeta.clear();
@@ -104,9 +124,7 @@ describe('SettingsPage', () => {
     expect(details?.open).toBe(false);
     await user.click(coefficientQuestion);
     expect(details?.open).toBe(true);
-    expect(
-      screen.getByText(/Нові суботні й недільні зміни отримують x1.5/)
-    ).toBeTruthy();
+    expect(screen.getByText(/У суботу й неділю режим auto.*x1.5/)).toBeTruthy();
     expect(screen.getByText(/Ліміт рахується як відсоток від плану 5\/2/)).toBeTruthy();
     expect(screen.getByText('Відкрийте «Таймер»')).toBeTruthy();
     expect(screen.getByText(/Натисніть ⋮/)).toBeTruthy();
@@ -189,11 +207,11 @@ describe('SettingsPage', () => {
 
     const limitInput = screen.getByLabelText(/Ліміт від планових годин/) as HTMLInputElement;
     const stepInput = screen.getByLabelText(/Крок рекомендацій, хв/) as HTMLInputElement;
-    const weekdayMaxInput = screen.getByLabelText(
-      /Максимум перепрацювання за будній день/
+    const weekdayEndTimeInput = screen.getByLabelText(
+      'Перепрацювання до'
     ) as HTMLInputElement;
-    const saturdayMaxInput = screen.getByLabelText(
-      /Максимум роботи в суботу/
+    const saturdayEndTimeInput = screen.getByLabelText(
+      'Робота в суботу до'
     ) as HTMLInputElement;
     expect(screen.getByRole('option', { name: 'Автоматичний' })).toBeTruthy();
     await user.clear(limitInput);
@@ -206,12 +224,10 @@ describe('SettingsPage', () => {
     ) as HTMLInputElement;
     await user.clear(saturdayCountInput);
     await user.type(saturdayCountInput, '3');
-    await user.clear(weekdayMaxInput);
-    await user.type(weekdayMaxInput, '300');
-    await user.clear(saturdayMaxInput);
-    await user.type(saturdayMaxInput, '600');
-    await user.type(screen.getByLabelText('Дата без перепрацювання'), '2099-01-01');
-    await user.click(screen.getByRole('button', { name: 'Додати' }));
+    await user.clear(weekdayEndTimeInput);
+    await user.type(weekdayEndTimeInput, '1930');
+    await user.clear(saturdayEndTimeInput);
+    await user.type(saturdayEndTimeInput, '1600');
     await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
 
     expect(onSettingsChange).toHaveBeenCalledWith(
@@ -221,8 +237,7 @@ describe('SettingsPage', () => {
         overtimeStrategy: 'custom',
         overtimeSaturdayCount: 3,
         overtimeWeekdayMaxMinutes: 300,
-        overtimeSaturdayMaxMinutes: 600,
-        overtimeUnavailableDates: ['2099-01-01']
+        overtimeSaturdayMaxMinutes: 600
       })
     );
 
@@ -237,6 +252,118 @@ describe('SettingsPage', () => {
     await user.type(stepInput, '17');
     await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
     expect(screen.getByText(/Крок має бути цілим числом.*кратним 5/)).toBeTruthy();
+  });
+
+  it('uses masked end-time fields for weekday and Saturday limits', async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('Дані на пристрої')).toBeNull();
+    expect(screen.queryByText('Недоступні дати')).toBeNull();
+
+    const weekdayEndTimeInput = screen.getByLabelText(
+      'Перепрацювання до'
+    ) as HTMLInputElement;
+    const saturdayEndTimeInput = screen.getByLabelText(
+      'Робота в суботу до'
+    ) as HTMLInputElement;
+
+    expect(weekdayEndTimeInput.type).toBe('text');
+    expect(weekdayEndTimeInput.inputMode).toBe('numeric');
+    expect(weekdayEndTimeInput.placeholder).toBe('ГГ:ХХ');
+    expect(weekdayEndTimeInput.value).toBe('18:30');
+    expect(saturdayEndTimeInput.value).toBe('14:00');
+
+    await user.clear(weekdayEndTimeInput);
+    await user.type(weekdayEndTimeInput, '0230');
+    expect(weekdayEndTimeInput.value).toBe('02:30');
+
+    await user.tab();
+    expect(weekdayEndTimeInput.value).toBe('02:30');
+    await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        overtimeWeekdayMaxMinutes: 720,
+        overtimeSaturdayMaxMinutes: 480
+      })
+    );
+  });
+
+  it('requires a valid inclusive period and recalculates only shifts inside it', async () => {
+    const today = new Date();
+    const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const insideDate = `${currentMonth}-10`;
+    const outsideDate = `${currentMonth}-12`;
+    const onSettingsChange = vi.fn().mockResolvedValue(undefined);
+    await localDb.shifts.bulkPut([
+      makeShift('inside-period', insideDate),
+      makeShift('outside-period', outsideDate)
+    ]);
+    const user = userEvent.setup();
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+        onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Перерахувати історію' }));
+    const dialog = screen.getByRole('dialog', { name: 'Перерахувати історію' });
+
+    expect(dialog.querySelector('input[type="date"]')).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: 'Перерахувати' }));
+    expect(within(dialog).getByRole('alert').textContent).toBe(
+      'Вкажіть початок і завершення періоду.'
+    );
+
+    const startDate = within(dialog).getByRole('button', { name: 'Обрати 10 число' });
+    fireEvent.pointerDown(startDate);
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 560));
+    });
+    fireEvent.pointerUp(startDate);
+    fireEvent.click(startDate);
+
+    expect(within(dialog).getByText('Затисніть кінцеву дату діапазону.')).toBeTruthy();
+
+    const endDate = within(dialog).getByRole('button', { name: 'Обрати 11 число' });
+    fireEvent.pointerDown(endDate);
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 560));
+    });
+    fireEvent.pointerUp(endDate);
+    fireEvent.click(endDate);
+
+    expect(
+      await within(dialog).findByText(/Період:.*Буде перераховано змін: 1/)
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Перерахувати' }));
+
+    const notice = await screen.findByText(/Ставки й рівні перераховано/);
+    expect(notice.textContent).toMatch(
+      /Перераховано змін: 1\. Період:/
+    );
+    expect(onSettingsChange).toHaveBeenCalledTimes(1);
+
+    const [inside, outside] = await Promise.all([
+      localDb.shifts.get('inside-period'),
+      localDb.shifts.get('outside-period')
+    ]);
+    expect(inside?.baseHourlyRateSnapshot).not.toBe(100);
+    expect(outside?.baseHourlyRateSnapshot).toBe(100);
   });
 
   it('does not show the removed monthly Saturday x2 feature', () => {

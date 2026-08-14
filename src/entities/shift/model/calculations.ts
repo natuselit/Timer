@@ -77,6 +77,13 @@ const overlapMinutes = (
 const calculateAmount = (hourlyRate: number, minutes: number, coefficient: number): number =>
   (hourlyRate / 60) * minutes * coefficient;
 
+const isWeekendDate = (date: LocalDateString): boolean => {
+  const [year, month, day] = date.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+
+  return weekday === 0 || weekday === 6;
+};
+
 export const getPlannedShiftWindow = (
   date: LocalDateString,
   type: ShiftType,
@@ -107,6 +114,10 @@ export const getEffectiveCoefficient = (
     }
 
     return coefficient;
+  }
+
+  if (isWeekendDate(shift.date)) {
+    return 1.5;
   }
 
   const plannedWindow = getPlannedShiftWindow(shift.date, shift.type, shift.startTime);
@@ -192,6 +203,31 @@ export const calculateSalaryBreakdown = (
         {
           key: 'whole-shift',
           label: `Уся зміна x${coefficient}`,
+          minutes: timeBreakdown.actualDurationMinutes,
+          coefficient,
+          amount
+        }
+      ]
+    };
+  }
+
+  if (isWeekendDate(shift.date)) {
+    const coefficient = 1.5;
+    const amount = calculateAmount(
+      hourlyRate,
+      timeBreakdown.actualDurationMinutes,
+      coefficient
+    );
+
+    return {
+      mode: 'auto',
+      hourlyRate,
+      totalMinutes: timeBreakdown.actualDurationMinutes,
+      totalAmount: amount,
+      lines: [
+        {
+          key: 'whole-shift',
+          label: 'Вихідний день x1.5',
           minutes: timeBreakdown.actualDurationMinutes,
           coefficient,
           amount

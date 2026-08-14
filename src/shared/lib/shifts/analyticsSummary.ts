@@ -90,6 +90,13 @@ const toLocalDateString = (date: Date): LocalDateString =>
     date.getDate()
   ).padStart(2, '0')}`;
 
+const isWeekendDate = (date: LocalDateString): boolean => {
+  const [year, month, day] = date.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+
+  return weekday === 0 || weekday === 6;
+};
+
 const createShiftTypeAnalytics = (): ShiftTypeAnalytics => ({
   shiftCount: 0,
   salaryAmount: 0,
@@ -102,7 +109,7 @@ const calculateOvertimeIncome = (shift: Shift, overtimeMinutes: number): number 
     const salary = calculateSalaryBreakdown(shift);
 
     return salary.lines
-      .filter((line) => line.key === 'overtime-before' || line.key === 'overtime-after')
+      .filter((line) => line.coefficient === 1.5)
       .reduce((total, line) => total + line.amount, 0);
   }
 
@@ -168,13 +175,17 @@ export const calculateAnalyticsSummary = ({
   completedShifts.forEach((shift) => {
     const salary = calculateSalaryBreakdown(shift);
     const time = calculateShiftTimeBreakdown(shift);
+    const shiftOvertimeMinutes =
+      shift.coefficientMode === 'auto' && isWeekendDate(shift.date)
+        ? time.actualDurationMinutes
+        : time.totalOvertimeMinutes;
     const typeSummary = shift.type === 'first' ? firstShift : secondShift;
 
     workSalary += salary.totalAmount;
     totalMinutes += time.actualDurationMinutes;
-    overtimeMinutes += time.totalOvertimeMinutes;
-    overtimeIncome += calculateOvertimeIncome(shift, time.totalOvertimeMinutes);
-    maxOvertimeMinutes = Math.max(maxOvertimeMinutes, time.totalOvertimeMinutes);
+    overtimeMinutes += shiftOvertimeMinutes;
+    overtimeIncome += calculateOvertimeIncome(shift, shiftOvertimeMinutes);
+    maxOvertimeMinutes = Math.max(maxOvertimeMinutes, shiftOvertimeMinutes);
     salary.lines.forEach((line) => {
       if (line.minutes <= 0) {
         return;
@@ -194,7 +205,7 @@ export const calculateAnalyticsSummary = ({
     typeSummary.shiftCount += 1;
     typeSummary.salaryAmount += salary.totalAmount;
     typeSummary.totalMinutes += time.actualDurationMinutes;
-    typeSummary.overtimeMinutes += time.totalOvertimeMinutes;
+    typeSummary.overtimeMinutes += shiftOvertimeMinutes;
 
     shift.workTickets
       .filter((ticket) => ticket.endedAt !== null)

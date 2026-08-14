@@ -64,27 +64,6 @@ export const isOvertimeDailyMaxMinutes = (value: unknown): value is number =>
   value <= OVERTIME_DAILY_MAX_MINUTES_MAX &&
   value % 5 === 0;
 
-const isLocalDateString = (value: unknown): value is string => {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return false;
-  }
-
-  const [year, month, day] = value.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-
-  return (
-    date.getUTCFullYear() === year &&
-    date.getUTCMonth() === month - 1 &&
-    date.getUTCDate() === day
-  );
-};
-
-export const isOvertimeUnavailableDates = (value: unknown): value is string[] =>
-  Array.isArray(value) &&
-  value.length <= 366 &&
-  value.every(isLocalDateString) &&
-  new Set(value).size === value.length;
-
 export const DEFAULT_SETTINGS: Settings = {
   employeeFirstName: '',
   employeeLastName: '',
@@ -97,7 +76,6 @@ export const DEFAULT_SETTINGS: Settings = {
   forecastDays: 30,
   arriveHoldDelayMs: 1500,
   leaveHoldDelayMs: 1500,
-  coefficientMode: 'auto',
   shiftDetectionMode: 'auto',
   themePreference: DEFAULT_THEME_PREFERENCE,
   backupReminderIntervalDays: DEFAULT_BACKUP_REMINDER_INTERVAL_DAYS,
@@ -107,7 +85,6 @@ export const DEFAULT_SETTINGS: Settings = {
   overtimeSaturdayCount: DEFAULT_OVERTIME_SATURDAY_COUNT,
   overtimeWeekdayMaxMinutes: DEFAULT_OVERTIME_WEEKDAY_MAX_MINUTES,
   overtimeSaturdayMaxMinutes: DEFAULT_OVERTIME_SATURDAY_MAX_MINUTES,
-  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: false,
   updatedAt: new Date(0).toISOString()

@@ -390,7 +390,7 @@ const createDefaultFormValues = (
     hourlyRateSnapshot: getMonthlySalaryInputValue(settings.monthlySalary),
     hourlyRateSnapshotValue: hourlyRateSnapshot,
     hourlyRateSnapshotEdited: false,
-    coefficientMode: settings.coefficientMode,
+    coefficientMode: 'auto',
     workTickets: []
   };
 };

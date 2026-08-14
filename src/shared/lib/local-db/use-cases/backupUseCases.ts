@@ -12,7 +12,6 @@ import {
   isOvertimeSaturdayCount,
   isOvertimeStepMinutes,
   isOvertimeStrategy,
-  isOvertimeUnavailableDates,
   type BackupReminderIntervalDays,
   type Grade,
   type GradePercentSet,
@@ -64,7 +63,8 @@ const SHIFT_NOTE_BACKUP_SCHEMA_VERSION = 9;
 const OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION = 10;
 const CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION = 11;
 const OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION = 12;
-export const BACKUP_SCHEMA_VERSION = OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION;
+const REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION = 13;
+export const BACKUP_SCHEMA_VERSION = REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION;
 const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   LEGACY_BACKUP_SCHEMA_VERSION,
   2,
@@ -77,7 +77,8 @@ const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   SHIFT_NOTE_BACKUP_SCHEMA_VERSION,
   OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION,
   CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION,
-  OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
+  OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION,
+  REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION
 ]);
 
 type BackupSchemaVersion = typeof BACKUP_SCHEMA_VERSION;
@@ -143,6 +144,12 @@ const isLocalDate = (value: unknown): value is LocalDateString => {
     date.getUTCDate() === day
   );
 };
+
+const isLegacyOvertimeUnavailableDates = (value: unknown): value is string[] =>
+  Array.isArray(value) &&
+  value.length <= 366 &&
+  value.every(isLocalDate) &&
+  new Set(value).size === value.length;
 
 const isLocalTime = (value: unknown): value is string =>
   isString(value) && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
@@ -282,11 +289,14 @@ const parseSettings = (
     throw new BackupValidationError('settings має бути обʼєктом.');
   }
 
-  const coefficientMode = value.coefficientMode;
   const shiftDetectionMode = value.shiftDetectionMode;
   const updatedAt = value.updatedAt;
 
-  if (!COEFFICIENT_MODES.has(coefficientMode as CoefficientMode)) {
+  if (
+    schemaVersion < REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION &&
+    value.coefficientMode !== undefined &&
+    !COEFFICIENT_MODES.has(value.coefficientMode as CoefficientMode)
+  ) {
     throw new BackupValidationError('settings.coefficientMode має несумісне значення.');
   }
 
@@ -379,7 +389,9 @@ const parseSettings = (
 
   if (
     schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION &&
-    !isOvertimeUnavailableDates(overtimeUnavailableDates)
+    schemaVersion < REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION &&
+    overtimeUnavailableDates !== undefined &&
+    !isLegacyOvertimeUnavailableDates(overtimeUnavailableDates)
   ) {
     throw new BackupValidationError(
       'settings.overtimeUnavailableDates має бути списком унікальних локальних дат.'
@@ -429,7 +441,6 @@ const parseSettings = (
       HOLD_DELAY_MIN_MS,
       HOLD_DELAY_MAX_MS
     ),
-    coefficientMode: coefficientMode as CoefficientMode,
     shiftDetectionMode: shiftDetectionMode as ShiftDetectionMode,
     themePreference:
       schemaVersion >= THEME_BACKUP_SCHEMA_VERSION
@@ -465,10 +476,6 @@ const parseSettings = (
       schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
         ? (overtimeSaturdayMaxMinutes as number)
         : DEFAULT_SETTINGS.overtimeSaturdayMaxMinutes,
-    overtimeUnavailableDates:
-      schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
-        ? [...(overtimeUnavailableDates as string[])].sort()
-        : DEFAULT_SETTINGS.overtimeUnavailableDates,
     incognitoEnabled: readBoolean(value, 'incognitoEnabled'),
     onboardingCompleted: readBoolean(value, 'onboardingCompleted'),
     updatedAt
