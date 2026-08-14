@@ -37,8 +37,6 @@ import {
   HOLD_DELAY_MIN_MS,
   OVERTIME_LIMIT_PERCENT_MAX,
   OVERTIME_LIMIT_PERCENT_MIN,
-  OVERTIME_SATURDAY_COUNT_MAX,
-  OVERTIME_SATURDAY_COUNT_MIN,
   OVERTIME_STEP_MINUTES_MAX,
   OVERTIME_STEP_MINUTES_MIN,
   calculateCumulativeGradePercent,
@@ -110,7 +108,6 @@ type FormValues = {
   overtimeLimitPercent: string;
   overtimeStepMinutes: string;
   overtimeStrategy: OvertimeStrategy;
-  overtimeSaturdayCount: string;
   overtimeWeekdayEndTime: string;
   overtimeSaturdayEndTime: string;
 };
@@ -206,7 +203,6 @@ const FORM_FIELD_SECTIONS: Record<keyof FormValues, SettingsSectionId> = {
   overtimeLimitPercent: 'overtime',
   overtimeStepMinutes: 'overtime',
   overtimeStrategy: 'overtime',
-  overtimeSaturdayCount: 'overtime',
   overtimeWeekdayEndTime: 'overtime',
   overtimeSaturdayEndTime: 'overtime'
 };
@@ -214,19 +210,14 @@ const FORM_FIELD_SECTIONS: Record<keyof FormValues, SettingsSectionId> = {
 const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
 const delayMaxSeconds = HOLD_DELAY_MAX_MS / 1000;
 const OVERTIME_STRATEGY_DESCRIPTIONS: Record<OvertimeStrategy, string> = {
-  weekdays: 'Увесь залишок розподіляється лише між майбутніми буднями.',
   standard: 'Використовуються дві найближчі суботи, решта — на будні.',
-  saturdays: 'Час розподіляється між усіма майбутніми суботами, решта — на будні.',
-  automatic:
-    'Намагається тримати будні в межах 2 годин перепрацювання на день, а надлишок переносить на мінімально потрібну кількість субот.',
-  custom: 'Ви самі задаєте кількість субот, решта ліміту розподіляється на будні.'
+  'standard-plus': 'Використовуються три найближчі суботи, решта — на будні.',
+  'standard-plus-plus': 'Використовуються чотири найближчі суботи, решта — на будні.'
 };
 const OVERTIME_STRATEGY_LABELS: Record<OvertimeStrategy, string> = {
-  weekdays: 'Лише будні',
   standard: 'Стандарт',
-  saturdays: 'Усі суботи',
-  automatic: 'Автоматично',
-  custom: 'Власна'
+  'standard-plus': 'Стандарт+',
+  'standard-plus-plus': 'Стандарт++'
 };
 const FAQ_ITEMS: Array<{
   question: string;
@@ -329,7 +320,6 @@ const toFormValues = (settings: Settings): FormValues => ({
   overtimeLimitPercent: String(settings.overtimeLimitPercent),
   overtimeStepMinutes: String(settings.overtimeStepMinutes),
   overtimeStrategy: settings.overtimeStrategy,
-  overtimeSaturdayCount: String(settings.overtimeSaturdayCount),
   overtimeWeekdayEndTime: formatOvertimeEndTime(
     WEEKDAY_OVERTIME_START_TIME,
     settings.overtimeWeekdayMaxMinutes
@@ -352,7 +342,6 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   const backupReminderIntervalDays = Number(values.backupReminderIntervalDays);
   const overtimeLimitPercent = parseNumber(values.overtimeLimitPercent);
   const overtimeStepMinutes = Number(values.overtimeStepMinutes);
-  const overtimeSaturdayCount = Number(values.overtimeSaturdayCount);
   const overtimeWeekdayMaxMinutes = getMinutesUntilTime(
     WEEKDAY_OVERTIME_START_TIME,
     values.overtimeWeekdayEndTime
@@ -428,14 +417,6 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
     overtimeStepMinutes % 5 !== 0
   ) {
     errors.overtimeStepMinutes = `Крок має бути цілим числом від ${OVERTIME_STEP_MINUTES_MIN} до ${OVERTIME_STEP_MINUTES_MAX} і кратним 5.`;
-  }
-
-  if (
-    !Number.isSafeInteger(overtimeSaturdayCount) ||
-    overtimeSaturdayCount < OVERTIME_SATURDAY_COUNT_MIN ||
-    overtimeSaturdayCount > OVERTIME_SATURDAY_COUNT_MAX
-  ) {
-    errors.overtimeSaturdayCount = `Кількість субот має бути від ${OVERTIME_SATURDAY_COUNT_MIN} до ${OVERTIME_SATURDAY_COUNT_MAX}.`;
   }
 
   if (!isOvertimeDailyMaxMinutes(overtimeWeekdayMaxMinutes)) {
@@ -688,7 +669,6 @@ export function SettingsPage({
       overtimeLimitPercent: parseNumber(values.overtimeLimitPercent),
       overtimeStepMinutes: Number(values.overtimeStepMinutes),
       overtimeStrategy: values.overtimeStrategy,
-      overtimeSaturdayCount: Number(values.overtimeSaturdayCount),
       overtimeWeekdayMaxMinutes,
       overtimeSaturdayMaxMinutes,
       updatedAt: toLocalIsoString(new Date())
@@ -1300,46 +1280,15 @@ export function SettingsPage({
               value={values.overtimeStrategy}
               onChange={updateField('overtimeStrategy')}
             >
-              <option value="weekdays">Лише будні</option>
               <option value="standard">Стандарт</option>
-              <option value="saturdays">Усі суботи</option>
-              <option value="automatic">Автоматичний</option>
-              <option value="custom">Власна</option>
+              <option value="standard-plus">Стандарт+</option>
+              <option value="standard-plus-plus">Стандарт++</option>
             </select>
             <small>{OVERTIME_STRATEGY_DESCRIPTIONS[values.overtimeStrategy]}</small>
             {errors.overtimeStrategy ? (
               <small id="overtimeStrategy-error">{errors.overtimeStrategy}</small>
             ) : null}
           </label>
-
-          {values.overtimeStrategy === 'custom' ? (
-            <label className="settings-page__field">
-              <span>Кількість субот у місяці</span>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={OVERTIME_SATURDAY_COUNT_MIN}
-                max={OVERTIME_SATURDAY_COUNT_MAX}
-                step={1}
-                aria-invalid={errors.overtimeSaturdayCount ? 'true' : 'false'}
-                aria-describedby={
-                  errors.overtimeSaturdayCount
-                    ? 'overtimeSaturdayCount-error'
-                    : 'overtimeSaturdayCount-help'
-                }
-                value={values.overtimeSaturdayCount}
-                onChange={updateField('overtimeSaturdayCount')}
-              />
-              <small id="overtimeSaturdayCount-help">
-                Від 0 до 5 найближчих субот; решта — на будні.
-              </small>
-              {errors.overtimeSaturdayCount ? (
-                <small id="overtimeSaturdayCount-error">
-                  {errors.overtimeSaturdayCount}
-                </small>
-              ) : null}
-            </label>
-          ) : null}
 
           <label className="settings-page__field">
             <span>Перепрацювання до</span>

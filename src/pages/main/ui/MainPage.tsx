@@ -769,7 +769,6 @@ export function MainPage({
         overtimeLimitPercent: settings.overtimeLimitPercent,
         overtimeStepMinutes: settings.overtimeStepMinutes,
         overtimeStrategy: settings.overtimeStrategy,
-        overtimeSaturdayCount: settings.overtimeSaturdayCount,
         overtimeWeekdayMaxMinutes: settings.overtimeWeekdayMaxMinutes,
         overtimeSaturdayMaxMinutes: settings.overtimeSaturdayMaxMinutes
       }),
@@ -779,7 +778,6 @@ export function MainPage({
       settings.monthlySalary,
       settings.overtimeLimitPercent,
       settings.overtimeStepMinutes,
-      settings.overtimeSaturdayCount,
       settings.overtimeWeekdayMaxMinutes,
       settings.overtimeSaturdayMaxMinutes,
       settings.overtimeStrategy

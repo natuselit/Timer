@@ -152,7 +152,6 @@ export const createDemoDataSet = (
     overtimeLimitPercent: 10,
     overtimeStepMinutes: 30,
     overtimeStrategy: 'standard',
-    overtimeSaturdayCount: 1,
     overtimeWeekdayMaxMinutes: 240,
     overtimeSaturdayMaxMinutes: 480,
     incognitoEnabled: false,

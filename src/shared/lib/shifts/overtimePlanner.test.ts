@@ -36,7 +36,6 @@ const calculatePlan = (
     overtimeLimitPercent: 10,
     overtimeStepMinutes: 30,
     overtimeStrategy: 'standard',
-    overtimeSaturdayCount: 1,
     overtimeWeekdayMaxMinutes: 240,
     overtimeSaturdayMaxMinutes: 480,
     ...overrides
@@ -100,7 +99,7 @@ describe('monthly overtime planner', () => {
   it('moves the recommendation to the next available date after today is completed', () => {
     const plan = calculatePlan({
       now: '2026-08-11T16:00:00.000+03:00',
-      overtimeStrategy: 'weekdays',
+      overtimeSaturdayMaxMinutes: 60,
       shifts: [
         makeShift({
           date: '2026-08-11',
@@ -128,7 +127,7 @@ describe('monthly overtime planner', () => {
   it('keeps the current-day recommendation for an active shift', () => {
     const plan = calculatePlan({
       now: '2026-08-11T15:00:00.000+03:00',
-      overtimeStrategy: 'weekdays',
+      overtimeSaturdayMaxMinutes: 60,
       shifts: [
         makeShift({
           date: '2026-08-11',
@@ -150,7 +149,7 @@ describe('monthly overtime planner', () => {
   it('starts a future first-shift recommendation as early as 06:00', () => {
     const plan = calculatePlan({
       now: '2026-08-11T16:00:00.000+03:00',
-      overtimeStrategy: 'weekdays',
+      overtimeSaturdayMaxMinutes: 60,
       shifts: [
         makeShift({
           date: '2026-08-11',
@@ -174,15 +173,15 @@ describe('monthly overtime planner', () => {
   it('distributes weekday recommendations in the configured step without exceeding the limit', () => {
     const stepMinutes = 15;
     const plan = calculatePlan({
-      overtimeStrategy: 'weekdays',
-      overtimeStepMinutes: stepMinutes
+      overtimeStepMinutes: stepMinutes,
+      overtimeSaturdayMaxMinutes: 60
     });
     const scenario = plan.selectedScenario;
 
-    expect(scenario.saturdayMinutes).toBe(0);
-    expect(scenario.weekdayMinutes + scenario.unallocatedMinutes).toBe(plan.remainingMinutes);
+    expect(
+      scenario.weekdayMinutes + scenario.saturdayMinutes + scenario.unallocatedMinutes
+    ).toBe(plan.remainingMinutes);
     expect(scenario.unallocatedMinutes).toBeLessThan(stepMinutes);
-    expect(scenario.allocations.every(({ kind }) => kind === 'weekday')).toBe(true);
     expect(
       scenario.allocations.every(
         ({ minutes }) => minutes % stepMinutes === 0
@@ -190,58 +189,34 @@ describe('monthly overtime planner', () => {
     ).toBe(true);
   });
 
-  it('uses two Saturdays and distributes the rest between weekdays for standard', () => {
-    const plan = calculatePlan({ overtimeLimitPercent: 20 });
+  it('returns exactly the three fixed strategies', () => {
+    const plan = calculatePlan();
 
-    expect(
-      plan.selectedScenario.allocations.filter(({ kind }) => kind === 'saturday')
-    ).toHaveLength(2);
-    expect(plan.selectedScenario.saturdayMinutes).toBe(960);
-    expect(plan.selectedScenario.weekdayMinutes).toBeGreaterThan(0);
+    expect(plan.scenarios.map(({ strategy }) => strategy)).toEqual([
+      'standard',
+      'standard-plus',
+      'standard-plus-plus'
+    ]);
   });
 
-  it('distributes time between every available Saturday', () => {
+  it('uses up to two, three or four Saturdays before distributing the rest to weekdays', () => {
     const plan = calculatePlan({
-      overtimeLimitPercent: 12,
-      overtimeStrategy: 'saturdays'
+      now: '2026-08-01T05:00:00.000+03:00',
+      overtimeLimitPercent: 20
     });
-    const saturdayAllocations = plan.selectedScenario.allocations.filter(
-      ({ kind }) => kind === 'saturday'
+    const saturdayCounts = Object.fromEntries(
+      plan.scenarios.map((scenario) => [
+        scenario.strategy,
+        scenario.allocations.filter(({ kind }) => kind === 'saturday').length
+      ])
     );
 
-    expect(saturdayAllocations).toHaveLength(3);
-    expect(saturdayAllocations.map(({ minutes }) => minutes)).toEqual([420, 390, 390]);
-    expect(
-      plan.selectedScenario.saturdayMinutes +
-        plan.selectedScenario.weekdayMinutes +
-        plan.selectedScenario.unallocatedMinutes
-    ).toBe(plan.remainingMinutes);
-    expect(
-      plan.selectedScenario.allocations.every(
-        ({ minutes }) => minutes % 30 === 0
-      )
-    ).toBe(true);
-  });
-
-  it('keeps automatic weekdays within two hours and adds only required Saturdays', () => {
-    const plan = calculatePlan({
-      overtimeLimitPercent: 20,
-      overtimeStrategy: 'automatic'
+    expect(saturdayCounts).toEqual({
+      standard: 2,
+      'standard-plus': 3,
+      'standard-plus-plus': 4
     });
-    const weekdayAllocations = plan.selectedScenario.allocations.filter(
-      ({ kind }) => kind === 'weekday'
-    );
-    const saturdayAllocations = plan.selectedScenario.allocations.filter(
-      ({ kind }) => kind === 'saturday'
-    );
-
-    expect(weekdayAllocations.every(({ minutes }) => minutes <= 120)).toBe(true);
-    expect(saturdayAllocations).toHaveLength(1);
-    expect(
-      plan.selectedScenario.weekdayMinutes +
-        plan.selectedScenario.saturdayMinutes +
-        plan.selectedScenario.unallocatedMinutes
-    ).toBe(plan.remainingMinutes);
+    expect(plan.scenarios.every(({ weekdayMinutes }) => weekdayMinutes > 0)).toBe(true);
   });
 
   it('keeps a future recommended interval on configured step boundaries', () => {
@@ -266,28 +241,41 @@ describe('monthly overtime planner', () => {
     ).toBe(true);
   });
 
-  it('uses exactly the configured number of Saturdays for the custom strategy', () => {
+  it('uses fewer Saturdays when the remaining limit fits into one', () => {
     const plan = calculatePlan({
+      now: '2026-08-01T05:00:00.000+03:00',
+      overtimeLimitPercent: 3,
+      overtimeStrategy: 'standard-plus-plus'
+    });
+
+    expect(
+      plan.selectedScenario.allocations.filter(({ kind }) => kind === 'saturday')
+    ).toHaveLength(1);
+    expect(plan.selectedScenario.saturdayMinutes).toBeLessThanOrEqual(plan.remainingMinutes);
+  });
+
+  it('uses only the Saturdays still available in the current month', () => {
+    const plan = calculatePlan({
+      now: '2026-08-20T08:00:00.000+03:00',
       overtimeLimitPercent: 20,
-      overtimeStrategy: 'custom',
-      overtimeSaturdayCount: 2
+      overtimeStrategy: 'standard-plus-plus'
     });
 
     expect(
       plan.selectedScenario.allocations.filter(({ kind }) => kind === 'saturday')
     ).toHaveLength(2);
-    expect(plan.selectedScenario.weekdayMinutes).toBeGreaterThan(0);
   });
 
   it('respects configurable weekday and Saturday daily maximums', () => {
     const weekdayPlan = calculatePlan({
       overtimeLimitPercent: 50,
-      overtimeStrategy: 'weekdays',
+      overtimeStrategy: 'standard',
+      overtimeSaturdayMaxMinutes: 60,
       overtimeWeekdayMaxMinutes: 60
     });
     const saturdayPlan = calculatePlan({
       overtimeLimitPercent: 50,
-      overtimeStrategy: 'saturdays',
+      overtimeStrategy: 'standard-plus-plus',
       overtimeSaturdayMaxMinutes: 600
     });
 
@@ -305,7 +293,7 @@ describe('monthly overtime planner', () => {
   it('reports an unallocated remainder when no eligible dates remain', () => {
     const plan = calculatePlan({
       now: '2026-08-31T23:00:00.000+03:00',
-      overtimeStrategy: 'saturdays',
+      overtimeStrategy: 'standard-plus-plus',
       shifts: [
         makeShift({
           date: '2026-08-31',

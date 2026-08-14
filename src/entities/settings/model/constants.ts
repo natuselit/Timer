@@ -17,19 +17,14 @@ export const DEFAULT_GRADE_NORM_PERCENTS = [100, 120, 140, 160] as const;
 export const BACKUP_REMINDER_INTERVAL_DAYS = [7, 14, 30] as const;
 export const DEFAULT_BACKUP_REMINDER_INTERVAL_DAYS: BackupReminderIntervalDays = 14;
 export const OVERTIME_STRATEGIES = [
-  'weekdays',
   'standard',
-  'saturdays',
-  'automatic',
-  'custom'
+  'standard-plus',
+  'standard-plus-plus'
 ] as const;
 export const DEFAULT_OVERTIME_STRATEGY: OvertimeStrategy = 'standard';
 export const OVERTIME_STEP_MINUTES_MIN = 5;
 export const OVERTIME_STEP_MINUTES_MAX = 480;
 export const DEFAULT_OVERTIME_STEP_MINUTES = 30;
-export const OVERTIME_SATURDAY_COUNT_MIN = 0;
-export const OVERTIME_SATURDAY_COUNT_MAX = 5;
-export const DEFAULT_OVERTIME_SATURDAY_COUNT = 1;
 export const OVERTIME_DAILY_MAX_MINUTES_MIN = 5;
 export const OVERTIME_DAILY_MAX_MINUTES_MAX = 12 * 60;
 export const DEFAULT_OVERTIME_WEEKDAY_MAX_MINUTES = 4 * 60;
@@ -50,12 +45,6 @@ export const isOvertimeStepMinutes = (value: unknown): value is number =>
   value >= OVERTIME_STEP_MINUTES_MIN &&
   value <= OVERTIME_STEP_MINUTES_MAX &&
   value % 5 === 0;
-
-export const isOvertimeSaturdayCount = (value: unknown): value is number =>
-  typeof value === 'number' &&
-  Number.isSafeInteger(value) &&
-  value >= OVERTIME_SATURDAY_COUNT_MIN &&
-  value <= OVERTIME_SATURDAY_COUNT_MAX;
 
 export const isOvertimeDailyMaxMinutes = (value: unknown): value is number =>
   typeof value === 'number' &&
@@ -82,7 +71,6 @@ export const DEFAULT_SETTINGS: Settings = {
   overtimeLimitPercent: 0,
   overtimeStepMinutes: DEFAULT_OVERTIME_STEP_MINUTES,
   overtimeStrategy: DEFAULT_OVERTIME_STRATEGY,
-  overtimeSaturdayCount: DEFAULT_OVERTIME_SATURDAY_COUNT,
   overtimeWeekdayMaxMinutes: DEFAULT_OVERTIME_WEEKDAY_MAX_MINUTES,
   overtimeSaturdayMaxMinutes: DEFAULT_OVERTIME_SATURDAY_MAX_MINUTES,
   incognitoEnabled: false,

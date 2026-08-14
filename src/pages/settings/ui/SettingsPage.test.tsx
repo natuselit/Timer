@@ -30,7 +30,6 @@ const settings: Settings = {
   overtimeLimitPercent: 0,
   overtimeStepMinutes: 30,
   overtimeStrategy: 'standard',
-  overtimeSaturdayCount: 1,
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
   incognitoEnabled: false,
@@ -192,7 +191,7 @@ describe('SettingsPage', () => {
     );
   });
 
-  it('validates and saves the overtime limit, step and custom strategy', async () => {
+  it('validates and saves the overtime limit, step and fixed strategy', async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn().mockResolvedValue(undefined);
 
@@ -213,17 +212,18 @@ describe('SettingsPage', () => {
     const saturdayEndTimeInput = screen.getByLabelText(
       'Робота в суботу до'
     ) as HTMLInputElement;
-    expect(screen.getByRole('option', { name: 'Автоматичний' })).toBeTruthy();
+    expect(
+      screen.getAllByRole('option').map((option) => option.textContent)
+    ).toEqual(expect.arrayContaining(['Стандарт', 'Стандарт+', 'Стандарт++']));
+    expect(screen.queryByRole('option', { name: 'Автоматичний' })).toBeNull();
     await user.clear(limitInput);
     await user.type(limitInput, '12,5');
     await user.clear(stepInput);
     await user.type(stepInput, '15');
-    await user.selectOptions(screen.getByLabelText('Стратегія перепрацювань'), 'custom');
-    const saturdayCountInput = screen.getByLabelText(
-      /Кількість субот у місяці/
-    ) as HTMLInputElement;
-    await user.clear(saturdayCountInput);
-    await user.type(saturdayCountInput, '3');
+    await user.selectOptions(
+      screen.getByLabelText('Стратегія перепрацювань'),
+      'standard-plus'
+    );
     await user.clear(weekdayEndTimeInput);
     await user.type(weekdayEndTimeInput, '1930');
     await user.clear(saturdayEndTimeInput);
@@ -234,12 +234,12 @@ describe('SettingsPage', () => {
       expect.objectContaining({
         overtimeLimitPercent: 12.5,
         overtimeStepMinutes: 15,
-        overtimeStrategy: 'custom',
-        overtimeSaturdayCount: 3,
+        overtimeStrategy: 'standard-plus',
         overtimeWeekdayMaxMinutes: 300,
         overtimeSaturdayMaxMinutes: 600
       })
     );
+    expect(screen.queryByLabelText(/Кількість субот у місяці/)).toBeNull();
 
     await user.clear(limitInput);
     await user.type(limitInput, '101');

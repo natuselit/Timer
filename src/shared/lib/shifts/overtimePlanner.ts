@@ -10,11 +10,9 @@ import {
   calculateHourlyRateFromMonthlySalary,
   countWeekdayWorkdaysInMonth,
   DEFAULT_OVERTIME_SATURDAY_MAX_MINUTES,
-  DEFAULT_OVERTIME_SATURDAY_COUNT,
   DEFAULT_OVERTIME_STEP_MINUTES,
   DEFAULT_OVERTIME_WEEKDAY_MAX_MINUTES,
   isOvertimeDailyMaxMinutes,
-  isOvertimeSaturdayCount,
   isOvertimeStepMinutes,
   type OvertimeStrategy
 } from '../../../entities/settings';
@@ -22,15 +20,16 @@ import {
 const MINUTES_PER_SHIFT = 8 * 60;
 const MINUTE_IN_MS = 60_000;
 const FIRST_SHIFT_MAX_EARLY_START_MINUTES = 30;
-const STANDARD_SATURDAY_COUNT = 2;
-const AUTOMATIC_PREFERRED_WEEKDAY_MINUTES = 2 * 60;
+const OVERTIME_STRATEGY_SATURDAY_COUNTS: Record<OvertimeStrategy, number> = {
+  standard: 2,
+  'standard-plus': 3,
+  'standard-plus-plus': 4
+};
 
 export const OVERTIME_STRATEGY_LABELS: Record<OvertimeStrategy, string> = {
-  weekdays: 'Лише будні',
   standard: 'Стандарт',
-  saturdays: 'Усі суботи',
-  automatic: 'Автоматичний',
-  custom: 'Власна'
+  'standard-plus': 'Стандарт+',
+  'standard-plus-plus': 'Стандарт++'
 };
 
 export type OvertimeAllocation = {
@@ -78,7 +77,6 @@ export type CalculateMonthlyOvertimePlanInput = {
   overtimeLimitPercent: number;
   overtimeStepMinutes: number;
   overtimeStrategy: OvertimeStrategy;
-  overtimeSaturdayCount: number;
   overtimeWeekdayMaxMinutes: number;
   overtimeSaturdayMaxMinutes: number;
 };
@@ -227,34 +225,13 @@ const allocateSaturdays = (
   return { allocations, remainingMinutes };
 };
 
-const distributeAcrossSaturdays = (
-  minutes: number,
-  saturdayCapacities: DateCapacity[],
-  stepMinutes: number
-): { allocations: OvertimeAllocation[]; remainingMinutes: number } => {
-  const weekdayResult = distributeAcrossWeekdays(
-    minutes,
-    saturdayCapacities,
-    stepMinutes
-  );
-
-  return {
-    allocations: weekdayResult.allocations.map((allocation) => ({
-      ...allocation,
-      kind: 'saturday' as const
-    })),
-    remainingMinutes: weekdayResult.unallocatedMinutes
-  };
-};
-
 const createScenario = ({
   strategy,
   remainingMinutes,
   weekdayCapacities,
   saturdayCapacities,
   hourlyRate,
-  stepMinutes,
-  customSaturdayCount
+  stepMinutes
 }: {
   strategy: OvertimeStrategy;
   remainingMinutes: number;
@@ -262,64 +239,13 @@ const createScenario = ({
   saturdayCapacities: DateCapacity[];
   hourlyRate: number;
   stepMinutes: number;
-  customSaturdayCount: number;
 }): OvertimeScenario => {
-  let saturdayResult = {
-    allocations: [] as OvertimeAllocation[],
-    remainingMinutes
-  };
-
-  if (strategy === 'standard') {
-    saturdayResult = allocateSaturdays(
-      remainingMinutes,
-      saturdayCapacities,
-      STANDARD_SATURDAY_COUNT,
-      stepMinutes
-    );
-  } else if (strategy === 'saturdays') {
-    saturdayResult = distributeAcrossSaturdays(
-      remainingMinutes,
-      saturdayCapacities,
-      stepMinutes
-    );
-  } else if (strategy === 'custom') {
-    saturdayResult = allocateSaturdays(
-      remainingMinutes,
-      saturdayCapacities,
-      customSaturdayCount,
-      stepMinutes
-    );
-  } else if (strategy === 'automatic') {
-    const preferredWeekdayCapacity = weekdayCapacities.reduce(
-      (total, { capacityMinutes }) =>
-        total +
-        Math.floor(
-          Math.min(capacityMinutes, AUTOMATIC_PREFERRED_WEEKDAY_MINUTES) /
-            stepMinutes
-        ) *
-          stepMinutes,
-      0
-    );
-    const saturdayTargetMinutes = Math.max(
-      0,
-      remainingMinutes - preferredWeekdayCapacity
-    );
-    const automaticSaturdays = allocateSaturdays(
-      saturdayTargetMinutes,
-      saturdayCapacities,
-      saturdayCapacities.length,
-      stepMinutes
-    );
-    const allocatedSaturdayMinutes = automaticSaturdays.allocations.reduce(
-      (total, allocation) => total + allocation.minutes,
-      0
-    );
-
-    saturdayResult = {
-      allocations: automaticSaturdays.allocations,
-      remainingMinutes: remainingMinutes - allocatedSaturdayMinutes
-    };
-  }
+  const saturdayResult = allocateSaturdays(
+    remainingMinutes,
+    saturdayCapacities,
+    OVERTIME_STRATEGY_SATURDAY_COUNTS[strategy],
+    stepMinutes
+  );
 
   const weekdayResult = distributeAcrossWeekdays(
     saturdayResult.remainingMinutes,
@@ -453,7 +379,6 @@ export const calculateMonthlyOvertimePlan = ({
   overtimeLimitPercent,
   overtimeStepMinutes,
   overtimeStrategy,
-  overtimeSaturdayCount,
   overtimeWeekdayMaxMinutes,
   overtimeSaturdayMaxMinutes
 }: CalculateMonthlyOvertimePlanInput): MonthlyOvertimePlan => {
@@ -466,9 +391,6 @@ export const calculateMonthlyOvertimePlan = ({
   const safeStepMinutes = isOvertimeStepMinutes(overtimeStepMinutes)
     ? overtimeStepMinutes
     : DEFAULT_OVERTIME_STEP_MINUTES;
-  const safeSaturdayCount = isOvertimeSaturdayCount(overtimeSaturdayCount)
-    ? overtimeSaturdayCount
-    : DEFAULT_OVERTIME_SATURDAY_COUNT;
   const safeWeekdayMaxMinutes = isOvertimeDailyMaxMinutes(overtimeWeekdayMaxMinutes)
     ? overtimeWeekdayMaxMinutes
     : DEFAULT_OVERTIME_WEEKDAY_MAX_MINUTES;
@@ -531,11 +453,9 @@ export const calculateMonthlyOvertimePlan = ({
     .filter(({ capacityMinutes }) => capacityMinutes > 0);
   const hourlyRate = calculateHourlyRateFromMonthlySalary(monthlySalary, today);
   const strategies: OvertimeStrategy[] = [
-    'weekdays',
     'standard',
-    'saturdays',
-    'automatic',
-    'custom'
+    'standard-plus',
+    'standard-plus-plus'
   ];
   const scenarios = strategies.map((strategy) =>
     createScenario({
@@ -544,12 +464,11 @@ export const calculateMonthlyOvertimePlan = ({
       weekdayCapacities,
       saturdayCapacities,
       hourlyRate,
-      stepMinutes: safeStepMinutes,
-      customSaturdayCount: safeSaturdayCount
+      stepMinutes: safeStepMinutes
     })
   );
   const selectedScenario =
-    scenarios.find(({ strategy }) => strategy === overtimeStrategy) ?? scenarios[1]!;
+    scenarios.find(({ strategy }) => strategy === overtimeStrategy) ?? scenarios[0]!;
 
   return {
     month: monthKey,

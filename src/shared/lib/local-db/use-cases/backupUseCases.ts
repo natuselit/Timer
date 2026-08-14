@@ -9,7 +9,6 @@ import {
   calculateMonthlySalaryFromHourlyRate,
   isThemePreference,
   isOvertimeDailyMaxMinutes,
-  isOvertimeSaturdayCount,
   isOvertimeStepMinutes,
   isOvertimeStrategy,
   type BackupReminderIntervalDays,
@@ -44,7 +43,10 @@ import {
   OvertimeCoefficientRepository,
   toSaturdayDoubleRateRecord
 } from '../repositories/overtimeCoefficientRepository';
-import { normalizeSettingsRecord } from '../repositories/settingsRepository';
+import {
+  normalizeOvertimeStrategy,
+  normalizeSettingsRecord
+} from '../repositories/settingsRepository';
 import { normalizeShiftRecord } from '../repositories/shiftRepository';
 import type {
   ReviewedScheduleWarning,
@@ -64,7 +66,8 @@ const OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION = 10;
 const CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION = 11;
 const OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION = 12;
 const REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION = 13;
-export const BACKUP_SCHEMA_VERSION = REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION;
+const FIXED_OVERTIME_STRATEGIES_BACKUP_SCHEMA_VERSION = 14;
+export const BACKUP_SCHEMA_VERSION = FIXED_OVERTIME_STRATEGIES_BACKUP_SCHEMA_VERSION;
 const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   LEGACY_BACKUP_SCHEMA_VERSION,
   2,
@@ -78,7 +81,8 @@ const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION,
   CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION,
   OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION,
-  REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION
+  REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION,
+  FIXED_OVERTIME_STRATEGIES_BACKUP_SCHEMA_VERSION
 ]);
 
 type BackupSchemaVersion = typeof BACKUP_SCHEMA_VERSION;
@@ -115,6 +119,13 @@ const SETTINGS_ID: SettingsRecord['id'] = 'default';
 const SHIFT_TYPES = new Set<ShiftType>(['first', 'second']);
 const COEFFICIENT_MODES = new Set<CoefficientMode>(['auto', 'x1', 'x1.5', 'x2']);
 const DETECTION_MODES = new Set<ShiftDetectionMode>(['auto', 'manual']);
+const LEGACY_OVERTIME_STRATEGIES = new Set([
+  'weekdays',
+  'standard',
+  'saturdays',
+  'automatic',
+  'custom'
+]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -327,6 +338,11 @@ const parseSettings = (
   const isLegacyBalancedStrategy =
     schemaVersion <= CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
     overtimeStrategy === 'balanced';
+  const isCompatibleOvertimeStrategy =
+    schemaVersion < FIXED_OVERTIME_STRATEGIES_BACKUP_SCHEMA_VERSION
+      ? LEGACY_OVERTIME_STRATEGIES.has(overtimeStrategy as string) ||
+        isLegacyBalancedStrategy
+      : isOvertimeStrategy(overtimeStrategy);
 
   if (
     schemaVersion >= THEME_BACKUP_SCHEMA_VERSION &&
@@ -354,8 +370,7 @@ const parseSettings = (
 
   if (
     schemaVersion >= OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
-    !isOvertimeStrategy(overtimeStrategy) &&
-    !isLegacyBalancedStrategy
+    !isCompatibleOvertimeStrategy
   ) {
     throw new BackupValidationError('settings.overtimeStrategy має несумісне значення.');
   }
@@ -400,7 +415,10 @@ const parseSettings = (
 
   if (
     schemaVersion >= CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION &&
-    !isOvertimeSaturdayCount(overtimeSaturdayCount)
+    schemaVersion < FIXED_OVERTIME_STRATEGIES_BACKUP_SCHEMA_VERSION &&
+    (!Number.isSafeInteger(overtimeSaturdayCount) ||
+      (overtimeSaturdayCount as number) < 0 ||
+      (overtimeSaturdayCount as number) > 5)
   ) {
     throw new BackupValidationError(
       'settings.overtimeSaturdayCount має бути цілим числом від 0 до 5.'
@@ -460,14 +478,8 @@ const parseSettings = (
         : DEFAULT_SETTINGS.overtimeStepMinutes,
     overtimeStrategy:
       schemaVersion >= OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION
-        ? isLegacyBalancedStrategy
-          ? 'standard'
-          : (overtimeStrategy as Settings['overtimeStrategy'])
+        ? normalizeOvertimeStrategy(overtimeStrategy, overtimeSaturdayCount)
         : DEFAULT_SETTINGS.overtimeStrategy,
-    overtimeSaturdayCount:
-      schemaVersion >= CUSTOM_OVERTIME_PLANNER_BACKUP_SCHEMA_VERSION
-        ? (overtimeSaturdayCount as number)
-        : DEFAULT_SETTINGS.overtimeSaturdayCount,
     overtimeWeekdayMaxMinutes:
       schemaVersion >= OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
         ? (overtimeWeekdayMaxMinutes as number)

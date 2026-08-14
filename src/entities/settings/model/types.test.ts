@@ -31,7 +31,6 @@ describe('settings domain types', () => {
       overtimeLimitPercent: 0,
       overtimeStepMinutes: 30,
       overtimeStrategy: 'standard',
-      overtimeSaturdayCount: 1,
       overtimeWeekdayMaxMinutes: 240,
       overtimeSaturdayMaxMinutes: 480,
       incognitoEnabled: false,
@@ -46,7 +45,6 @@ describe('settings domain types', () => {
     expect(settings.overtimeLimitPercent).toBe(0);
     expect(settings.overtimeStepMinutes).toBe(30);
     expect(settings.overtimeStrategy).toBe('standard');
-    expect(settings.overtimeSaturdayCount).toBe(1);
     expect(settings.overtimeWeekdayMaxMinutes).toBe(240);
     expect(settings.overtimeSaturdayMaxMinutes).toBe(480);
     expect(settings.incognitoEnabled).toBe(false);

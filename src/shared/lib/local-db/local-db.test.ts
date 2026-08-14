@@ -99,7 +99,6 @@ const makeSettings = (overrides: Partial<Settings> = {}): Settings => ({
   overtimeLimitPercent: 0,
   overtimeStepMinutes: 30,
   overtimeStrategy: 'standard',
-  overtimeSaturdayCount: 1,
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
   incognitoEnabled: false,
@@ -353,7 +352,6 @@ describe('settings repository use-cases', () => {
       overtimeLimitPercent: 0,
       overtimeStepMinutes: 30,
       overtimeStrategy: 'standard',
-      overtimeSaturdayCount: 1,
       overtimeWeekdayMaxMinutes: 240,
       overtimeSaturdayMaxMinutes: 480,
       incognitoEnabled: false,
@@ -380,8 +378,7 @@ describe('settings repository use-cases', () => {
       backupReminderIntervalDays: 30,
       overtimeLimitPercent: 12.5,
       overtimeStepMinutes: 15,
-      overtimeStrategy: 'saturdays',
-      overtimeSaturdayCount: 3,
+      overtimeStrategy: 'standard-plus',
       overtimeWeekdayMaxMinutes: 300,
       overtimeSaturdayMaxMinutes: 600,
       incognitoEnabled: true,
@@ -441,21 +438,31 @@ describe('settings repository use-cases', () => {
     } as never);
 
     expect(normalized.overtimeStepMinutes).toBe(30);
-    expect(normalized.overtimeSaturdayCount).toBe(1);
     expect(normalized.overtimeWeekdayMaxMinutes).toBe(240);
     expect(normalized.overtimeSaturdayMaxMinutes).toBe(480);
     expect('coefficientMode' in normalized).toBe(false);
     expect('overtimeUnavailableDates' in normalized).toBe(false);
+    expect('overtimeSaturdayCount' in normalized).toBe(false);
   });
 
-  it('migrates the stored balanced strategy to standard', () => {
+  it.each([
+    ['balanced', undefined, 'standard'],
+    ['weekdays', undefined, 'standard'],
+    ['automatic', undefined, 'standard'],
+    ['custom', 2, 'standard'],
+    ['custom', 3, 'standard-plus'],
+    ['custom', 4, 'standard-plus-plus'],
+    ['custom', 5, 'standard-plus-plus'],
+    ['saturdays', undefined, 'standard-plus-plus']
+  ])('migrates stored strategy %s with %s Saturdays to %s', (legacyStrategy, saturdayCount, expected) => {
     const normalized = normalizeSettingsRecord({
       ...makeSettings(),
       id: 'default',
-      overtimeStrategy: 'balanced'
+      overtimeStrategy: legacyStrategy,
+      overtimeSaturdayCount: saturdayCount
     } as never);
 
-    expect(normalized.overtimeStrategy).toBe('standard');
+    expect(normalized.overtimeStrategy).toBe(expected);
   });
 });
 
@@ -1815,7 +1822,7 @@ describe('backup use-cases', () => {
     const source = serializeBackup({
       schemaVersion: BACKUP_SCHEMA_VERSION,
       exportedAt: '2026-06-24T12:00:00.000Z',
-      settings: makeSettings(),
+      settings: makeSettings({ overtimeStrategy: 'standard-plus' }),
       shifts: [shift],
       enterpriseSchedule: [],
       reviewedScheduleWarnings: [
@@ -1835,11 +1842,11 @@ describe('backup use-cases', () => {
 
     const parsed = parseBackupJson(source);
 
+    expect(BACKUP_SCHEMA_VERSION).toBe(14);
     expect(parsed).toMatchObject({
       settings: {
         overtimeStepMinutes: 30,
-        overtimeStrategy: 'standard',
-        overtimeSaturdayCount: 1,
+        overtimeStrategy: 'standard-plus',
         overtimeWeekdayMaxMinutes: 240,
         overtimeSaturdayMaxMinutes: 480
       },
@@ -1855,6 +1862,7 @@ describe('backup use-cases', () => {
     expect(parsed.shifts[0]?.coefficientMode).toBe('x2');
     expect(parsed.settings).not.toHaveProperty('coefficientMode');
     expect(parsed.settings).not.toHaveProperty('overtimeUnavailableDates');
+    expect(parsed.settings).not.toHaveProperty('overtimeSaturdayCount');
   });
 
   it('imports schema v12 while discarding removed settings and preserving shift mode', () => {
@@ -1869,6 +1877,7 @@ describe('backup use-cases', () => {
       settings: {
         ...makeSettings(),
         coefficientMode: 'x2',
+        overtimeSaturdayCount: 1,
         overtimeUnavailableDates: ['2026-06-20']
       },
       shifts: [shift],
@@ -1885,18 +1894,48 @@ describe('backup use-cases', () => {
     expect(parsed.shifts[0]?.coefficientMode).toBe('x1');
   });
 
-  it('migrates schema v10 to the default recommendation step and Saturday count', () => {
-    const {
-      overtimeStepMinutes: _step,
-      overtimeSaturdayCount: _saturdayCount,
-      ...legacySettings
-    } = makeSettings({
-      overtimeStrategy: 'saturdays'
-    });
+  it.each([
+    ['standard', 1, 'standard'],
+    ['weekdays', 1, 'standard'],
+    ['automatic', 1, 'standard'],
+    ['custom', 2, 'standard'],
+    ['custom', 3, 'standard-plus'],
+    ['custom', 4, 'standard-plus-plus'],
+    ['custom', 5, 'standard-plus-plus'],
+    ['saturdays', 1, 'standard-plus-plus']
+  ])(
+    'migrates schema v13 strategy %s with %s Saturdays to %s',
+    (legacyStrategy, saturdayCount, expected) => {
+      const source = JSON.stringify({
+        schemaVersion: 13,
+        exportedAt: '2026-06-24T12:00:00.000Z',
+        settings: {
+          ...makeSettings(),
+          overtimeStrategy: legacyStrategy,
+          overtimeSaturdayCount: saturdayCount
+        },
+        shifts: [],
+        enterpriseSchedule: [],
+        reviewedScheduleWarnings: [],
+        confirmedSaturdayDoubleRateMonths: []
+      });
+
+      const parsed = parseBackupJson(source);
+
+      expect(parsed.settings.overtimeStrategy).toBe(expected);
+      expect(parsed.settings).not.toHaveProperty('overtimeSaturdayCount');
+    }
+  );
+
+  it('migrates schema v10 to the default recommendation step and fixed strategy', () => {
+    const { overtimeStepMinutes: _step, ...legacySettings } = makeSettings();
     const source = JSON.stringify({
       schemaVersion: 10,
       exportedAt: '2026-06-24T12:00:00.000Z',
-      settings: legacySettings,
+      settings: {
+        ...legacySettings,
+        overtimeStrategy: 'saturdays'
+      },
       shifts: [],
       enterpriseSchedule: [],
       reviewedScheduleWarnings: [],
@@ -1905,8 +1944,7 @@ describe('backup use-cases', () => {
 
     expect(parseBackupJson(source).settings).toMatchObject({
       overtimeStepMinutes: 30,
-      overtimeStrategy: 'saturdays',
-      overtimeSaturdayCount: 1,
+      overtimeStrategy: 'standard-plus-plus',
       overtimeWeekdayMaxMinutes: 240,
       overtimeSaturdayMaxMinutes: 480
     });
@@ -1923,7 +1961,8 @@ describe('backup use-cases', () => {
       exportedAt: '2026-06-24T12:00:00.000Z',
       settings: {
         ...legacySettings,
-        overtimeStrategy: 'balanced'
+        overtimeStrategy: 'balanced',
+        overtimeSaturdayCount: 1
       },
       shifts: [],
       enterpriseSchedule: [],
@@ -1959,8 +1998,7 @@ describe('backup use-cases', () => {
     expect(parsed.settings).toMatchObject({
       overtimeLimitPercent: 0,
       overtimeStepMinutes: 30,
-      overtimeStrategy: 'standard',
-      overtimeSaturdayCount: 1
+      overtimeStrategy: 'standard'
     });
     expect(parsed.confirmedSaturdayDoubleRateMonths).toEqual([]);
   });

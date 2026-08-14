@@ -4,12 +4,12 @@ import {
   GRADE_VALUES,
   isBackupReminderIntervalDays,
   isOvertimeDailyMaxMinutes,
-  isOvertimeSaturdayCount,
   isOvertimeStepMinutes,
   isOvertimeStrategy,
   isThemePreference,
   type Grade,
   type GradePercentSet,
+  type OvertimeStrategy,
   type Settings
 } from '../../../../entities/settings';
 import type { ShifterDatabase } from '../database';
@@ -22,6 +22,7 @@ type LegacySettingsRecord = Omit<Partial<SettingsRecord>, 'overtimeStrategy'> & 
   overtimeStrategy?: unknown;
   coefficientMode?: unknown;
   overtimeUnavailableDates?: unknown;
+  overtimeSaturdayCount?: unknown;
 };
 
 const isFiniteNumber = (value: unknown): value is number =>
@@ -29,6 +30,31 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 const isGrade = (value: unknown): value is Grade =>
   typeof value === 'number' && GRADE_VALUES.includes(value as Grade);
+
+export const normalizeOvertimeStrategy = (
+  value: unknown,
+  legacySaturdayCount: unknown
+): OvertimeStrategy => {
+  if (isOvertimeStrategy(value)) {
+    return value;
+  }
+
+  if (value === 'saturdays') {
+    return 'standard-plus-plus';
+  }
+
+  if (value === 'custom' && Number.isSafeInteger(legacySaturdayCount)) {
+    if ((legacySaturdayCount as number) >= 4 && (legacySaturdayCount as number) <= 5) {
+      return 'standard-plus-plus';
+    }
+
+    if (legacySaturdayCount === 3) {
+      return 'standard-plus';
+    }
+  }
+
+  return DEFAULT_SETTINGS.overtimeStrategy;
+};
 
 const normalizePercentSet = (
   value: unknown,
@@ -59,6 +85,7 @@ export const normalizeSettingsRecord = (
     hourlyRate: legacyHourlyRate,
     coefficientMode: _legacyCoefficientMode,
     overtimeUnavailableDates: _legacyUnavailableDates,
+    overtimeSaturdayCount: legacyOvertimeSaturdayCount,
     ...storedSettings
   } = record;
   const monthlySalary = isFiniteNumber(storedSettings.monthlySalary)
@@ -104,15 +131,10 @@ export const normalizeSettingsRecord = (
     overtimeStepMinutes: isOvertimeStepMinutes(storedSettings.overtimeStepMinutes)
       ? storedSettings.overtimeStepMinutes
       : DEFAULT_SETTINGS.overtimeStepMinutes,
-    overtimeStrategy:
-      storedSettings.overtimeStrategy === 'balanced'
-        ? 'standard'
-        : isOvertimeStrategy(storedSettings.overtimeStrategy)
-          ? storedSettings.overtimeStrategy
-          : DEFAULT_SETTINGS.overtimeStrategy,
-    overtimeSaturdayCount: isOvertimeSaturdayCount(storedSettings.overtimeSaturdayCount)
-      ? storedSettings.overtimeSaturdayCount
-      : DEFAULT_SETTINGS.overtimeSaturdayCount,
+    overtimeStrategy: normalizeOvertimeStrategy(
+      storedSettings.overtimeStrategy,
+      legacyOvertimeSaturdayCount
+    ),
     overtimeWeekdayMaxMinutes: isOvertimeDailyMaxMinutes(
       storedSettings.overtimeWeekdayMaxMinutes
     )

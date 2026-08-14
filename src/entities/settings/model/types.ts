@@ -8,12 +8,7 @@ export type ThemePreference = 'system' | 'light' | 'dark';
 
 export type BackupReminderIntervalDays = 7 | 14 | 30;
 
-export type OvertimeStrategy =
-  | 'weekdays'
-  | 'standard'
-  | 'saturdays'
-  | 'automatic'
-  | 'custom';
+export type OvertimeStrategy = 'standard' | 'standard-plus' | 'standard-plus-plus';
 
 export type Settings = {
   employeeFirstName: string;
@@ -33,7 +28,6 @@ export type Settings = {
   overtimeLimitPercent: number;
   overtimeStepMinutes: number;
   overtimeStrategy: OvertimeStrategy;
-  overtimeSaturdayCount: number;
   overtimeWeekdayMaxMinutes: number;
   overtimeSaturdayMaxMinutes: number;
   incognitoEnabled: boolean;

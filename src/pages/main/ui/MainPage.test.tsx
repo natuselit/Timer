@@ -32,7 +32,6 @@ const settings: Settings = {
   overtimeLimitPercent: 0,
   overtimeStepMinutes: 30,
   overtimeStrategy: 'standard',
-  overtimeSaturdayCount: 1,
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
   incognitoEnabled: false,
@@ -577,10 +576,14 @@ describe('MainPage active shift', () => {
 
     await user.click(screen.getByRole('button', { name: 'Інші варіанти' }));
     const dialog = screen.getByRole('dialog', { name: 'Варіанти перепрацювань' });
-    await user.click(within(dialog).getByRole('button', { name: /Лише будні/ }));
+    expect(within(dialog).getByRole('button', { name: /^СтандартБудні/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /^Стандарт\+Будні/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /^Стандарт\+\+Будні/ })).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: /Лише будні/ })).toBeNull();
+    await user.click(within(dialog).getByRole('button', { name: /^Стандарт\+Будні/ }));
 
     expect(onSettingsChange).toHaveBeenCalledWith(
-      expect.objectContaining({ overtimeStrategy: 'weekdays' })
+      expect.objectContaining({ overtimeStrategy: 'standard-plus' })
     );
     expect(screen.queryByRole('dialog', { name: 'Варіанти перепрацювань' })).toBeNull();
   });
@@ -664,7 +667,7 @@ describe('MainPage inactive state', () => {
         settings={{
           ...settings,
           overtimeLimitPercent: 10,
-          overtimeStrategy: 'weekdays'
+          overtimeStrategy: 'standard'
         }}
         dataVersion={0}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
