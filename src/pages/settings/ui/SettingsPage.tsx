@@ -46,6 +46,7 @@ import {
   isBackupReminderIntervalDays,
   isOvertimeDailyMaxMinutes,
   isOvertimeStrategy,
+  isOvertimeUnavailableDates,
   type Grade,
   type GradePercentSet,
   type OvertimeStrategy,
@@ -110,6 +111,7 @@ type FormValues = {
   overtimeStrategy: OvertimeStrategy;
   overtimeWeekdayEndTime: string;
   overtimeSaturdayEndTime: string;
+  overtimeUnavailableDates: string[];
 };
 
 type FormErrors = Partial<Record<keyof FormValues, string>>;
@@ -204,7 +206,8 @@ const FORM_FIELD_SECTIONS: Record<keyof FormValues, SettingsSectionId> = {
   overtimeStepMinutes: 'overtime',
   overtimeStrategy: 'overtime',
   overtimeWeekdayEndTime: 'overtime',
-  overtimeSaturdayEndTime: 'overtime'
+  overtimeSaturdayEndTime: 'overtime',
+  overtimeUnavailableDates: 'overtime'
 };
 
 const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
@@ -242,7 +245,7 @@ const FAQ_ITEMS: Array<{
   {
     question: 'Як працює ліміт перепрацювань?',
     answer:
-      'Ліміт рахується як відсоток від плану 5/2 по 8 годин. У будні враховується час до або після планової зміни, а у вихідні — вся фактична тривалість. Денний максимум задається в налаштуваннях. Перевищення показується, але не блокує таймер.'
+      'Ліміт рахується як відсоток від плану 5/2 по 8 годин. У будні враховується час до або після планової зміни, а у вихідні — вся фактична тривалість. Денний максимум і недоступні дати задаються в налаштуваннях. Перевищення показується, але не блокує таймер.'
   },
   {
     question: 'Як працюють тікети та простій?',
@@ -327,7 +330,8 @@ const toFormValues = (settings: Settings): FormValues => ({
   overtimeSaturdayEndTime: formatOvertimeEndTime(
     SATURDAY_WORK_START_TIME,
     settings.overtimeSaturdayMaxMinutes
-  )
+  ),
+  overtimeUnavailableDates: [...settings.overtimeUnavailableDates].sort()
 });
 
 const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors => {
@@ -427,6 +431,10 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
     errors.overtimeSaturdayEndTime = 'Вкажіть час від 06:05 до 18:00 з кроком 5 хв.';
   }
 
+  if (!isOvertimeUnavailableDates(values.overtimeUnavailableDates)) {
+    errors.overtimeUnavailableDates = 'Перевірте список недоступних дат.';
+  }
+
   return errors;
 };
 
@@ -474,6 +482,7 @@ export function SettingsPage({
     useState<RecalculationCalendarMonth>(getCurrentCalendarMonth);
   const [isClearing, setIsClearing] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
+  const [overtimeUnavailableDateDraft, setOvertimeUnavailableDateDraft] = useState('');
   const formRef = useRef<HTMLFormElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const syncedValuesRef = useRef<FormValues>(toFormValues(settings));
@@ -488,6 +497,42 @@ export function SettingsPage({
     );
     syncedValuesRef.current = nextValues;
   }, [settings]);
+
+  const addOvertimeUnavailableDate = () => {
+    const today = toLocalIsoString(new Date()).slice(0, 10);
+
+    if (!overtimeUnavailableDateDraft || overtimeUnavailableDateDraft < today) {
+      setErrors((current) => ({
+        ...current,
+        overtimeUnavailableDates: 'Оберіть сьогоднішню або майбутню дату.'
+      }));
+      return;
+    }
+
+    setValues((current) => ({
+      ...current,
+      overtimeUnavailableDates: [
+        ...new Set([
+          ...current.overtimeUnavailableDates,
+          overtimeUnavailableDateDraft
+        ])
+      ].sort()
+    }));
+    setErrors((current) => ({ ...current, overtimeUnavailableDates: undefined }));
+    setOvertimeUnavailableDateDraft('');
+    setNotice(null);
+  };
+
+  const removeOvertimeUnavailableDate = (date: string) => {
+    setValues((current) => ({
+      ...current,
+      overtimeUnavailableDates: current.overtimeUnavailableDates.filter(
+        (item) => item !== date
+      )
+    }));
+    setErrors((current) => ({ ...current, overtimeUnavailableDates: undefined }));
+    setNotice(null);
+  };
 
   useEffect(() => {
     if (
@@ -671,6 +716,9 @@ export function SettingsPage({
       overtimeStrategy: values.overtimeStrategy,
       overtimeWeekdayMaxMinutes,
       overtimeSaturdayMaxMinutes,
+      overtimeUnavailableDates: values.overtimeUnavailableDates.filter(
+        (date) => date >= toLocalIsoString(new Date()).slice(0, 10)
+      ),
       updatedAt: toLocalIsoString(new Date())
     };
 
@@ -947,6 +995,7 @@ export function SettingsPage({
         await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
 
         setValues(toFormValues(restoredSettings));
+        setOvertimeUnavailableDateDraft('');
         setErrors({});
         onLocalDataReplace(restoredSettings);
         setNotice({
@@ -1019,6 +1068,7 @@ export function SettingsPage({
       );
       await onSettingsChange(resetSettings);
       setValues(toFormValues(resetSettings));
+      setOvertimeUnavailableDateDraft('');
       setErrors({});
       await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
       onLocalDataChange?.();
@@ -1048,6 +1098,7 @@ export function SettingsPage({
       await backupReminderRepository.resetAnchor(now);
 
       setValues(toFormValues(demoData.settings));
+      setOvertimeUnavailableDateDraft('');
       setErrors({});
       onLocalDataReplace(demoData.settings);
       onLocalDataChange?.();
@@ -1101,6 +1152,7 @@ export function SettingsPage({
 
   const discardChanges = () => {
     setValues(toFormValues(settings));
+    setOvertimeUnavailableDateDraft('');
     setErrors({});
     setNotice({ tone: 'info', text: 'Незбережені зміни скасовано.' });
   };
@@ -1339,6 +1391,60 @@ export function SettingsPage({
               </small>
             ) : null}
           </label>
+
+          <div className="settings-page__field settings-page__overtime-availability">
+            <span>Недоступні дати</span>
+            <div className="settings-page__overtime-date-entry">
+              <input
+                type="date"
+                min={toLocalIsoString(new Date()).slice(0, 10)}
+                aria-label="Дата без перепрацювання"
+                aria-invalid={errors.overtimeUnavailableDates ? 'true' : 'false'}
+                aria-describedby={
+                  errors.overtimeUnavailableDates
+                    ? 'overtimeUnavailableDates-error'
+                    : 'overtimeUnavailableDates-help'
+                }
+                value={overtimeUnavailableDateDraft}
+                onChange={(event) => {
+                  setOvertimeUnavailableDateDraft(event.target.value);
+                  setErrors((current) => ({
+                    ...current,
+                    overtimeUnavailableDates: undefined
+                  }));
+                }}
+              />
+              <button type="button" onClick={addOvertimeUnavailableDate}>
+                Додати
+              </button>
+            </div>
+            <small id="overtimeUnavailableDates-help">
+              Ці дні не потраплятимуть у рекомендації жодної стратегії.
+            </small>
+            {values.overtimeUnavailableDates.length > 0 ? (
+              <ul className="settings-page__overtime-date-list">
+                {values.overtimeUnavailableDates.map((date) => (
+                  <li key={date}>
+                    <time dateTime={date}>{formatDate(date)}</time>
+                    <button
+                      type="button"
+                      aria-label={`Повернути ${formatDate(date)} у рекомендації`}
+                      onClick={() => removeOvertimeUnavailableDate(date)}
+                    >
+                      <X size={16} aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <small>Усі майбутні дні доступні.</small>
+            )}
+            {errors.overtimeUnavailableDates ? (
+              <small id="overtimeUnavailableDates-error">
+                {errors.overtimeUnavailableDates}
+              </small>
+            ) : null}
+          </div>
 
         </div>
       </SettingsSection>

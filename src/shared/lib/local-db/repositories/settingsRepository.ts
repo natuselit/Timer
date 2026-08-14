@@ -6,6 +6,7 @@ import {
   isOvertimeDailyMaxMinutes,
   isOvertimeStepMinutes,
   isOvertimeStrategy,
+  isOvertimeUnavailableDates,
   isThemePreference,
   type Grade,
   type GradePercentSet,
@@ -84,7 +85,6 @@ export const normalizeSettingsRecord = (
     id: _id,
     hourlyRate: legacyHourlyRate,
     coefficientMode: _legacyCoefficientMode,
-    overtimeUnavailableDates: _legacyUnavailableDates,
     overtimeSaturdayCount: legacyOvertimeSaturdayCount,
     ...storedSettings
   } = record;
@@ -144,7 +144,12 @@ export const normalizeSettingsRecord = (
       storedSettings.overtimeSaturdayMaxMinutes
     )
       ? storedSettings.overtimeSaturdayMaxMinutes
-      : DEFAULT_SETTINGS.overtimeSaturdayMaxMinutes
+      : DEFAULT_SETTINGS.overtimeSaturdayMaxMinutes,
+    overtimeUnavailableDates: isOvertimeUnavailableDates(
+      storedSettings.overtimeUnavailableDates
+    )
+      ? [...storedSettings.overtimeUnavailableDates].sort()
+      : DEFAULT_SETTINGS.overtimeUnavailableDates
   };
 };
 

@@ -164,7 +164,6 @@ export class ShifterDatabase extends Dexie {
           .toCollection()
           .modify((settings) => {
             delete settings.coefficientMode;
-            delete settings.overtimeUnavailableDates;
           });
       });
   }

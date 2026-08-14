@@ -33,11 +33,15 @@ const calculatePlan = (
     shifts: [],
     now: '2026-08-11T08:00:00.000+03:00',
     monthlySalary: 22_400,
+    monthlyBonus: 0,
+    currentGrade: 1,
+    gradeSalaryBonusPercents: [0, 0, 0, 0],
     overtimeLimitPercent: 10,
     overtimeStepMinutes: 30,
     overtimeStrategy: 'standard',
     overtimeWeekdayMaxMinutes: 240,
     overtimeSaturdayMaxMinutes: 480,
+    overtimeUnavailableDates: [],
     ...overrides
   });
 
@@ -47,6 +51,50 @@ describe('monthly overtime planner', () => {
 
     expect(plan.plannedMinutes).toBe(21 * 8 * 60);
     expect(plan.limitMinutes).toBe(Math.floor(21 * 8 * 60 * 0.07333));
+  });
+
+  it('adds manual coefficient extras from completed and active shifts to the maximum', () => {
+    const plan = calculatePlan({
+      monthlyBonus: 1_000,
+      currentGrade: 2,
+      gradeSalaryBonusPercents: [5, 10, 10, 10],
+      shifts: [
+        makeShift({
+          endTime: '2026-08-10T07:30:00.000+03:00',
+          coefficientMode: 'x2'
+        }),
+        makeShift({
+          id: 'active-shift',
+          date: '2026-08-11',
+          startTime: '2026-08-11T06:30:00.000+03:00',
+          endTime: null,
+          coefficientMode: 'x1.5'
+        })
+      ]
+    });
+
+    expect(plan.earnedAmount).toBeCloseTo(510);
+    expect(plan.baseSalaryAmount).toBe(22_400);
+    expect(plan.overtimeMaximumAmount).toBeCloseTo(3_360);
+    expect(plan.monthlyBonusAmount).toBe(1_000);
+    expect(plan.gradeBonusAmount).toBe(3_360);
+    expect(plan.coefficientExtraAmount).toBeCloseTo(210);
+    expect(plan.maximumAmount).toBeCloseTo(30_330);
+  });
+
+  it('does not add automatic overtime to the coefficient extra twice', () => {
+    const plan = calculatePlan({
+      shifts: [
+        makeShift({
+          startTime: '2026-08-10T06:00:00.000+03:00',
+          endTime: '2026-08-10T15:00:00.000+03:00',
+          coefficientMode: 'auto'
+        })
+      ]
+    });
+
+    expect(plan.coefficientExtraAmount).toBe(0);
+    expect(plan.maximumAmount).toBeCloseTo(25_760);
   });
 
   it('counts only early arrival and late exit on weekdays', () => {
@@ -306,6 +354,35 @@ describe('monthly overtime planner', () => {
     expect(plan.selectedScenario.allocations).toEqual([]);
     expect(plan.selectedScenario.unallocatedMinutes).toBe(plan.remainingMinutes);
     expect(plan.recommendation).toMatchObject({ date: null, isToday: false, kind: 'rest' });
+  });
+
+  it('excludes unavailable dates from every strategy and advances the recommendation', () => {
+    const initialPlan = calculatePlan();
+    const initialDate = initialPlan.recommendation.date;
+    expect(initialDate).not.toBeNull();
+
+    const updatedPlan = calculatePlan({
+      overtimeUnavailableDates: [initialDate!]
+    });
+
+    expect(updatedPlan.recommendation.date).not.toBe(initialDate);
+    expect(
+      updatedPlan.scenarios.every((scenario) =>
+        scenario.allocations.every(({ date }) => date !== initialDate)
+      )
+    ).toBe(true);
+  });
+
+  it('reports no recommendation when every remaining date is unavailable', () => {
+    const plan = calculatePlan({
+      overtimeUnavailableDates: Array.from(
+        { length: 21 },
+        (_, index) => `2026-08-${String(index + 11).padStart(2, '0')}`
+      )
+    });
+
+    expect(plan.scenarios.every(({ allocations }) => allocations.length === 0)).toBe(true);
+    expect(plan.recommendation).toMatchObject({ date: null, kind: 'rest' });
   });
 
   it('calculates an exact forecast with the x1.5 overtime coefficient', () => {

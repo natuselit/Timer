@@ -154,6 +154,7 @@ export const createDemoDataSet = (
     overtimeStrategy: 'standard',
     overtimeWeekdayMaxMinutes: 240,
     overtimeSaturdayMaxMinutes: 480,
+    overtimeUnavailableDates: [],
     incognitoEnabled: false,
     onboardingCompleted: true,
     updatedAt

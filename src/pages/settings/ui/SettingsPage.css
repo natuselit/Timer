@@ -201,6 +201,65 @@
   gap: 14px;
 }
 
+.settings-page__overtime-availability {
+  padding-top: 4px;
+}
+
+.settings-page__overtime-date-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.settings-page__overtime-date-entry button {
+  min-height: 52px;
+  padding: 0 15px;
+  border: 1px solid var(--color-primary-border);
+  border-radius: var(--radius-control);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 800;
+}
+
+.settings-page__overtime-date-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-page__overtime-date-list li {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-compact);
+  background: var(--color-background);
+}
+
+.settings-page__overtime-date-list time {
+  color: var(--color-text-primary);
+  font-size: 0.88rem;
+  font-weight: 750;
+}
+
+.settings-page__overtime-date-list button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
 .settings-page__modal-overlay {
   position: fixed;
   inset: 0;
@@ -882,6 +941,10 @@
 
   .settings-page__grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-page__overtime-availability {
+    grid-column: 1 / -1;
   }
 
   .settings-page__grade-grid {

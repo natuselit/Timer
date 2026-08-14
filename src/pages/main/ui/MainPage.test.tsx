@@ -34,6 +34,7 @@ const settings: Settings = {
   overtimeStrategy: 'standard',
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
+  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T06:00:00.000+03:00'
@@ -536,6 +537,12 @@ describe('MainPage active shift', () => {
     );
 
     expect(await screen.findByLabelText('Поточний коефіцієнт: x2')).toBeTruthy();
+    const moneyProgress = screen.getByRole('progressbar', {
+      name: 'Прогрес заробітку за місяць'
+    });
+    expect(moneyProgress.getAttribute('aria-valuetext')).toBe('••••');
+    expect(moneyProgress.getAttribute('aria-valuenow')).toBe('0');
+    expect(moneyProgress.getAttribute('data-incognito')).toBe('true');
   });
 
   it('shows the monthly overtime plan and saves a selected alternative', async () => {
@@ -552,17 +559,22 @@ describe('MainPage active shift', () => {
     );
 
     expect(await screen.findByRole('heading', { name: 'Стандарт' })).toBeTruthy();
-    expect(
-      screen.getByRole('progressbar', {
-        name: 'Використання місячного ліміту перепрацювань'
-      })
-    ).toBeTruthy();
+    const moneyProgress = screen.getByRole('progressbar', {
+      name: 'Прогрес заробітку за місяць'
+    });
+    const moneyPanel = moneyProgress.closest('.main-page__money-panel') as HTMLElement | null;
+    expect(moneyPanel).toBeTruthy();
     expect(screen.getByText('План місяця')).toBeTruthy();
     expect(screen.getAllByText('Ліміт')).toHaveLength(1);
     expect(
       screen.queryByLabelText('Ліміт перепрацювань: 10% від планових годин')
     ).toBeNull();
-    expect(screen.getByText('Використано ліміту')).toBeTruthy();
+    expect(screen.getByText('Зароблено цього місяця')).toBeTruthy();
+    expect(screen.getByLabelText(/Початок шкали:/)).toBeTruthy();
+    expect(screen.getByLabelText(/Максимум шкали:/)).toBeTruthy();
+    expect(within(moneyPanel!).queryByText('Ставка')).toBeNull();
+    expect(within(moneyPanel!).queryByText('Максимум')).toBeNull();
+    expect(within(moneyPanel!).queryByText(/Ставка \+ перепрацювання/)).toBeNull();
     expect(
       screen.getByText('Перепрацювання', {
         selector: '.main-page__overtime-title .main-page__label'
@@ -571,8 +583,19 @@ describe('MainPage active shift', () => {
     expect(screen.queryByText('Орієнтовний додатковий дохід за залишок')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Налаштування' })).toBeNull();
     expect(screen.queryByText(/Залишок .* менший за крок рекомендації/)).toBeNull();
+    const recommendationOvertime = document.querySelector(
+      '.main-page__overtime-shift-summary > div:nth-child(2) dd'
+    );
+    expect(recommendationOvertime?.textContent).toMatch(/^\d+:\d{2}$/);
 
-    expect(screen.queryByRole('button', { name: 'Цей день недоступний' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Цей день недоступний' }));
+    await waitFor(() => {
+      expect(onSettingsChange).toHaveBeenCalledWith(
+        expect.objectContaining({
+          overtimeUnavailableDates: expect.arrayContaining([expect.any(String)])
+        })
+      );
+    });
 
     await user.click(screen.getByRole('button', { name: 'Інші варіанти' }));
     const dialog = screen.getByRole('dialog', { name: 'Варіанти перепрацювань' });
@@ -614,6 +637,43 @@ describe('MainPage active shift', () => {
     expect(await screen.findByText(/Ліміт перевищено на/)).toBeTruthy();
     expect(screen.getByRole('region', { name: 'План перепрацювань' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Прийшов/ })).toBeTruthy();
+  });
+
+  it('caps the financial fill and shows the full amount above the calculated maximum', async () => {
+    const date = toLocalIsoString(new Date()).slice(0, 10);
+    await localDb.shifts.clear();
+    await localDb.shifts.put({
+      ...activeShift,
+      id: 'income-over-maximum-shift',
+      date,
+      startTime: combineLocalDateAndTime(date, '06:30'),
+      endTime: combineLocalDateAndTime(date, '14:30'),
+      coefficientMode: 'x2',
+      workTickets: []
+    });
+
+    render(
+      <MainPage
+        settings={{
+          ...settings,
+          monthlySalary: 100,
+          overtimeLimitPercent: 10
+        }}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('Вище розрахункового максимуму')).toBeTruthy();
+    const progress = screen.getByRole('progressbar', {
+      name: 'Прогрес заробітку за місяць'
+    });
+    expect(progress.getAttribute('data-over-maximum')).toBe('true');
+    expect(progress.getAttribute('aria-valuenow')).toBe(
+      progress.getAttribute('aria-valuemax')
+    );
+    expect(progress.getAttribute('aria-valuetext')).toContain('з');
   });
 
   it('keeps the mandatory reminder visible until backup export succeeds', async () => {

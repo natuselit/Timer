@@ -1,4 +1,5 @@
 import {
+  calculateSalaryBreakdown,
   calculateShiftTimeBreakdown,
   detectShiftType,
   getPlannedShiftWindow,
@@ -7,6 +8,8 @@ import {
   type Shift
 } from '../../../entities/shift';
 import {
+  calculateCumulativeGradePercent,
+  calculateGradeMonthlyBonus,
   calculateHourlyRateFromMonthlySalary,
   countWeekdayWorkdaysInMonth,
   DEFAULT_OVERTIME_SATURDAY_MAX_MINUTES,
@@ -14,8 +17,12 @@ import {
   DEFAULT_OVERTIME_WEEKDAY_MAX_MINUTES,
   isOvertimeDailyMaxMinutes,
   isOvertimeStepMinutes,
+  isOvertimeUnavailableDates,
+  type Grade,
+  type GradePercentSet,
   type OvertimeStrategy
 } from '../../../entities/settings';
+import { calculateMonthShiftSummary } from './monthSummary';
 
 const MINUTES_PER_SHIFT = 8 * 60;
 const MINUTE_IN_MS = 60_000;
@@ -65,6 +72,13 @@ export type MonthlyOvertimePlan = {
   usedMinutes: number;
   remainingMinutes: number;
   exceededMinutes: number;
+  earnedAmount: number;
+  baseSalaryAmount: number;
+  overtimeMaximumAmount: number;
+  monthlyBonusAmount: number;
+  gradeBonusAmount: number;
+  coefficientExtraAmount: number;
+  maximumAmount: number;
   selectedScenario: OvertimeScenario;
   scenarios: OvertimeScenario[];
   recommendation: TodayOvertimeRecommendation;
@@ -74,16 +88,37 @@ export type CalculateMonthlyOvertimePlanInput = {
   shifts: Shift[];
   now: ISODateTimeString;
   monthlySalary: number;
+  monthlyBonus: number;
+  currentGrade: Grade;
+  gradeSalaryBonusPercents: GradePercentSet;
   overtimeLimitPercent: number;
   overtimeStepMinutes: number;
   overtimeStrategy: OvertimeStrategy;
   overtimeWeekdayMaxMinutes: number;
   overtimeSaturdayMaxMinutes: number;
+  overtimeUnavailableDates: string[];
 };
 
 type DateCapacity = {
   date: LocalDateString;
   capacityMinutes: number;
+};
+
+const calculateManualCoefficientExtraAmount = (
+  shift: Shift,
+  now: ISODateTimeString
+): number => {
+  if (shift.coefficientMode === 'auto' || shift.coefficientMode === 'x1') {
+    return 0;
+  }
+
+  const salary = calculateSalaryBreakdown({
+    ...shift,
+    endTime: shift.endTime ?? now
+  });
+  const amountAtX1 = (salary.hourlyRate / 60) * salary.totalMinutes;
+
+  return Math.max(0, salary.totalAmount - amountAtX1);
 };
 
 const parseLocalDate = (date: LocalDateString): { year: number; month: number; day: number } => {
@@ -376,11 +411,15 @@ export const calculateMonthlyOvertimePlan = ({
   shifts,
   now,
   monthlySalary,
+  monthlyBonus,
+  currentGrade,
+  gradeSalaryBonusPercents,
   overtimeLimitPercent,
   overtimeStepMinutes,
   overtimeStrategy,
   overtimeWeekdayMaxMinutes,
-  overtimeSaturdayMaxMinutes
+  overtimeSaturdayMaxMinutes,
+  overtimeUnavailableDates
 }: CalculateMonthlyOvertimePlanInput): MonthlyOvertimePlan => {
   const today = now.slice(0, 10);
   const { year, month } = parseLocalDate(today);
@@ -397,6 +436,12 @@ export const calculateMonthlyOvertimePlan = ({
   const safeSaturdayMaxMinutes = isOvertimeDailyMaxMinutes(overtimeSaturdayMaxMinutes)
     ? overtimeSaturdayMaxMinutes
     : DEFAULT_OVERTIME_SATURDAY_MAX_MINUTES;
+  const unavailableDates = new Set(
+    isOvertimeUnavailableDates(overtimeUnavailableDates)
+      ? overtimeUnavailableDates
+      : []
+  );
+  const baseSalaryAmount = Math.max(0, monthlySalary);
   const limitMinutes = Math.floor(plannedMinutes * (safeLimitPercent / 100));
   const usedMinutes = monthShifts.reduce(
     (total, shift) => total + calculateShiftLimitOvertimeMinutes(shift, now),
@@ -415,7 +460,7 @@ export const calculateMonthlyOvertimePlan = ({
       .sort((left, right) => right.date.localeCompare(left.date))[0] ??
     null;
   const availableDates = getMonthDates(year, month).filter((date) => {
-    if (date < today) {
+    if (date < today || unavailableDates.has(date)) {
       return false;
     }
 
@@ -451,7 +496,24 @@ export const calculateMonthlyOvertimePlan = ({
       };
     })
     .filter(({ capacityMinutes }) => capacityMinutes > 0);
-  const hourlyRate = calculateHourlyRateFromMonthlySalary(monthlySalary, today);
+  const hourlyRate = calculateHourlyRateFromMonthlySalary(baseSalaryAmount, today);
+  const earnedAmount = calculateMonthShiftSummary(monthShifts, now).totalAmount;
+  const overtimeMaximumAmount = (hourlyRate / 60) * limitMinutes * 1.5;
+  const monthlyBonusAmount = Math.max(0, monthlyBonus);
+  const gradeBonusAmount = calculateGradeMonthlyBonus(
+    baseSalaryAmount,
+    calculateCumulativeGradePercent(currentGrade, gradeSalaryBonusPercents)
+  );
+  const coefficientExtraAmount = monthShifts.reduce(
+    (total, shift) => total + calculateManualCoefficientExtraAmount(shift, now),
+    0
+  );
+  const maximumAmount =
+    baseSalaryAmount +
+    overtimeMaximumAmount +
+    monthlyBonusAmount +
+    gradeBonusAmount +
+    coefficientExtraAmount;
   const strategies: OvertimeStrategy[] = [
     'standard',
     'standard-plus',
@@ -477,6 +539,13 @@ export const calculateMonthlyOvertimePlan = ({
     usedMinutes,
     remainingMinutes,
     exceededMinutes,
+    earnedAmount,
+    baseSalaryAmount,
+    overtimeMaximumAmount,
+    monthlyBonusAmount,
+    gradeBonusAmount,
+    coefficientExtraAmount,
+    maximumAmount,
     selectedScenario,
     scenarios,
     recommendation: getRecommendation(

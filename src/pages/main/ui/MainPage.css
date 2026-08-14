@@ -509,9 +509,9 @@
 
 .main-page__overtime-heading {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .main-page__overtime-modal header {
@@ -541,9 +541,14 @@
 }
 
 .main-page__overtime-card .main-page__overtime-strategy {
-  grid-column: 1 / -1;
-  margin: -4px 0 0;
-  font-size: 1.05rem;
+  margin: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--color-primary-border-muted);
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 0.7rem;
+  font-weight: 900;
   line-height: 1.2;
 }
 
@@ -554,72 +559,136 @@
   line-height: 1.15;
 }
 
-.main-page__overtime-progress-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.main-page__money-panel {
+  display: grid;
   gap: 10px;
-  margin-bottom: -8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 18%, var(--color-border));
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--color-primary-soft) 72%, var(--color-surface)),
+      var(--color-surface) 72%
+    );
+}
+
+.main-page__money-progress-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
   color: var(--color-text-secondary);
-  font-size: 0.7rem;
-  font-weight: 750;
+  font-size: 0.68rem;
+  font-weight: 800;
 }
 
-.main-page__overtime-progress-label strong {
+.main-page__money-progress-heading strong {
   color: var(--color-primary);
-  font-size: 0.86rem;
+  font-size: 1.12rem;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+  text-align: right;
 }
 
-.main-page__overtime-progress {
-  height: 8px;
-  overflow: hidden;
+.main-page__money-progress-heading small {
+  grid-column: 1 / -1;
+  color: var(--color-warning);
+  font-size: 0.66rem;
+  text-align: right;
+}
+
+.main-page__money-scale {
+  position: relative;
+  display: grid;
+  gap: 7px;
+}
+
+.main-page__money-progress {
+  position: relative;
+  height: 10px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 
-.main-page__overtime-progress > span {
-  display: block;
+.main-page__money-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
   height: 100%;
   border-radius: inherit;
-  background: var(--color-primary);
+  background: linear-gradient(90deg, var(--color-primary), var(--color-primary-strong));
   transition: width 180ms ease;
 }
 
-.main-page__overtime-card[data-over-limit='true'] .main-page__overtime-progress > span {
+.main-page__money-progress-earned-marker {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border: 3px solid var(--color-surface);
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 22%);
+  transform: translate(-50%, -50%);
+  transition: left 180ms ease;
+}
+
+.main-page__money-progress[data-over-maximum='true'] .main-page__money-progress-fill,
+.main-page__money-progress[data-over-maximum='true'] .main-page__money-progress-earned-marker {
   background: var(--color-error);
+}
+
+.main-page__money-progress[data-incognito='true'] {
+  background: color-mix(in srgb, var(--color-text-secondary) 12%, var(--color-surface));
+}
+
+.main-page__money-progress[data-incognito='true'] .main-page__money-progress-earned-marker {
+  display: none;
+}
+
+.main-page__money-progress-labels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.main-page__money-progress-labels > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.main-page__money-progress-labels > span:last-child {
+  text-align: right;
+}
+
+.main-page__money-progress-labels strong {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: clamp(0.67rem, 3vw, 0.78rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .main-page__overtime-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0;
+  gap: 8px;
   margin: 0;
-  padding: 3px 0;
+  padding: 0;
 }
 
 .main-page__overtime-metrics > div {
-  display: flex;
+  display: grid;
   min-width: 0;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 0 10px 8px;
-}
-
-.main-page__overtime-metrics > div:nth-child(odd) {
-  padding-left: 0;
-  border-right: 1px solid var(--color-border);
-}
-
-.main-page__overtime-metrics > div:nth-child(even) {
-  padding-right: 0;
-}
-
-.main-page__overtime-metrics > div:nth-child(n + 3) {
-  padding-top: 8px;
-  padding-bottom: 0;
-  border-top: 1px solid var(--color-border);
+  gap: 5px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--color-primary) 12%, var(--color-border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-primary-soft) 36%, var(--color-surface));
 }
 
 .main-page__overtime-metrics dt,
@@ -636,7 +705,7 @@
 
 .main-page__overtime-metrics dd {
   color: var(--color-text-primary);
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   white-space: nowrap;
@@ -751,6 +820,14 @@
   font-size: 0.84rem;
   font-variant-numeric: tabular-nums;
   font-weight: 900;
+}
+
+.main-page__overtime-next-shift .main-page__overtime-skip-date {
+  width: 100%;
+  min-height: 38px;
+  border-color: var(--color-primary-border-muted);
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  color: var(--color-text-secondary);
 }
 
 .main-page__overtime-recommendation-status {
@@ -1941,14 +2018,12 @@
   }
 
   .main-page__overtime-heading {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
   }
 
   .main-page__overtime-title {
-    grid-row: 1;
-    grid-column: 1 / -1;
     grid-template-columns: 32px minmax(0, 1fr);
     gap: 7px;
   }
@@ -1971,7 +2046,16 @@
   .main-page__overtime-card .main-page__overtime-strategy {
     align-self: center;
     margin: 0;
-    font-size: 0.98rem;
+    padding: 5px 7px;
+    font-size: 0.64rem;
+  }
+
+  .main-page__money-panel {
+    padding: 10px;
+  }
+
+  .main-page__money-progress-heading strong {
+    font-size: 1rem;
   }
 
   .main-page__overtime-metrics dt {

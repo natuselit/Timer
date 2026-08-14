@@ -101,6 +101,7 @@ const makeSettings = (overrides: Partial<Settings> = {}): Settings => ({
   overtimeStrategy: 'standard',
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
+  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-06-23T10:00:00.000Z',
@@ -296,7 +297,7 @@ describe('database migrations', () => {
     }
   });
 
-  it('removes legacy global defaults without rewriting saved shift coefficients', async () => {
+  it('removes the legacy coefficient default and preserves unavailable dates', async () => {
     const databaseName = makeDbName();
     const legacyDatabase = new Dexie(databaseName);
     legacyDatabase.version(4).stores({
@@ -323,7 +324,7 @@ describe('database migrations', () => {
       const migratedShift = await migratedDatabase.shifts.get(legacyShift.id);
 
       expect(migratedSettings).not.toHaveProperty('coefficientMode');
-      expect(migratedSettings).not.toHaveProperty('overtimeUnavailableDates');
+      expect(migratedSettings?.overtimeUnavailableDates).toEqual(['2026-06-20']);
       expect(migratedShift?.coefficientMode).toBe('x2');
     } finally {
       migratedDatabase.close();
@@ -354,6 +355,7 @@ describe('settings repository use-cases', () => {
       overtimeStrategy: 'standard',
       overtimeWeekdayMaxMinutes: 240,
       overtimeSaturdayMaxMinutes: 480,
+      overtimeUnavailableDates: [],
       incognitoEnabled: false,
       onboardingCompleted: false,
       updatedAt: new Date(0).toISOString()
@@ -381,6 +383,7 @@ describe('settings repository use-cases', () => {
       overtimeStrategy: 'standard-plus',
       overtimeWeekdayMaxMinutes: 300,
       overtimeSaturdayMaxMinutes: 600,
+      overtimeUnavailableDates: ['2026-06-27'],
       incognitoEnabled: true,
       onboardingCompleted: true,
       updatedAt: '2026-06-23T10:00:00.000Z'
@@ -441,8 +444,21 @@ describe('settings repository use-cases', () => {
     expect(normalized.overtimeWeekdayMaxMinutes).toBe(240);
     expect(normalized.overtimeSaturdayMaxMinutes).toBe(480);
     expect('coefficientMode' in normalized).toBe(false);
-    expect('overtimeUnavailableDates' in normalized).toBe(false);
+    expect(normalized.overtimeUnavailableDates).toEqual([]);
     expect('overtimeSaturdayCount' in normalized).toBe(false);
+  });
+
+  it('keeps valid unavailable dates sorted in normalized settings', () => {
+    const normalized = normalizeSettingsRecord({
+      ...makeSettings(),
+      id: 'default',
+      overtimeUnavailableDates: ['2026-06-27', '2026-06-20']
+    });
+
+    expect(normalized.overtimeUnavailableDates).toEqual([
+      '2026-06-20',
+      '2026-06-27'
+    ]);
   });
 
   it.each([
@@ -1800,7 +1816,7 @@ describe('backup use-cases', () => {
     });
   });
 
-  it('round-trips schema v13 without removed settings and preserves shift coefficients', () => {
+  it('round-trips schema v15 with unavailable dates and preserves shift coefficients', () => {
     const shift = makeShift({
       id: 'production-backup-shift',
       endTime: '2026-06-10T14:30:00.000Z',
@@ -1822,7 +1838,10 @@ describe('backup use-cases', () => {
     const source = serializeBackup({
       schemaVersion: BACKUP_SCHEMA_VERSION,
       exportedAt: '2026-06-24T12:00:00.000Z',
-      settings: makeSettings({ overtimeStrategy: 'standard-plus' }),
+      settings: makeSettings({
+        overtimeStrategy: 'standard-plus',
+        overtimeUnavailableDates: ['2026-06-27']
+      }),
       shifts: [shift],
       enterpriseSchedule: [],
       reviewedScheduleWarnings: [
@@ -1842,13 +1861,14 @@ describe('backup use-cases', () => {
 
     const parsed = parseBackupJson(source);
 
-    expect(BACKUP_SCHEMA_VERSION).toBe(14);
+    expect(BACKUP_SCHEMA_VERSION).toBe(15);
     expect(parsed).toMatchObject({
       settings: {
         overtimeStepMinutes: 30,
         overtimeStrategy: 'standard-plus',
         overtimeWeekdayMaxMinutes: 240,
-        overtimeSaturdayMaxMinutes: 480
+        overtimeSaturdayMaxMinutes: 480,
+        overtimeUnavailableDates: ['2026-06-27']
       },
       shifts: [shift],
       reviewedScheduleWarnings: [
@@ -1861,11 +1881,10 @@ describe('backup use-cases', () => {
     });
     expect(parsed.shifts[0]?.coefficientMode).toBe('x2');
     expect(parsed.settings).not.toHaveProperty('coefficientMode');
-    expect(parsed.settings).not.toHaveProperty('overtimeUnavailableDates');
     expect(parsed.settings).not.toHaveProperty('overtimeSaturdayCount');
   });
 
-  it('imports schema v12 while discarding removed settings and preserving shift mode', () => {
+  it('imports schema v12 while restoring unavailable dates and preserving shift mode', () => {
     const shift = makeShift({
       id: 'legacy-v12-shift',
       endTime: '2026-06-10T14:30:00.000Z',
@@ -1890,8 +1909,23 @@ describe('backup use-cases', () => {
 
     expect(parsed.schemaVersion).toBe(BACKUP_SCHEMA_VERSION);
     expect(parsed.settings).not.toHaveProperty('coefficientMode');
-    expect(parsed.settings).not.toHaveProperty('overtimeUnavailableDates');
+    expect(parsed.settings.overtimeUnavailableDates).toEqual(['2026-06-20']);
     expect(parsed.shifts[0]?.coefficientMode).toBe('x1');
+  });
+
+  it('imports schema v14 with an empty unavailable-date list', () => {
+    const { overtimeUnavailableDates: _unavailableDates, ...legacySettings } = makeSettings();
+    const source = JSON.stringify({
+      schemaVersion: 14,
+      exportedAt: '2026-06-24T12:00:00.000Z',
+      settings: legacySettings,
+      shifts: [],
+      enterpriseSchedule: [],
+      reviewedScheduleWarnings: [],
+      confirmedSaturdayDoubleRateMonths: []
+    });
+
+    expect(parseBackupJson(source).settings.overtimeUnavailableDates).toEqual([]);
   });
 
   it.each([
@@ -2354,7 +2388,7 @@ describe('backup use-cases', () => {
     );
   });
 
-  it('rejects invalid overtime maximums and validates removed dates in schema v12', () => {
+  it('rejects invalid overtime maximums and validates unavailable dates in schemas v12 and v15', () => {
     const parsed = JSON.parse(
       serializeBackup({
         schemaVersion: BACKUP_SCHEMA_VERSION,
@@ -2370,6 +2404,17 @@ describe('backup use-cases', () => {
 
     expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(
       'settings.overtimeWeekdayMaxMinutes'
+    );
+
+    parsed.settings.overtimeWeekdayMaxMinutes = 240;
+    delete parsed.settings.overtimeUnavailableDates;
+    expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(
+      'settings.overtimeUnavailableDates'
+    );
+
+    parsed.settings.overtimeUnavailableDates = ['2026-08-12', '2026-08-12'];
+    expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(
+      'settings.overtimeUnavailableDates'
     );
 
     const legacyV12 = structuredClone(parsed);

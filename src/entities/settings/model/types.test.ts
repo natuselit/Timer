@@ -33,6 +33,7 @@ describe('settings domain types', () => {
       overtimeStrategy: 'standard',
       overtimeWeekdayMaxMinutes: 240,
       overtimeSaturdayMaxMinutes: 480,
+      overtimeUnavailableDates: [],
       incognitoEnabled: false,
       onboardingCompleted: true,
       updatedAt: '2026-06-23T08:00:00.000+03:00'
@@ -47,6 +48,7 @@ describe('settings domain types', () => {
     expect(settings.overtimeStrategy).toBe('standard');
     expect(settings.overtimeWeekdayMaxMinutes).toBe(240);
     expect(settings.overtimeSaturdayMaxMinutes).toBe(480);
+    expect(settings.overtimeUnavailableDates).toEqual([]);
     expect(settings.incognitoEnabled).toBe(false);
     expect(settings.onboardingCompleted).toBe(true);
   });

@@ -30,6 +30,7 @@ export type Settings = {
   overtimeStrategy: OvertimeStrategy;
   overtimeWeekdayMaxMinutes: number;
   overtimeSaturdayMaxMinutes: number;
+  overtimeUnavailableDates: string[];
   incognitoEnabled: boolean;
   onboardingCompleted: boolean;
   updatedAt: string;

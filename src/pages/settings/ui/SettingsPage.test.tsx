@@ -32,6 +32,7 @@ const settings: Settings = {
   overtimeStrategy: 'standard',
   overtimeWeekdayMaxMinutes: 240,
   overtimeSaturdayMaxMinutes: 480,
+  overtimeUnavailableDates: [],
   incognitoEnabled: false,
   onboardingCompleted: true,
   updatedAt: '2026-07-27T19:30:00.000+03:00'
@@ -254,6 +255,36 @@ describe('SettingsPage', () => {
     expect(screen.getByText(/Крок має бути цілим числом.*кратним 5/)).toBeTruthy();
   });
 
+  it('adds and returns unavailable overtime dates', async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SettingsPage
+        settings={{
+          ...settings,
+          overtimeUnavailableDates: ['2099-01-01']
+        }}
+        onSettingsChange={onSettingsChange}
+        onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
+      />
+    );
+
+    await user.click(
+      screen.getByRole('button', { name: /Повернути .*01 січня у рекомендації/ })
+    );
+    const dateInput = screen.getByLabelText('Дата без перепрацювання');
+    await user.type(dateInput, '2099-01-02');
+    await user.click(screen.getByRole('button', { name: 'Додати' }));
+    expect(document.querySelector('time[datetime="2099-01-02"]')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
+    expect(onSettingsChange).toHaveBeenCalledWith(
+      expect.objectContaining({ overtimeUnavailableDates: ['2099-01-02'] })
+    );
+  });
+
   it('uses masked end-time fields for weekday and Saturday limits', async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn().mockResolvedValue(undefined);
@@ -268,7 +299,7 @@ describe('SettingsPage', () => {
     );
 
     expect(screen.queryByText('Дані на пристрої')).toBeNull();
-    expect(screen.queryByText('Недоступні дати')).toBeNull();
+    expect(screen.getByText('Недоступні дати')).toBeTruthy();
 
     const weekdayEndTimeInput = screen.getByLabelText(
       'Перепрацювання до'
