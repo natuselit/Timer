@@ -10,6 +10,7 @@ import {
   CALENDAR_TUTORIAL_SEEN_KEY,
   localDb
 } from '../../../shared/lib/local-db';
+import { PwaInstallProvider } from '../../../shared/lib/pwa-install';
 import { SettingsPage } from './SettingsPage';
 
 const settings: Settings = {
@@ -196,6 +197,69 @@ describe('SettingsPage', () => {
     expect(onSettingsChange).toHaveBeenCalledWith(
       expect.objectContaining({ backupReminderIntervalDays: 30 })
     );
+  });
+
+  it('shows browser installation instructions when the native prompt is unavailable', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+        onOpenCalendarTutorial={vi.fn()}
+      />
+    );
+
+    const installationSection = screen
+      .getByRole('heading', { name: 'Встановлення' })
+      .closest('details');
+
+    await user.click(installationSection!.querySelector('summary')!);
+    await user.click(screen.getByRole('button', { name: 'Як встановити застосунок' }));
+
+    expect(screen.getByText(/Відкрийте меню браузера.*Встановити застосунок/)).toBeTruthy();
+  });
+
+  it('opens the native PWA installation prompt from settings', async () => {
+    const user = userEvent.setup();
+    const prompt = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PwaInstallProvider>
+        <SettingsPage
+          settings={settings}
+          onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+          onLocalDataReplace={vi.fn()}
+          onOpenCalendarTutorial={vi.fn()}
+        />
+      </PwaInstallProvider>
+    );
+
+    const installEvent = Object.assign(
+      new Event('beforeinstallprompt', { cancelable: true }),
+      {
+        prompt,
+        userChoice: Promise.resolve({ outcome: 'accepted', platform: 'web' })
+      }
+    );
+
+    act(() => {
+      window.dispatchEvent(installEvent);
+    });
+
+    const installationSection = screen
+      .getByRole('heading', { name: 'Встановлення' })
+      .closest('details');
+
+    await user.click(installationSection!.querySelector('summary')!);
+    await user.click(screen.getByRole('button', { name: 'Встановити застосунок' }));
+
+    await waitFor(() => {
+      expect(prompt).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Застосунок уже встановлено')).toBeTruthy();
+    });
+    expect(installEvent.defaultPrevented).toBe(true);
   });
 
   it('validates and saves the overtime limit, step and fixed strategy', async () => {

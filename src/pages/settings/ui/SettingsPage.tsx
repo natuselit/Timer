@@ -9,6 +9,7 @@ import {
 import {
   CalendarClock,
   CalendarDays,
+  CircleCheck,
   ChevronDown,
   CircleHelp,
   Database,
@@ -21,6 +22,7 @@ import {
   RotateCcw,
   Save,
   Shield,
+  Smartphone,
   TimerReset,
   Trophy,
   UserRound,
@@ -67,6 +69,7 @@ import {
   ShiftRepository
 } from '../../../shared/lib/local-db';
 import { downloadBackup } from '../../../shared/lib/backup';
+import { usePwaInstall, type PwaInstallStatus } from '../../../shared/lib/pwa-install';
 import {
   addMinutesToLocalTime,
   formatTimeInputDraft,
@@ -152,6 +155,7 @@ type SettingsSectionId =
   | 'grades'
   | 'timer'
   | 'appearance'
+  | 'installation'
   | 'privacy'
   | 'data'
   | 'help'
@@ -222,6 +226,12 @@ const OVERTIME_STRATEGY_LABELS: Record<OvertimeStrategy, string> = {
   standard: 'Стандарт',
   'standard-plus': 'Стандарт+',
   'standard-plus-plus': 'Стандарт++'
+};
+const PWA_INSTALL_SUMMARIES: Record<PwaInstallStatus, string> = {
+  installed: 'Встановлено',
+  available: 'Доступно',
+  ios: 'Через Safari',
+  manual: 'Через меню'
 };
 const FAQ_ITEMS: Array<{
   question: string;
@@ -483,10 +493,13 @@ export function SettingsPage({
     useState<RecalculationCalendarMonth>(getCurrentCalendarMonth);
   const [isClearing, setIsClearing] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
+  const [isInstallBusy, setIsInstallBusy] = useState(false);
+  const [isInstallHelpVisible, setIsInstallHelpVisible] = useState(false);
   const [overtimeUnavailableDateDraft, setOvertimeUnavailableDateDraft] = useState('');
   const formRef = useRef<HTMLFormElement | null>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const syncedValuesRef = useRef<FormValues>(toFormValues(settings));
+  const { status: pwaInstallStatus, install: installPwa } = usePwaInstall();
 
   useEffect(() => {
     const nextValues = toFormValues(settings);
@@ -498,6 +511,36 @@ export function SettingsPage({
     );
     syncedValuesRef.current = nextValues;
   }, [settings]);
+
+  const installApplication = async () => {
+    if (pwaInstallStatus !== 'available') {
+      setIsInstallHelpVisible(true);
+      return;
+    }
+
+    setIsInstallBusy(true);
+    setNotice(null);
+
+    try {
+      const result = await installPwa();
+
+      if (result === 'accepted') {
+        setNotice({ tone: 'success', text: 'Застосунок встановлено.' });
+      } else if (result === 'dismissed') {
+        setNotice({ tone: 'info', text: 'Встановлення скасовано.' });
+      } else {
+        setIsInstallHelpVisible(true);
+      }
+    } catch {
+      setNotice({
+        tone: 'error',
+        text: 'Не вдалося відкрити встановлення. Скористайтеся меню браузера.'
+      });
+      setIsInstallHelpVisible(true);
+    } finally {
+      setIsInstallBusy(false);
+    }
+  };
 
   const addOvertimeUnavailableDate = () => {
     const today = toLocalIsoString(new Date()).slice(0, 10);
@@ -1605,6 +1648,62 @@ export function SettingsPage({
             Системна тема автоматично повторює налаштування Android або iOS.
           </small>
         </label>
+      </SettingsSection>
+
+      <SettingsSection
+        id="installation"
+        title="Встановлення"
+        description="Швидкий запуск з екрана пристрою"
+        summary={PWA_INSTALL_SUMMARIES[pwaInstallStatus]}
+        icon={Smartphone}
+      >
+        {pwaInstallStatus === 'installed' ? (
+          <div className="settings-page__install-note" role="status">
+            <CircleCheck size={22} aria-hidden="true" />
+            <div>
+              <strong>Застосунок уже встановлено</strong>
+              <p>Запускайте його з головного екрана пристрою.</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <button
+              className="settings-page__secondary-action"
+              type="button"
+              disabled={isInstallBusy}
+              onClick={() => void installApplication()}
+            >
+              <Download size={19} aria-hidden="true" />
+              {isInstallBusy
+                ? 'Відкриття...'
+                : pwaInstallStatus === 'available'
+                  ? 'Встановити застосунок'
+                  : 'Як встановити застосунок'}
+            </button>
+
+            {isInstallHelpVisible ? (
+              <div className="settings-page__install-note" role="status">
+                <Smartphone size={22} aria-hidden="true" />
+                <div>
+                  <strong>Встановлення через браузер</strong>
+                  <p>
+                    {pwaInstallStatus === 'ios' ? (
+                      <>
+                        Відкрийте сторінку в Safari, натисніть «Поділитися», потім
+                        «На початковий екран» і підтвердьте.
+                      </>
+                    ) : (
+                      <>
+                        Відкрийте меню браузера та оберіть «Встановити застосунок» або
+                        «Додати на головний екран».
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
       </SettingsSection>
 
       <SettingsSection
