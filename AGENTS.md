@@ -69,8 +69,9 @@ npm run dev
 
 - Після змін у репозиторії запусти потрібні перевірки, але не створюй коміт, не роби push і не запускай deploy без прямого прохання користувача.
 - Конфігурація Sites зберігається у `.openai/hosting.json`, а production build має бути сумісним із Cloudflare Workers.
-- `npm run build` створює Sites/Cloudflare Worker-збірку, а `npm run build:pages` — окрему статичну збірку GitHub Pages із базовим шляхом `/Timer/`.
-- Push у `main` запускає GitHub Pages workflow; Sites публікується окремим deployment-процесом.
+- `npm run build` створює Sites/Cloudflare Worker-збірку. `npm run build:pages` збережено лише для локальної перевірки замороженої legacy-версії з базовим шляхом `/Timer/`; її артефакти не можна публікувати.
+- GitHub Pages заморожено на вже опублікованій версії: не створюй і не відновлюй Pages workflow, не завантажуй туди нові артефакти та не вимикай наявний Pages-сайт.
+- Усі нові релізи публікуються лише через Sites окремим deployment-процесом; push у `main` не має оновлювати GitHub Pages.
 - Якщо користувач прямо попросив виконати push або deploy, не публікуй зламану версію: у разі помилки тестів, збірки, push або deploy зупинись і явно повідом про причину.
 
 ## Очікувана поведінка Codex
