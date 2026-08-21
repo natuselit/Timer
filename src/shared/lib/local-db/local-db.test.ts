@@ -183,6 +183,7 @@ describe('database migrations', () => {
           {
             id: 'legacy-ticket',
             actualQuantity: null,
+            manualCompletionPercent: null,
             downtimeMinutes: 0
           }
         ]
@@ -326,6 +327,54 @@ describe('database migrations', () => {
       expect(migratedSettings).not.toHaveProperty('coefficientMode');
       expect(migratedSettings?.overtimeUnavailableDates).toEqual(['2026-06-20']);
       expect(migratedShift?.coefficientMode).toBe('x2');
+    } finally {
+      migratedDatabase.close();
+      await migratedDatabase.delete();
+    }
+  });
+
+  it('adds a null manual completion percent to tickets from IndexedDB schema v5', async () => {
+    const databaseName = makeDbName();
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase.version(5).stores({
+      settings: '&id',
+      shifts: '&id,&date,updatedAt,createdAt',
+      enterpriseSchedule: '&id,&date,createdAt',
+      appMeta: '&key'
+    });
+    const legacyShift = {
+      ...makeShift({
+        id: 'legacy-manual-completion-shift',
+        endTime: '2026-06-10T14:30:00.000Z'
+      }),
+      workTickets: [
+        {
+          id: 'legacy-manual-completion-ticket',
+          normPerEightHours: 80,
+          startedAt: '2026-06-10T07:00:00.000Z',
+          endedAt: '2026-06-10T08:00:00.000Z',
+          actualQuantity: 9,
+          downtimeMinutes: 0,
+          createdAt: '2026-06-10T07:00:00.000Z',
+          updatedAt: '2026-06-10T08:00:00.000Z'
+        }
+      ]
+    } as unknown as Shift;
+
+    await legacyDatabase.table<Shift, string>('shifts').put(legacyShift);
+    legacyDatabase.close();
+
+    const migratedDatabase = new ShifterDatabase(databaseName);
+
+    try {
+      await expect(migratedDatabase.shifts.get(legacyShift.id)).resolves.toMatchObject({
+        workTickets: [
+          {
+            id: 'legacy-manual-completion-ticket',
+            manualCompletionPercent: null
+          }
+        ]
+      });
     } finally {
       migratedDatabase.close();
       await migratedDatabase.delete();
@@ -578,6 +627,23 @@ describe('shift repository use-cases', () => {
       coefficientMode: 'auto'
     });
     await expect(getActiveShift(shiftRepository)).resolves.toEqual(shift);
+  });
+
+  it('creates an active shift with an explicitly selected type', async () => {
+    const shift = await createShift(shiftRepository, {
+      id: 'selected-second-shift',
+      startTime: '2026-06-10T06:00:00.000Z',
+      type: 'second',
+      hourlyRateSnapshot: 200,
+      now: '2026-06-10T06:00:00.000Z'
+    });
+
+    expect(shift).toMatchObject({
+      type: 'second',
+      detectionMode: 'manual',
+      plannedStartTime: '14:30',
+      plannedEndTime: '22:30'
+    });
   });
 
   it('updates a note only for an active shift and enforces its limit', async () => {
@@ -978,6 +1044,7 @@ describe('shift repository use-cases', () => {
           startedAt: '2026-06-11T07:00:00.000Z',
           endedAt: '2026-06-11T10:00:00.000Z',
           actualQuantity: 20,
+          manualCompletionPercent: null,
           downtimeMinutes: 0,
           createdAt: '2026-06-11T07:00:00.000Z',
           updatedAt: '2026-06-11T07:00:00.000Z'
@@ -988,6 +1055,7 @@ describe('shift repository use-cases', () => {
           startedAt: '2026-06-11T10:00:00.000Z',
           endedAt: '2026-06-11T14:30:00.000Z',
           actualQuantity: 15,
+          manualCompletionPercent: null,
           downtimeMinutes: 0,
           createdAt: '2026-06-11T10:00:00.000Z',
           updatedAt: '2026-06-11T10:00:00.000Z'
@@ -1040,6 +1108,7 @@ describe('shift repository use-cases', () => {
               startedAt: '2026-06-10T07:00:00.000Z',
               endedAt: '2026-06-10T08:00:00.000Z',
               actualQuantity: 1.5,
+              manualCompletionPercent: null,
               downtimeMinutes: 0,
               createdAt: '2026-06-10T07:00:00.000Z',
               updatedAt: '2026-06-10T08:00:00.000Z'
@@ -1048,6 +1117,28 @@ describe('shift repository use-cases', () => {
         })
       )
     ).rejects.toThrow('Фактична кількість');
+
+    await expect(
+      shiftRepository.createShift(
+        makeShift({
+          id: 'invalid-manual-completion-write',
+          endTime: '2026-06-10T14:30:00.000Z',
+          workTickets: [
+            {
+              id: 'invalid-manual-completion-ticket',
+              normPerEightHours: 50,
+              startedAt: '2026-06-10T07:00:00.000Z',
+              endedAt: '2026-06-10T08:00:00.000Z',
+              actualQuantity: 1,
+              manualCompletionPercent: -1,
+              downtimeMinutes: 0,
+              createdAt: '2026-06-10T07:00:00.000Z',
+              updatedAt: '2026-06-10T08:00:00.000Z'
+            }
+          ]
+        })
+      )
+    ).rejects.toThrow('Ручний відсоток');
   });
 
   it('creates a completed manual shift with selected type and planned window', async () => {
@@ -1816,7 +1907,7 @@ describe('backup use-cases', () => {
     });
   });
 
-  it('round-trips schema v15 with unavailable dates and preserves shift coefficients', () => {
+  it('round-trips schema v16 with unavailable dates and preserves shift coefficients', () => {
     const shift = makeShift({
       id: 'production-backup-shift',
       endTime: '2026-06-10T14:30:00.000Z',
@@ -1829,6 +1920,7 @@ describe('backup use-cases', () => {
           startedAt: '2026-06-10T07:00:00.000Z',
           endedAt: '2026-06-10T08:00:00.000Z',
           actualQuantity: 9,
+          manualCompletionPercent: 137,
           downtimeMinutes: 6,
           createdAt: '2026-06-10T07:00:00.000Z',
           updatedAt: '2026-06-10T08:00:00.000Z'
@@ -1861,7 +1953,7 @@ describe('backup use-cases', () => {
 
     const parsed = parseBackupJson(source);
 
-    expect(BACKUP_SCHEMA_VERSION).toBe(15);
+    expect(BACKUP_SCHEMA_VERSION).toBe(16);
     expect(parsed).toMatchObject({
       settings: {
         overtimeStepMinutes: 30,
@@ -1880,8 +1972,48 @@ describe('backup use-cases', () => {
       ]
     });
     expect(parsed.shifts[0]?.coefficientMode).toBe('x2');
+    expect(parsed.shifts[0]?.workTickets[0]?.manualCompletionPercent).toBe(137);
     expect(parsed.settings).not.toHaveProperty('coefficientMode');
     expect(parsed.settings).not.toHaveProperty('overtimeSaturdayCount');
+  });
+
+  it('imports schema v15 tickets without a manual completion percent as automatic', () => {
+    const legacyBackup = JSON.parse(
+      serializeBackup({
+        schemaVersion: BACKUP_SCHEMA_VERSION,
+        exportedAt: '2026-06-24T12:00:00.000Z',
+        settings: makeSettings(),
+        shifts: [
+          makeShift({
+            id: 'legacy-v15-production-shift',
+            endTime: '2026-06-10T14:30:00.000Z',
+            workTickets: [
+              {
+                id: 'legacy-v15-production-ticket',
+                normPerEightHours: 80,
+                startedAt: '2026-06-10T07:00:00.000Z',
+                endedAt: '2026-06-10T08:00:00.000Z',
+                actualQuantity: 9,
+                manualCompletionPercent: null,
+                downtimeMinutes: 0,
+                createdAt: '2026-06-10T07:00:00.000Z',
+                updatedAt: '2026-06-10T08:00:00.000Z'
+              }
+            ]
+          })
+        ],
+        enterpriseSchedule: [],
+        reviewedScheduleWarnings: [],
+        confirmedSaturdayDoubleRateMonths: []
+      })
+    );
+    legacyBackup.schemaVersion = 15;
+    delete legacyBackup.shifts[0].workTickets[0].manualCompletionPercent;
+
+    const parsed = parseBackupJson(JSON.stringify(legacyBackup));
+
+    expect(parsed.schemaVersion).toBe(16);
+    expect(parsed.shifts[0]?.workTickets[0]?.manualCompletionPercent).toBeNull();
   });
 
   it('imports schema v12 while restoring unavailable dates and preserving shift mode', () => {
@@ -2477,6 +2609,7 @@ describe('backup use-cases', () => {
               startedAt: '2026-06-10T09:00:00.000Z',
               endedAt: '2026-06-10T08:00:00.000Z',
               actualQuantity: 0,
+              manualCompletionPercent: null,
               downtimeMinutes: 0,
               createdAt: '2026-06-10T09:00:00.000Z',
               updatedAt: '2026-06-10T08:00:00.000Z'
@@ -2491,6 +2624,44 @@ describe('backup use-cases', () => {
 
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
     expect(() => parseBackupJson(source)).toThrow('Тікет не може завершуватись раніше старту.');
+  });
+
+  it.each([
+    ['відʼємний', -1],
+    ['нецілий', 99.5]
+  ])('rejects a %s manual completion percent in schema v16', (_label, invalidPercent) => {
+    const parsed = JSON.parse(
+      serializeBackup({
+        schemaVersion: BACKUP_SCHEMA_VERSION,
+        exportedAt: '2026-06-24T12:00:00.000Z',
+        settings: makeSettings(),
+        shifts: [
+          makeShift({
+            id: 'invalid-manual-completion-shift',
+            endTime: '2026-06-10T14:30:00.000Z',
+            workTickets: [
+              {
+                id: 'invalid-manual-completion-ticket',
+                normPerEightHours: 80,
+                startedAt: '2026-06-10T07:00:00.000Z',
+                endedAt: '2026-06-10T08:00:00.000Z',
+                actualQuantity: 9,
+                manualCompletionPercent: null,
+                downtimeMinutes: 0,
+                createdAt: '2026-06-10T07:00:00.000Z',
+                updatedAt: '2026-06-10T08:00:00.000Z'
+              }
+            ]
+          })
+        ],
+        enterpriseSchedule: [],
+        reviewedScheduleWarnings: [],
+        confirmedSaturdayDoubleRateMonths: []
+      })
+    );
+    parsed.shifts[0].workTickets[0].manualCompletionPercent = invalidPercent;
+
+    expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(BackupValidationError);
   });
 
   it.each([
@@ -2512,6 +2683,7 @@ describe('backup use-cases', () => {
               startedAt: '2026-06-10T07:00:00.000Z',
               endedAt: '2026-06-10T08:00:00.000Z',
               actualQuantity: invalidValues.actualQuantity,
+              manualCompletionPercent: null,
               downtimeMinutes: invalidValues.downtimeMinutes,
               createdAt: '2026-06-10T07:00:00.000Z',
               updatedAt: '2026-06-10T08:00:00.000Z'

@@ -29,10 +29,12 @@ import { SettingsPage } from '../../settings';
 import {
   calculateSalaryBreakdown,
   calculateTicketProductionSummary,
+  detectShiftType,
   getEffectiveCoefficient,
   SHIFT_NOTE_MAX_LENGTH,
   type ISODateTimeString,
   type Shift,
+  type ShiftType,
   type WorkTicket
 } from '../../../entities/shift';
 import {
@@ -255,6 +257,9 @@ function HoldButton({ label, delayMs, disabled = false, tone = 'default', onConf
 type OvertimePlannerCardProps = {
   plan: MonthlyOvertimePlan;
   settings: Settings;
+  selectedShiftType: ShiftType;
+  canSelectShiftType: boolean;
+  onShiftTypeChange: (type: ShiftType) => void;
   onStrategyChange: (strategy: OvertimeStrategy) => Promise<void>;
   onDateUnavailable: (date: string) => Promise<void>;
   onOpenSettings: () => void;
@@ -279,6 +284,9 @@ const formatScenarioIncome = (
 function OvertimePlannerCard({
   plan,
   settings,
+  selectedShiftType,
+  canSelectShiftType,
+  onShiftTypeChange,
   onStrategyChange,
   onDateUnavailable,
   onOpenSettings
@@ -307,7 +315,25 @@ function OvertimePlannerCard({
       ? Math.min(plan.earnedAmount, plan.maximumAmount)
       : plan.earnedAmount > 0
         ? 1
-        : 0;
+      : 0;
+  const shiftTypeSelector = canSelectShiftType ? (
+    <div className="main-page__shift-type-selector">
+      <span>Зміна для рекомендації</span>
+      <div role="group" aria-label="Вибір зміни перед стартом">
+        {(['first', 'second'] as const).map((type) => (
+          <button
+            type="button"
+            aria-pressed={selectedShiftType === type}
+            data-selected={selectedShiftType === type ? 'true' : 'false'}
+            key={type}
+            onClick={() => onShiftTypeChange(type)}
+          >
+            {type === 'first' ? '1 зміна' : '2 зміна'}
+          </button>
+        ))}
+      </div>
+    </div>
+  ) : null;
 
   const selectStrategy = async (strategy: OvertimeStrategy) => {
     if (strategy === settings.overtimeStrategy) {
@@ -352,6 +378,7 @@ function OvertimePlannerCard({
           <p className="main-page__label">Перепрацювання</p>
           <h3>Планувальник вимкнено</h3>
           <p>Вкажіть відсоток ліміту, щоб отримувати рекомендації на місяць.</p>
+          {shiftTypeSelector}
         </div>
         <button type="button" onClick={onOpenSettings}>
           Налаштувати
@@ -465,6 +492,7 @@ function OvertimePlannerCard({
       </dl>
 
       <div className="main-page__overtime-guidance">
+        {shiftTypeSelector}
         {hasRecommendedShift ? (
           <div className="main-page__overtime-next-shift">
             <div className="main-page__overtime-next-shift-header">
@@ -605,6 +633,7 @@ export function MainPage({
   const [activePage, setActivePage] = useState<NavigationItem['id']>('timer');
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [overtimeMonthShifts, setOvertimeMonthShifts] = useState<Shift[]>([]);
+  const [preferredShiftType, setPreferredShiftType] = useState<ShiftType | null>(null);
   const [now, setNow] = useState(() => toLocalIsoString(new Date()));
   const [isLoadingShift, setIsLoadingShift] = useState(true);
   const [timerError, setTimerError] = useState<string | null>(null);
@@ -846,6 +875,7 @@ export function MainPage({
       endTime: now
     });
   }, [activeShift, now]);
+  const selectedShiftType = preferredShiftType ?? detectShiftType(now);
   const overtimePlan = useMemo(
     () =>
       calculateMonthlyOvertimePlan({
@@ -860,7 +890,8 @@ export function MainPage({
         overtimeStrategy: settings.overtimeStrategy,
         overtimeWeekdayMaxMinutes: settings.overtimeWeekdayMaxMinutes,
         overtimeSaturdayMaxMinutes: settings.overtimeSaturdayMaxMinutes,
-        overtimeUnavailableDates: settings.overtimeUnavailableDates
+        overtimeUnavailableDates: settings.overtimeUnavailableDates,
+        preferredShiftType: selectedShiftType
       }),
     [
       now,
@@ -874,7 +905,8 @@ export function MainPage({
       settings.overtimeWeekdayMaxMinutes,
       settings.overtimeSaturdayMaxMinutes,
       settings.overtimeUnavailableDates,
-      settings.overtimeStrategy
+      settings.overtimeStrategy,
+      selectedShiftType
     ]
   );
   const currentEarning = activeSalaryBreakdown?.totalAmount ?? 0;
@@ -1080,6 +1112,7 @@ export function MainPage({
     try {
       const createdShift = await createShift(shiftRepository, {
         startTime: startedAt,
+        type: selectedShiftType,
         baseHourlyRateSnapshot: baseHourlyRate,
         hourlyRateSnapshot: baseHourlyRate,
         gradeSnapshot: createGradeSnapshot(settings),
@@ -1088,6 +1121,7 @@ export function MainPage({
 
       setNow(startedAt);
       setActiveShift(createdShift);
+      setPreferredShiftType(null);
       setTicketNormDraft('');
       setTicketError(null);
       notifyLocalDataChange();
@@ -1699,6 +1733,9 @@ export function MainPage({
           <OvertimePlannerCard
             plan={overtimePlan}
             settings={settings}
+            selectedShiftType={selectedShiftType}
+            canSelectShiftType={false}
+            onShiftTypeChange={setPreferredShiftType}
             onStrategyChange={changeOvertimeStrategy}
             onDateUnavailable={markOvertimeDateUnavailable}
             onOpenSettings={() => setActivePage('settings')}
@@ -2086,9 +2123,14 @@ export function MainPage({
                                   </div>
                                   <output
                                     className="main-page__ticket-history-completion"
-                                    aria-label={`Виконання плану G1: ${completionLabel}`}
+                                    aria-label={`Виконання: ${completionLabel}${
+                                      ticket.manualCompletionPercent !== null ? ', вручну' : ''
+                                    }`}
                                   >
                                     {completionLabel}
+                                    {ticket.manualCompletionPercent !== null ? (
+                                      <small>вручну</small>
+                                    ) : null}
                                   </output>
                                   <div
                                     className="main-page__ticket-more"
@@ -2468,6 +2510,9 @@ export function MainPage({
             <OvertimePlannerCard
               plan={overtimePlan}
               settings={settings}
+              selectedShiftType={selectedShiftType}
+              canSelectShiftType
+              onShiftTypeChange={setPreferredShiftType}
               onStrategyChange={changeOvertimeStrategy}
               onDateUnavailable={markOvertimeDateUnavailable}
               onOpenSettings={() => setActivePage('settings')}

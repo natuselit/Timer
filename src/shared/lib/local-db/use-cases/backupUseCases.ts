@@ -69,7 +69,8 @@ const OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION = 12;
 const REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION = 13;
 const FIXED_OVERTIME_STRATEGIES_BACKUP_SCHEMA_VERSION = 14;
 const RESTORED_OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION = 15;
-export const BACKUP_SCHEMA_VERSION = RESTORED_OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION;
+const MANUAL_COMPLETION_PERCENT_BACKUP_SCHEMA_VERSION = 16;
+export const BACKUP_SCHEMA_VERSION = MANUAL_COMPLETION_PERCENT_BACKUP_SCHEMA_VERSION;
 const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   LEGACY_BACKUP_SCHEMA_VERSION,
   2,
@@ -85,7 +86,8 @@ const SUPPORTED_BACKUP_SCHEMA_VERSIONS = new Set<number>([
   OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION,
   REMOVED_GLOBAL_SHIFT_DEFAULTS_BACKUP_SCHEMA_VERSION,
   FIXED_OVERTIME_STRATEGIES_BACKUP_SCHEMA_VERSION,
-  RESTORED_OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION
+  RESTORED_OVERTIME_AVAILABILITY_BACKUP_SCHEMA_VERSION,
+  MANUAL_COMPLETION_PERCENT_BACKUP_SCHEMA_VERSION
 ]);
 
 type BackupSchemaVersion = typeof BACKUP_SCHEMA_VERSION;
@@ -593,6 +595,7 @@ const parseWorkTicket = (
 
   const endedAt = value.endedAt;
   const actualQuantity = value.actualQuantity;
+  const manualCompletionPercent = value.manualCompletionPercent;
   const parsedEndedAt = endedAt === null ? null : readString(value, 'endedAt');
   const legacyIntervals =
     schemaVersion === TICKET_PRODUCTION_BACKUP_SCHEMA_VERSION
@@ -613,6 +616,12 @@ const parseWorkTicket = (
         : actualQuantity === null
           ? null
           : readFiniteNumber(value, 'actualQuantity'),
+    manualCompletionPercent:
+      schemaVersion < MANUAL_COMPLETION_PERCENT_BACKUP_SCHEMA_VERSION
+        ? null
+        : manualCompletionPercent === null
+          ? null
+          : readFiniteNumber(value, 'manualCompletionPercent'),
     downtimeMinutes:
       baseDowntimeMinutes +
       getLegacyOpenDowntimeMinutes(legacyIntervals, parsedEndedAt ?? fallbackEndTime),
@@ -624,6 +633,9 @@ const parseWorkTicket = (
     ticket.normPerEightHours <= 0 ||
     (ticket.actualQuantity !== null &&
       (!Number.isSafeInteger(ticket.actualQuantity) || ticket.actualQuantity < 0)) ||
+    (ticket.manualCompletionPercent !== null &&
+      (!Number.isSafeInteger(ticket.manualCompletionPercent) ||
+        ticket.manualCompletionPercent < 0)) ||
     !Number.isSafeInteger(ticket.downtimeMinutes) ||
     !isIsoLikeDateTime(ticket.startedAt) ||
     (ticket.endedAt !== null && !isIsoLikeDateTime(ticket.endedAt)) ||

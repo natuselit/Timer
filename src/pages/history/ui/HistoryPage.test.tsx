@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import type { Shift } from '../../../entities/shift';
@@ -77,6 +78,7 @@ beforeEach(async () => {
           startedAt: '2026-07-27T06:55:00.000+03:00',
           endedAt: '2026-07-27T10:15:00.000+03:00',
           actualQuantity: 20,
+          manualCompletionPercent: null,
           downtimeMinutes: 0,
           createdAt: '2026-07-27T06:55:00.000+03:00',
           updatedAt: '2026-07-27T10:15:00.000+03:00'
@@ -167,5 +169,70 @@ describe('HistoryPage', () => {
 
     expect(completionTile?.textContent).toContain('80%');
     expect(screen.queryByText('Виконання G2')).toBeNull();
+  });
+
+  it('saves and clears a manual company completion percent', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <HistoryPage
+        settings={settings}
+        calendarMonth={{ year: 2026, month: 7 }}
+        selectedRange={{ start: '2026-07-01', end: '2026-07-31' }}
+        onCalendarMonthChange={vi.fn()}
+        onSelectedRangeChange={vi.fn()}
+        activeRangePreset="month"
+        isAllTimePresetEnabled
+        onRangePresetSelect={vi.fn()}
+      />
+    );
+
+    const note = await screen.findByText('Передати партію наступній зміні');
+    const completedShiftCard = note.closest('article');
+
+    expect(completedShiftCard).not.toBeNull();
+    await user.click(
+      within(completedShiftCard as HTMLElement).getByRole('button', {
+        name: /Редагувати зміну за/
+      })
+    );
+    const manualPercent = screen.getByLabelText(
+      'Виконання компанії, тікет 1'
+    ) as HTMLInputElement;
+
+    await user.type(manualPercent, '135');
+    await user.click(screen.getByRole('button', { name: 'Зберегти' }));
+
+    await waitFor(async () => {
+      expect(
+        (await localDb.shifts.get('mixed-coefficients'))?.workTickets[0]
+          .manualCompletionPercent
+      ).toBe(135);
+    });
+    expect(await screen.findByText('вручну')).toBeTruthy();
+
+    const savedNote = await screen.findByText('Передати партію наступній зміні');
+    const savedCompletedShiftCard = savedNote.closest('article');
+
+    expect(savedCompletedShiftCard).not.toBeNull();
+    await user.click(
+      within(savedCompletedShiftCard as HTMLElement).getByRole('button', {
+        name: /Редагувати зміну за/
+      })
+    );
+    const savedManualPercent = screen.getByLabelText(
+      'Виконання компанії, тікет 1'
+    ) as HTMLInputElement;
+    expect(savedManualPercent.value).toBe('135');
+
+    await user.clear(savedManualPercent);
+    await user.click(screen.getByRole('button', { name: 'Зберегти' }));
+
+    await waitFor(async () => {
+      expect(
+        (await localDb.shifts.get('mixed-coefficients'))?.workTickets[0]
+          .manualCompletionPercent
+      ).toBeNull();
+    });
   });
 });

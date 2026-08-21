@@ -171,6 +171,7 @@ export const calculateAnalyticsSummary = ({
     downtimePercent: null
   };
   let gradeOneTarget = 0;
+  let completionEquivalentQuantity = 0;
 
   completedShifts.forEach((shift) => {
     const salary = calculateSalaryBreakdown(shift);
@@ -212,7 +213,7 @@ export const calculateAnalyticsSummary = ({
       .forEach((ticket) => {
         production.ticketCount += 1;
 
-        if (ticket.actualQuantity === null || !shift.gradeSnapshot) {
+        if (!shift.gradeSnapshot) {
           production.unfilledTicketCount += 1;
           return;
         }
@@ -223,12 +224,23 @@ export const calculateAnalyticsSummary = ({
           currentGrade: shift.gradeSnapshot.currentGrade,
           gradeNormPercents: shift.gradeSnapshot.gradeNormPercents
         });
+        const ticketGradeOneTarget = ticketSummary.targets[0]?.quantity ?? 0;
+
+        if (ticketSummary.completionPercent !== null && ticketGradeOneTarget > 0) {
+          gradeOneTarget += ticketGradeOneTarget;
+          completionEquivalentQuantity +=
+            ticketGradeOneTarget * (ticketSummary.completionPercent / 100);
+        }
+
+        if (ticket.actualQuantity === null) {
+          production.unfilledTicketCount += 1;
+          return;
+        }
 
         production.filledTicketCount += 1;
         production.actualQuantity += ticket.actualQuantity;
         production.productiveMinutes += ticketSummary.productiveMinutes;
         production.downtimeMinutes += ticketSummary.downtimeMinutes;
-        gradeOneTarget += ticketSummary.targets[0]?.quantity ?? 0;
         production.currentGradeTarget += ticketSummary.currentTarget;
       });
   });
@@ -251,7 +263,7 @@ export const calculateAnalyticsSummary = ({
 
   production.completionPercent =
     gradeOneTarget > 0
-      ? (production.actualQuantity / gradeOneTarget) * 100
+      ? (completionEquivalentQuantity / gradeOneTarget) * 100
       : null;
   production.gradeOneTarget = gradeOneTarget;
   production.averageActualPerTicket =

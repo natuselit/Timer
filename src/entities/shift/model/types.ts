@@ -26,6 +26,7 @@ export type WorkTicket = {
   startedAt: ISODateTimeString;
   endedAt: ISODateTimeString | null;
   actualQuantity: number | null;
+  manualCompletionPercent: number | null;
   downtimeMinutes: number;
   createdAt: ISODateTimeString;
   updatedAt: ISODateTimeString;

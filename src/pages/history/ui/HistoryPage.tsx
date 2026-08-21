@@ -103,17 +103,24 @@ type ShiftFormValues = {
 
 type TicketFormValue = Omit<
   WorkTicket,
-  'normPerEightHours' | 'startedAt' | 'endedAt' | 'actualQuantity' | 'downtimeMinutes'
+  | 'normPerEightHours'
+  | 'startedAt'
+  | 'endedAt'
+  | 'actualQuantity'
+  | 'manualCompletionPercent'
+  | 'downtimeMinutes'
 > & {
   normPerEightHours: string;
   startedAt: string;
   endedAt: string;
   actualQuantity: string;
+  manualCompletionPercent: string;
   downtimeMinutes: string;
   originalNormPerEightHours: number;
   originalStartedAt: ISODateTimeString;
   originalEndedAt: ISODateTimeString | null;
   originalActualQuantity: number | null;
+  originalManualCompletionPercent: number | null;
   originalDowntimeMinutes: number;
 };
 
@@ -180,6 +187,7 @@ const createTicketFormValue = (): TicketFormValue => {
     startedAt: '',
     endedAt: '',
     actualQuantity: '',
+    manualCompletionPercent: '',
     downtimeMinutes: '0',
     createdAt,
     updatedAt: createdAt,
@@ -187,6 +195,7 @@ const createTicketFormValue = (): TicketFormValue => {
     originalStartedAt: '',
     originalEndedAt: null,
     originalActualQuantity: null,
+    originalManualCompletionPercent: null,
     originalDowntimeMinutes: 0
   };
 };
@@ -198,6 +207,8 @@ const toTicketFormValues = (workTickets: WorkTicket[]): TicketFormValue[] =>
     startedAt: getTimeInputValue(ticket.startedAt),
     endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : '',
     actualQuantity: ticket.actualQuantity === null ? '' : String(ticket.actualQuantity),
+    manualCompletionPercent:
+      ticket.manualCompletionPercent === null ? '' : String(ticket.manualCompletionPercent),
     downtimeMinutes: String(ticket.downtimeMinutes),
     createdAt: ticket.createdAt,
     updatedAt: ticket.updatedAt,
@@ -205,6 +216,7 @@ const toTicketFormValues = (workTickets: WorkTicket[]): TicketFormValue[] =>
     originalStartedAt: ticket.startedAt,
     originalEndedAt: ticket.endedAt,
     originalActualQuantity: ticket.actualQuantity,
+    originalManualCompletionPercent: ticket.manualCompletionPercent,
     originalDowntimeMinutes: ticket.downtimeMinutes
   }));
 
@@ -243,14 +255,19 @@ const createWorkTicketsFromFormValues = (
     const actualQuantity = ticket.actualQuantity.trim() === ''
       ? null
       : Number(ticket.actualQuantity);
+    const manualCompletionPercent = ticket.manualCompletionPercent.trim() === ''
+      ? null
+      : Number(ticket.manualCompletionPercent);
     const downtimeMinutes = Number(ticket.downtimeMinutes);
 
     if (
       (actualQuantity !== null && (!Number.isSafeInteger(actualQuantity) || actualQuantity < 0)) ||
+      (manualCompletionPercent !== null &&
+        (!Number.isSafeInteger(manualCompletionPercent) || manualCompletionPercent < 0)) ||
       !Number.isSafeInteger(downtimeMinutes) ||
       downtimeMinutes < 0
     ) {
-      throw new Error('Факт і простій мають бути цілими невідʼємними числами.');
+      throw new Error('Факт, відсоток і простій мають бути цілими невідʼємними числами.');
     }
 
     if (ticket.originalEndedAt !== null && endedAt === null) {
@@ -266,6 +283,7 @@ const createWorkTicketsFromFormValues = (
       startedAt !== ticket.originalStartedAt ||
       endedAt !== ticket.originalEndedAt ||
       actualQuantity !== ticket.originalActualQuantity ||
+      manualCompletionPercent !== ticket.originalManualCompletionPercent ||
       downtimeMinutes !== ticket.originalDowntimeMinutes;
 
     return {
@@ -274,6 +292,7 @@ const createWorkTicketsFromFormValues = (
       startedAt,
       endedAt,
       actualQuantity: endedAt === null ? null : actualQuantity,
+      manualCompletionPercent: endedAt === null ? null : manualCompletionPercent,
       downtimeMinutes,
       createdAt: ticket.createdAt,
       updatedAt: didChange ? updatedAt : ticket.updatedAt
@@ -303,6 +322,9 @@ const getTicketProductionPreview = (
     const actualQuantity = ticket.actualQuantity.trim() === ''
       ? null
       : Number(ticket.actualQuantity);
+    const manualCompletionPercent = ticket.manualCompletionPercent.trim() === ''
+      ? null
+      : Number(ticket.manualCompletionPercent);
     const endedAt = combineLocalDateAndTime(date, normalizeTimeInput(ticket.endedAt));
     const previewTicket: WorkTicket = {
       id: ticket.id,
@@ -310,6 +332,7 @@ const getTicketProductionPreview = (
       startedAt: combineLocalDateAndTime(date, normalizeTimeInput(ticket.startedAt)),
       endedAt,
       actualQuantity,
+      manualCompletionPercent,
       downtimeMinutes: Number(ticket.downtimeMinutes),
       createdAt: ticket.createdAt,
       updatedAt: ticket.updatedAt
@@ -318,6 +341,8 @@ const getTicketProductionPreview = (
     if (
       !Number.isSafeInteger(previewTicket.downtimeMinutes) ||
       previewTicket.downtimeMinutes < 0 ||
+      (manualCompletionPercent !== null &&
+        (!Number.isSafeInteger(manualCompletionPercent) || manualCompletionPercent < 0)) ||
       (actualQuantity !== null && (!Number.isSafeInteger(actualQuantity) || actualQuantity < 0))
     ) {
       return null;
@@ -724,7 +749,7 @@ export function HistoryPage({
 
   const changeEditorTicketNumber = (
     ticketId: string,
-    key: 'actualQuantity' | 'downtimeMinutes',
+    key: 'actualQuantity' | 'manualCompletionPercent' | 'downtimeMinutes',
     value: string
   ) => {
     const normalizedValue = value.replace(/\D/g, '');
@@ -1248,6 +1273,9 @@ export function HistoryPage({
                                       {production.completionPercent === null
                                         ? '—'
                                         : `${Math.round(production.completionPercent)}%`}
+                                      {ticket.manualCompletionPercent !== null ? (
+                                        <small>вручну</small>
+                                      ) : null}
                                     </dd>
                                   </div>
                                 </dl>
@@ -1578,6 +1606,34 @@ export function HistoryPage({
                                 <span aria-hidden="true">хв</span>
                               </span>
                             </label>
+                            {ticket.endedAt.trim() ? (
+                              <label className="history-page__ticket-norm">
+                                <span>Виконання компанії</span>
+                                <span className="history-page__ticket-norm-control">
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    autoComplete="off"
+                                    pattern="[0-9]*"
+                                    aria-label={`Виконання компанії, тікет ${index + 1}`}
+                                    value={ticket.manualCompletionPercent}
+                                    placeholder={
+                                      production?.completionPercent == null
+                                        ? 'Авто'
+                                        : `Авто: ${Math.round(production.completionPercent)}`
+                                    }
+                                    onChange={(event) =>
+                                      changeEditorTicketNumber(
+                                        ticket.id,
+                                        'manualCompletionPercent',
+                                        event.target.value
+                                      )
+                                    }
+                                  />
+                                  <span aria-hidden="true">%</span>
+                                </span>
+                              </label>
+                            ) : null}
                           </div>
                           {production ? (
                             <div className="history-page__ticket-production">
@@ -1593,6 +1649,7 @@ export function HistoryPage({
                                 {production.completionPercent === null
                                   ? '—'
                                   : `${Math.round(production.completionPercent)}%`}
+                                {ticket.manualCompletionPercent.trim() ? ' · вручну' : ''}
                               </span>
                               <strong>
                                 {previewActualQuantity === null

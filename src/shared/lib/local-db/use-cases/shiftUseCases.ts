@@ -16,6 +16,7 @@ import type { ShiftRepository } from '../repositories/shiftRepository';
 
 export type CreateShiftInput = {
   startTime: ISODateTimeString;
+  type?: ShiftType;
   baseHourlyRateSnapshot?: number;
   hourlyRateSnapshot: number;
   gradeSnapshot?: GradeSnapshot | null;
@@ -87,7 +88,7 @@ export const createShift = (
   repository: ShiftRepository,
   input: CreateShiftInput
 ): Promise<Shift> => {
-  const type = detectShiftType(input.startTime);
+  const type = input.type ?? detectShiftType(input.startTime);
   const date = getDateFromDateTime(input.startTime);
   const plannedWindow = getPlannedShiftWindow(date, type, input.startTime);
   const now = input.now ?? new Date().toISOString();
@@ -96,7 +97,7 @@ export const createShift = (
     id: input.id ?? createId(),
     date,
     type,
-    detectionMode: 'auto',
+    detectionMode: input.type === undefined ? 'auto' : 'manual',
     plannedStartTime: plannedWindow.startTime,
     plannedEndTime: plannedWindow.endTime,
     startTime: input.startTime,
@@ -244,6 +245,7 @@ export const addWorkTicketToActiveShift = async (
     startedAt: input.startedAt,
     endedAt: null,
     actualQuantity: null,
+    manualCompletionPercent: null,
     downtimeMinutes: 0,
     createdAt: input.startedAt,
     updatedAt: input.startedAt

@@ -634,7 +634,7 @@ export function AnalyticsPage({
                 </article>
                 <article data-tone={getChangeTone(periodComparison.completionPercentChange)}>
                   <header>
-                    <span>Виконання G1</span>
+                    <span>Виконання %</span>
                     <strong>
                       {formatSignedValue(
                         periodComparison.completionPercentChange,
@@ -821,7 +821,7 @@ export function AnalyticsPage({
                 <dd>{summary.production.currentGradeTarget} шт</dd>
               </div>
               <div>
-                <dt>Виконання від G1</dt>
+                <dt>Виконання %</dt>
                 <dd>{formatPercent(summary.production.completionPercent)}</dd>
               </div>
               <div>

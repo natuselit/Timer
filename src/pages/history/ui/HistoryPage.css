@@ -664,6 +664,18 @@
   overflow-wrap: anywhere;
 }
 
+.history-page__ticket-detail-metrics dd small {
+  display: inline-flex;
+  margin-left: 5px;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: 0.58rem;
+  font-weight: 850;
+  vertical-align: middle;
+}
+
 .history-page__ticket-detail-targets {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

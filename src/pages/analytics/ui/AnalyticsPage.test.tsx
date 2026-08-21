@@ -84,6 +84,7 @@ beforeEach(async () => {
           startedAt: '2026-07-28T07:00:00.000+03:00',
           endedAt: '2026-07-28T08:00:00.000+03:00',
           actualQuantity: 12,
+          manualCompletionPercent: null,
           downtimeMinutes: 0,
           createdAt: '2026-07-28T07:00:00.000+03:00',
           updatedAt: '2026-07-28T08:00:00.000+03:00'
@@ -135,7 +136,7 @@ describe('AnalyticsPage', () => {
     expect(screen.getByLabelText('Запізнення: 15 хв')).toBeTruthy();
     expect(screen.getByLabelText('Ранній вихід: 10 хв')).toBeTruthy();
     expect(screen.getByText('План G1')).toBeTruthy();
-    expect(screen.getByText('Виконання від G1')).toBeTruthy();
+    expect(screen.getAllByText('Виконання %')).toHaveLength(2);
   });
 
   it('switches comparison offsets without changing the selected calendar range', async () => {

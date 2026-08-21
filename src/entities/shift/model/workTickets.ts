@@ -30,6 +30,12 @@ const assertActualQuantity = (value: number | null): void => {
   }
 };
 
+const assertManualCompletionPercent = (value: number | null): void => {
+  if (value !== null && (!Number.isSafeInteger(value) || value < 0)) {
+    throw new Error('Ручний відсоток виконання має бути цілим невідʼємним числом.');
+  }
+};
+
 export type TicketProductionSummary = {
   elapsedMinutes: number;
   productiveMinutes: number;
@@ -79,6 +85,10 @@ export const calculateTicketProductionSummary = ({
   }));
   const gradeOneTarget = targets[0]?.quantity ?? 0;
   const currentTarget = targets[currentGrade - 1]?.quantity ?? 0;
+  const calculatedCompletionPercent =
+    ticket.actualQuantity === null || gradeOneTarget <= 0
+      ? null
+      : (ticket.actualQuantity / gradeOneTarget) * 100;
   const achievedGrade =
     ticket.actualQuantity === null || productiveMinutes === 0
       ? null
@@ -93,10 +103,7 @@ export const calculateTicketProductionSummary = ({
     targets,
     currentGrade,
     currentTarget,
-    completionPercent:
-      ticket.actualQuantity === null || gradeOneTarget <= 0
-        ? null
-        : (ticket.actualQuantity / gradeOneTarget) * 100,
+    completionPercent: ticket.manualCompletionPercent ?? calculatedCompletionPercent,
     achievedGrade
   };
 };
@@ -127,23 +134,30 @@ export const calculateShiftProductionSummary = ({
     downtimeMinutes: 0
   };
   let gradeOneTarget = 0;
+  let completionEquivalentQuantity = 0;
 
   completedTickets.forEach((ticket) => {
-    if (ticket.actualQuantity === null) {
-      summary.unfilledTicketCount += 1;
-      return;
-    }
-
     const ticketSummary = calculateTicketProductionSummary({
       ticket,
       effectiveEndTime: ticket.endedAt,
       currentGrade,
       gradeNormPercents
     });
+    const ticketGradeOneTarget = ticketSummary.targets[0]?.quantity ?? 0;
+
+    if (ticketSummary.completionPercent !== null && ticketGradeOneTarget > 0) {
+      gradeOneTarget += ticketGradeOneTarget;
+      completionEquivalentQuantity +=
+        ticketGradeOneTarget * (ticketSummary.completionPercent / 100);
+    }
+
+    if (ticket.actualQuantity === null) {
+      summary.unfilledTicketCount += 1;
+      return;
+    }
 
     summary.filledTicketCount += 1;
     summary.actualQuantity += ticket.actualQuantity;
-    gradeOneTarget += ticketSummary.targets[0]?.quantity ?? 0;
     summary.currentGradeTarget += ticketSummary.currentTarget;
     summary.productiveMinutes += ticketSummary.productiveMinutes;
     summary.downtimeMinutes += ticketSummary.downtimeMinutes;
@@ -151,7 +165,7 @@ export const calculateShiftProductionSummary = ({
 
   summary.completionPercent =
     gradeOneTarget > 0
-      ? (summary.actualQuantity / gradeOneTarget) * 100
+      ? (completionEquivalentQuantity / gradeOneTarget) * 100
       : null;
 
   return summary;
@@ -190,6 +204,7 @@ export const validateAndSortWorkTickets = (
     }
 
     assertActualQuantity(ticket.actualQuantity);
+    assertManualCompletionPercent(ticket.manualCompletionPercent);
 
     if (!Number.isSafeInteger(ticket.downtimeMinutes) || ticket.downtimeMinutes < 0) {
       throw new Error('Простій має бути цілою невідʼємною кількістю хвилин.');
@@ -216,6 +231,10 @@ export const validateAndSortWorkTickets = (
 
       if (ticket.actualQuantity !== null) {
         throw new Error('Фактичну кількість можна вносити лише під час завершення тікета.');
+      }
+
+      if (ticket.manualCompletionPercent !== null) {
+        throw new Error('Ручний відсоток можна вносити лише для завершеного тікета.');
       }
 
       if (!bounds.allowOpenTicket) {

@@ -355,10 +355,11 @@ describe('calculateAnalyticsSummary', () => {
           workTickets: [
             {
               id: 'different-norm-ticket',
-              normPerEightHours: 80,
+              normPerEightHours: 160,
               startedAt: '2026-06-10T07:00:00.000+03:00',
               endedAt: '2026-06-10T08:00:00.000+03:00',
               actualQuantity: 10,
+              manualCompletionPercent: 200,
               downtimeMinutes: 0,
               createdAt: '2026-06-10T07:00:00.000+03:00',
               updatedAt: '2026-06-10T08:00:00.000+03:00'
@@ -386,6 +387,7 @@ describe('calculateAnalyticsSummary', () => {
               startedAt: '2026-06-19T07:00:00.000+03:00',
               endedAt: '2026-06-19T09:00:00.000+03:00',
               actualQuantity: 15,
+              manualCompletionPercent: null,
               downtimeMinutes: 20,
               createdAt: '2026-06-19T07:00:00.000+03:00',
               updatedAt: '2026-06-19T09:00:00.000+03:00'
@@ -396,6 +398,7 @@ describe('calculateAnalyticsSummary', () => {
               startedAt: '2026-06-19T09:00:00.000+03:00',
               endedAt: '2026-06-19T10:00:00.000+03:00',
               actualQuantity: null,
+              manualCompletionPercent: null,
               downtimeMinutes: 0,
               createdAt: '2026-06-19T09:00:00.000+03:00',
               updatedAt: '2026-06-19T10:00:00.000+03:00'
@@ -417,9 +420,9 @@ describe('calculateAnalyticsSummary', () => {
         actualQuantity: 25,
         productiveMinutes: 160,
         downtimeMinutes: 20,
-        gradeOneTarget: 20,
-        currentGradeTarget: 22,
-        completionPercent: 25 / 20 * 100,
+        gradeOneTarget: 30,
+        currentGradeTarget: 32,
+        completionPercent: 55 / 30 * 100,
         averageActualPerTicket: 12.5,
         averageTicketsPerShift: 1.5,
         quantityPerProductiveHour: 25 * 60 / 160,

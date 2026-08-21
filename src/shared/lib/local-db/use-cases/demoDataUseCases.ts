@@ -112,6 +112,7 @@ const createTickets = (
       startedAt: firstStartedAt,
       endedAt: firstEndedAt,
       actualQuantity: 18 + (index % 5),
+      manualCompletionPercent: null,
       downtimeMinutes: index % 3 === 0 ? 10 : 0,
       createdAt,
       updatedAt: firstEndedAt
@@ -122,6 +123,7 @@ const createTickets = (
       startedAt: secondStartedAt,
       endedAt: secondEndedAt,
       actualQuantity: 24 + (index % 7),
+      manualCompletionPercent: null,
       downtimeMinutes: index % 4 === 0 ? 15 : 0,
       createdAt,
       updatedAt: secondEndedAt

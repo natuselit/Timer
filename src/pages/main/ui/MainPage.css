@@ -716,6 +716,47 @@
   gap: 8px;
 }
 
+.main-page__shift-type-selector {
+  display: grid;
+  gap: 6px;
+  padding: 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-background);
+}
+
+.main-page__overtime-card--disabled .main-page__shift-type-selector {
+  margin-top: 10px;
+}
+
+.main-page__shift-type-selector > span {
+  color: var(--color-text-secondary);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.main-page__shift-type-selector > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 4px;
+  border-radius: 11px;
+  background: var(--color-surface);
+}
+
+.main-page__overtime-card .main-page__shift-type-selector button {
+  min-height: 38px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.main-page__overtime-card .main-page__shift-type-selector button[data-selected='true'] {
+  border-color: var(--color-primary-border-muted);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
 .main-page__overtime-next-shift {
   display: grid;
   gap: 10px;
@@ -1572,7 +1613,11 @@
 }
 
 .main-page__ticket-history-completion {
+  display: inline-flex;
   min-width: 46px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   padding: 5px 8px;
   border-radius: 999px;
   background: var(--color-primary-soft);
@@ -1582,6 +1627,11 @@
   font-variant-numeric: tabular-nums;
   line-height: 1;
   text-align: center;
+}
+
+.main-page__ticket-history-completion small {
+  font-size: 0.56rem;
+  font-weight: 800;
 }
 
 .main-page__ticket-history-header .main-page__ticket-more > button {
@@ -1952,6 +2002,14 @@
 }
 
 @media (max-width: 380px) {
+  .main-page__overtime-card--disabled {
+    grid-template-columns: 1fr;
+  }
+
+  .main-page__overtime-card--disabled > button {
+    width: 100%;
+  }
+
   .main-page__summary {
     padding: 14px;
   }

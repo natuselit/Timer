@@ -85,6 +85,11 @@ export class ShifterDatabase extends Dexie {
                     Number.isSafeInteger(ticket.actualQuantity) && ticket.actualQuantity! >= 0
                       ? ticket.actualQuantity!
                       : null,
+                  manualCompletionPercent:
+                    Number.isSafeInteger(ticket.manualCompletionPercent) &&
+                    ticket.manualCompletionPercent! >= 0
+                      ? ticket.manualCompletionPercent!
+                      : null,
                   downtimeMinutes:
                     Number.isSafeInteger(ticket.downtimeMinutes) && ticket.downtimeMinutes! >= 0
                       ? ticket.downtimeMinutes!
@@ -164,6 +169,31 @@ export class ShifterDatabase extends Dexie {
           .toCollection()
           .modify((settings) => {
             delete settings.coefficientMode;
+          });
+      });
+
+    this.version(6)
+      .stores({
+        settings: '&id',
+        shifts: '&id,&date,updatedAt,createdAt',
+        enterpriseSchedule: '&id,&date,createdAt',
+        appMeta: '&key'
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table<LegacyShift, string>('shifts')
+          .toCollection()
+          .modify((shift) => {
+            shift.workTickets = Array.isArray(shift.workTickets)
+              ? shift.workTickets.map((ticket) => ({
+                  ...ticket,
+                  manualCompletionPercent:
+                    Number.isSafeInteger(ticket.manualCompletionPercent) &&
+                    ticket.manualCompletionPercent! >= 0
+                      ? ticket.manualCompletionPercent!
+                      : null
+                }))
+              : [];
           });
       });
   }

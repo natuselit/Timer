@@ -37,6 +37,7 @@ const shifts: Shift[] = [
         startedAt: '2026-07-01T06:30:00.000+03:00',
         endedAt: '2026-07-01T14:30:00.000+03:00',
         actualQuantity: 50,
+        manualCompletionPercent: null,
         downtimeMinutes: 10,
         createdAt: '2026-07-01T06:30:00.000+03:00',
         updatedAt: '2026-07-01T14:30:00.000+03:00'
@@ -59,6 +60,7 @@ const shifts: Shift[] = [
         startedAt: '2026-07-02T06:30:00.000+03:00',
         endedAt: '2026-07-02T09:30:00.000+03:00',
         actualQuantity: 25,
+        manualCompletionPercent: null,
         downtimeMinutes: 20,
         createdAt: '2026-07-02T06:30:00.000+03:00',
         updatedAt: '2026-07-02T09:30:00.000+03:00'
@@ -69,6 +71,7 @@ const shifts: Shift[] = [
         startedAt: '2026-07-02T09:30:00.000+03:00',
         endedAt: '2026-07-02T12:30:00.000+03:00',
         actualQuantity: 25,
+        manualCompletionPercent: null,
         downtimeMinutes: 20,
         createdAt: '2026-07-02T09:30:00.000+03:00',
         updatedAt: '2026-07-02T12:30:00.000+03:00'

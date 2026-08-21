@@ -87,6 +87,11 @@ const normalizeWorkTickets = (value: unknown): WorkTicket[] => {
         Number.isSafeInteger(ticket.actualQuantity) && ticket.actualQuantity! >= 0
           ? ticket.actualQuantity!
           : null,
+      manualCompletionPercent:
+        Number.isSafeInteger(ticket.manualCompletionPercent) &&
+        ticket.manualCompletionPercent! >= 0
+          ? ticket.manualCompletionPercent!
+          : null,
       downtimeMinutes:
         Number.isSafeInteger(ticket.downtimeMinutes) && ticket.downtimeMinutes! >= 0
           ? ticket.downtimeMinutes!
@@ -145,6 +150,13 @@ const prepareShiftForWrite = (record: Shift): Shift => {
       (!Number.isSafeInteger(ticket.actualQuantity) || ticket.actualQuantity < 0)
     ) {
       throw new Error('Фактична кількість має бути цілим невідʼємним числом.');
+    }
+
+    if (
+      ticket.manualCompletionPercent !== null &&
+      (!Number.isSafeInteger(ticket.manualCompletionPercent) || ticket.manualCompletionPercent < 0)
+    ) {
+      throw new Error('Ручний відсоток виконання має бути цілим невідʼємним числом.');
     }
 
     if (!Number.isSafeInteger(ticket.downtimeMinutes) || ticket.downtimeMinutes < 0) {

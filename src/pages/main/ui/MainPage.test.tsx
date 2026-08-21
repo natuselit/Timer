@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
@@ -59,6 +59,7 @@ const activeShift: Shift = {
       startedAt: '2026-07-27T06:15:00.000+03:00',
       endedAt: null,
       actualQuantity: null,
+      manualCompletionPercent: null,
       downtimeMinutes: 5,
       createdAt: '2026-07-27T06:15:00.000+03:00',
       updatedAt: '2026-07-27T06:15:00.000+03:00'
@@ -201,6 +202,7 @@ describe('MainPage active shift', () => {
     );
 
     expect(await screen.findByLabelText('Поточний коефіцієнт: x2')).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Вибір зміни перед стартом' })).toBeNull();
     expect(screen.queryByText('Коефіцієнт зараз')).toBeNull();
     expect(screen.queryByText('Потрібно для G1')).toBeNull();
     expect(screen.queryByText(/Додайте або відніміть/)).toBeNull();
@@ -276,7 +278,7 @@ describe('MainPage active shift', () => {
     expect(completionButton.parentElement?.children).toHaveLength(1);
   });
 
-  it('shows a compact G1 summary and an accessible actions menu for a completed ticket', async () => {
+  it('shows a compact effective summary and an accessible actions menu for a completed ticket', async () => {
     const user = userEvent.setup();
 
     await localDb.shifts.put({
@@ -285,6 +287,7 @@ describe('MainPage active shift', () => {
         ...ticket,
         endedAt: '2026-07-27T07:15:00.000+03:00',
         actualQuantity: 56,
+        manualCompletionPercent: 135,
         downtimeMinutes: 15
       }))
     });
@@ -305,7 +308,8 @@ describe('MainPage active shift', () => {
     expect(summaryQueries.getByText('06:15–07:15')).toBeTruthy();
     expect(summaryQueries.getByText('Факт / план G1')).toBeTruthy();
     expect(summaryQueries.getByText('56 / 8 шт')).toBeTruthy();
-    expect(summaryQueries.getByLabelText('Виконання плану G1: 700%')).toBeTruthy();
+    expect(summaryQueries.getByLabelText('Виконання: 135%, вручну')).toBeTruthy();
+    expect(summaryQueries.getByText('вручну')).toBeTruthy();
     expect(summaryQueries.getByText('0:45')).toBeTruthy();
     expect(summaryQueries.getByText('Простій')).toBeTruthy();
     expect(summaryQueries.getByText('0:15')).toBeTruthy();
@@ -394,14 +398,14 @@ describe('MainPage active shift', () => {
     const newerSummary = within(summaries[0]);
     expect(newerSummary.getByText('Тікет 2')).toBeTruthy();
     expect(newerSummary.getByText('— / 0 шт')).toBeTruthy();
-    expect(newerSummary.getByLabelText('Виконання плану G1: —')).toBeTruthy();
+    expect(newerSummary.getByLabelText('Виконання: —')).toBeTruthy();
     expect(newerSummary.getByText('Простій')).toBeTruthy();
     expect(newerSummary.getByText('0:01')).toBeTruthy();
 
     const olderSummary = within(summaries[1]);
     expect(olderSummary.getByText('Тікет 1')).toBeTruthy();
     expect(olderSummary.getByText('10 / 10 шт')).toBeTruthy();
-    expect(olderSummary.getByLabelText('Виконання плану G1: 100%')).toBeTruthy();
+    expect(olderSummary.getByLabelText('Виконання: 100%')).toBeTruthy();
     expect(olderSummary.queryByText('Простій')).toBeNull();
   });
 
@@ -710,6 +714,52 @@ describe('MainPage active shift', () => {
 });
 
 describe('MainPage inactive state', () => {
+  it('selects the second shift before arrival and hides the selector after start', async () => {
+    const user = userEvent.setup();
+    await localDb.shifts.clear();
+
+    render(
+      <MainPage
+        settings={{ ...settings, overtimeLimitPercent: 10, arriveHoldDelayMs: 1 }}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    const selector = await screen.findByRole('group', {
+      name: 'Вибір зміни перед стартом'
+    });
+    const firstShiftButton = within(selector).getByRole('button', { name: '1 зміна' });
+    const secondShiftButton = within(selector).getByRole('button', { name: '2 зміна' });
+
+    await user.click(firstShiftButton);
+    const firstShiftRecommendation = screen
+      .getByLabelText(/Рекомендований час:/)
+      .getAttribute('aria-label');
+    await user.click(secondShiftButton);
+    expect(secondShiftButton.getAttribute('aria-pressed')).toBe('true');
+    await waitFor(() => {
+      expect(
+        screen.getByLabelText(/Рекомендований час:/).getAttribute('aria-label')
+      ).not.toBe(firstShiftRecommendation);
+    });
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: /Прийшов/ }));
+
+    await waitFor(async () => {
+      const storedShift = (await localDb.shifts.toArray())[0];
+
+      expect(storedShift).toMatchObject({
+        type: 'second',
+        detectionMode: 'manual',
+        plannedStartTime: '14:30',
+        plannedEndTime: '22:30'
+      });
+    });
+    expect(screen.queryByRole('group', { name: 'Вибір зміни перед стартом' })).toBeNull();
+  });
+
   it('hides the previous shift and moves its recommendation forward', async () => {
     const date = toLocalIsoString(new Date()).slice(0, 10);
     await localDb.shifts.clear();
@@ -768,6 +818,7 @@ describe('MainPage inactive state', () => {
     expect(
       await screen.findByRole('heading', { name: 'Планувальник вимкнено' })
     ).toBeTruthy();
+    expect(screen.getByRole('group', { name: 'Вибір зміни перед стартом' })).toBeTruthy();
     expect(screen.queryByText('Зміна не активна')).toBeNull();
     expect(screen.queryByText('Остання зміна')).toBeNull();
   });

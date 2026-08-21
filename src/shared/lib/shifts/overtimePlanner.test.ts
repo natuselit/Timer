@@ -163,12 +163,15 @@ describe('monthly overtime planner', () => {
     expect(plan.recommendation).toMatchObject({
       date: '2026-08-12',
       isToday: false,
-      kind: 'weekday'
+      kind: 'weekday',
+      shiftType: 'second'
     });
     expect(new Date(plan.recommendation.recommendedStartAt!).getTime()).toBe(
-      new Date('2026-08-12T14:30:00.000+03:00').getTime()
+      new Date('2026-08-12T13:30:00.000+03:00').getTime()
     );
-    expect(plan.recommendation.recommendedEndAt).not.toBeNull();
+    expect(new Date(plan.recommendation.recommendedEndAt!).getTime()).toBe(
+      new Date('2026-08-12T22:30:00.000+03:00').getTime()
+    );
     expect(plan.recommendation.totalMinutes).toBe(480 + plan.recommendation.minutes);
   });
 
@@ -216,6 +219,67 @@ describe('monthly overtime planner', () => {
         new Date('2026-08-12T14:30:00.000+03:00').getTime()) /
         60_000
     ).toBe(plan.recommendation.minutes - 30);
+  });
+
+  it('moves all weekday overtime before the second shift and ends at 22:30', () => {
+    const plan = calculatePlan({
+      preferredShiftType: 'second',
+      overtimeSaturdayMaxMinutes: 60
+    });
+
+    expect(plan.recommendation.shiftType).toBe('second');
+    expect(plan.recommendation.kind).toBe('weekday');
+    expect(new Date(plan.recommendation.recommendedEndAt!).getTime()).toBe(
+      new Date(`${plan.recommendation.date}T22:30:00.000+03:00`).getTime()
+    );
+    expect(
+      (new Date(`${plan.recommendation.date}T14:30:00.000+03:00`).getTime() -
+        new Date(plan.recommendation.recommendedStartAt!).getTime()) /
+        60_000
+    ).toBe(plan.recommendation.minutes);
+    expect(plan.recommendation.totalMinutes).toBe(480 + plan.recommendation.minutes);
+  });
+
+  it('keeps a long Saturday second-shift recommendation within 22:30', () => {
+    const plan = calculatePlan({
+      now: '2026-08-01T05:00:00.000+03:00',
+      preferredShiftType: 'second',
+      overtimeLimitPercent: 20,
+      overtimeSaturdayMaxMinutes: 720,
+      overtimeStrategy: 'standard'
+    });
+
+    expect(plan.recommendation.kind).toBe('saturday');
+    expect(plan.recommendation.minutes).toBe(720);
+    expect(new Date(plan.recommendation.recommendedStartAt!).getTime()).toBe(
+      new Date('2026-08-01T10:30:00.000+03:00').getTime()
+    );
+    expect(new Date(plan.recommendation.recommendedEndAt!).getTime()).toBe(
+      new Date('2026-08-01T22:30:00.000+03:00').getTime()
+    );
+  });
+
+  it('moves the remaining recommendation forward after a second shift starts', () => {
+    const plan = calculatePlan({
+      now: '2026-08-11T14:00:00.000+03:00',
+      overtimeSaturdayMaxMinutes: 60,
+      shifts: [
+        makeShift({
+          date: '2026-08-11',
+          type: 'second',
+          plannedStartTime: '14:30',
+          plannedEndTime: '22:30',
+          startTime: '2026-08-11T13:30:00.000+03:00',
+          endTime: null
+        })
+      ]
+    });
+
+    expect(plan.recommendation.shiftType).toBe('second');
+    expect(plan.recommendation.date).toBe('2026-08-12');
+    expect(new Date(plan.recommendation.recommendedEndAt!).getTime()).toBe(
+      new Date('2026-08-12T22:30:00.000+03:00').getTime()
+    );
   });
 
   it('distributes weekday recommendations in the configured step without exceeding the limit', () => {

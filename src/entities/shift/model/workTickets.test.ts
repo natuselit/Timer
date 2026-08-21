@@ -12,6 +12,7 @@ const makeTicket = (overrides: Partial<WorkTicket> = {}): WorkTicket => ({
   startedAt: '2026-06-10T07:00:00.000Z',
   endedAt: '2026-06-10T08:00:00.000Z',
   actualQuantity: 12,
+  manualCompletionPercent: null,
   downtimeMinutes: 0,
   createdAt: '2026-06-10T07:00:00.000Z',
   updatedAt: '2026-06-10T08:00:00.000Z',
@@ -147,6 +148,20 @@ describe('validateAndSortWorkTickets', () => {
         completedBounds
       )
     ).toThrow('Простій не може бути довшим за тікет.');
+
+    expect(() =>
+      validateAndSortWorkTickets(
+        [makeTicket({ manualCompletionPercent: -1 })],
+        completedBounds
+      )
+    ).toThrow('Ручний відсоток');
+
+    expect(() =>
+      validateAndSortWorkTickets(
+        [makeTicket({ manualCompletionPercent: 99.5 })],
+        completedBounds
+      )
+    ).toThrow('Ручний відсоток');
   });
 });
 
@@ -251,6 +266,25 @@ describe('calculateTicketProductionSummary', () => {
       achievedGrade: null
     });
   });
+
+  it('uses a manual company percent without changing the achieved grade', () => {
+    const automatic = calculateTicketProductionSummary({
+      ticket: makeTicket({ actualQuantity: 9 }),
+      effectiveEndTime: '2026-06-10T08:00:00.000Z',
+      currentGrade: 2,
+      gradeNormPercents: [100, 120, 140, 160]
+    });
+    const manual = calculateTicketProductionSummary({
+      ticket: makeTicket({ actualQuantity: 9, manualCompletionPercent: 87 }),
+      effectiveEndTime: '2026-06-10T08:00:00.000Z',
+      currentGrade: 2,
+      gradeNormPercents: [100, 120, 140, 160]
+    });
+
+    expect(automatic.completionPercent).toBe(9 / 7 * 100);
+    expect(manual.completionPercent).toBe(87);
+    expect(manual.achievedGrade).toBe(automatic.achievedGrade);
+  });
 });
 
 describe('calculateShiftProductionSummary', () => {
@@ -318,5 +352,32 @@ describe('calculateShiftProductionSummary', () => {
       productiveMinutes: 0,
       downtimeMinutes: 60
     });
+  });
+
+  it('weights manual and automatic completion by each ticket G1 target', () => {
+    const summary = calculateShiftProductionSummary({
+      shift: {
+        gradeSnapshot: null,
+        workTickets: [
+          makeTicket({
+            normPerEightHours: 80,
+            actualQuantity: 12,
+            manualCompletionPercent: 200
+          }),
+          makeTicket({
+            id: 'ticket-2',
+            normPerEightHours: 80,
+            startedAt: '2026-06-10T08:00:00.000Z',
+            endedAt: '2026-06-10T10:00:00.000Z',
+            actualQuantity: 10
+          })
+        ]
+      },
+      fallbackCurrentGrade: 1,
+      fallbackGradeNormPercents: [100, 120, 140, 160]
+    });
+
+    expect(summary.actualQuantity).toBe(22);
+    expect(summary.completionPercent).toBe(100);
   });
 });

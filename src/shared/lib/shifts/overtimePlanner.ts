@@ -5,7 +5,8 @@ import {
   getPlannedShiftWindow,
   type ISODateTimeString,
   type LocalDateString,
-  type Shift
+  type Shift,
+  type ShiftType
 } from '../../../entities/shift';
 import {
   calculateCumulativeGradePercent,
@@ -59,6 +60,7 @@ export type TodayOvertimeRecommendation = {
   date: LocalDateString | null;
   isToday: boolean;
   kind: 'weekday' | 'saturday' | 'rest';
+  shiftType: ShiftType;
   minutes: number;
   recommendedStartAt: ISODateTimeString | null;
   recommendedEndAt: ISODateTimeString | null;
@@ -97,6 +99,7 @@ export type CalculateMonthlyOvertimePlanInput = {
   overtimeWeekdayMaxMinutes: number;
   overtimeSaturdayMaxMinutes: number;
   overtimeUnavailableDates: string[];
+  preferredShiftType?: ShiftType;
 };
 
 type DateCapacity = {
@@ -321,8 +324,11 @@ const getRecommendation = (
   now: ISODateTimeString,
   activeShift: Shift | null,
   referenceShift: Shift | null,
+  preferredShiftType: ShiftType | undefined,
   deferToNextDate: boolean
 ): TodayOvertimeRecommendation => {
+  const shiftType =
+    activeShift?.type ?? preferredShiftType ?? referenceShift?.type ?? detectShiftType(now);
   const allocation = scenario.allocations.find(({ date }) =>
     deferToNextDate ? date > today : date >= today
   );
@@ -332,6 +338,7 @@ const getRecommendation = (
       date: null,
       isToday: !deferToNextDate,
       kind: 'rest',
+      shiftType,
       minutes: 0,
       recommendedStartAt: null,
       recommendedEndAt: null,
@@ -339,27 +346,45 @@ const getRecommendation = (
     };
   }
 
-  const shiftType = activeShift?.type ?? referenceShift?.type ?? detectShiftType(now);
   const timeZoneSource = activeShift?.startTime ?? referenceShift?.startTime ?? now;
   const plannedWindow = getPlannedShiftWindow(
     allocation.date,
     shiftType,
     timeZoneSource
   );
+  const activeShiftForDate = activeShift?.date === allocation.date ? activeShift : null;
 
   if (allocation.kind === 'saturday') {
-    const recommendedStartAt = activeShift?.startTime
-      ?? (shiftType === 'first'
-        ? addMinutes(plannedWindow.plannedStart, -FIRST_SHIFT_MAX_EARLY_START_MINUTES)
-        : plannedWindow.plannedStart);
-    const recommendedEndAt = activeShift
-      ? addMinutes(now, allocation.minutes)
-      : addMinutes(recommendedStartAt, allocation.minutes);
+    let recommendedStartAt: ISODateTimeString;
+    let recommendedEndAt: ISODateTimeString;
+
+    if (shiftType === 'second') {
+      const endFromPlannedStart = addMinutes(plannedWindow.plannedStart, allocation.minutes);
+
+      if (
+        new Date(endFromPlannedStart).getTime() <=
+        new Date(plannedWindow.plannedEnd).getTime()
+      ) {
+        recommendedStartAt = plannedWindow.plannedStart;
+        recommendedEndAt = endFromPlannedStart;
+      } else {
+        recommendedEndAt = plannedWindow.plannedEnd;
+        recommendedStartAt = addMinutes(recommendedEndAt, -allocation.minutes);
+      }
+    } else {
+      recommendedStartAt =
+        activeShiftForDate?.startTime ??
+        addMinutes(plannedWindow.plannedStart, -FIRST_SHIFT_MAX_EARLY_START_MINUTES);
+      recommendedEndAt = activeShiftForDate
+        ? addMinutes(now, allocation.minutes)
+        : addMinutes(recommendedStartAt, allocation.minutes);
+    }
 
     return {
       date: allocation.date,
       isToday: allocation.date === today,
       kind: 'saturday',
+      shiftType,
       minutes: allocation.minutes,
       recommendedStartAt,
       recommendedEndAt,
@@ -374,15 +399,34 @@ const getRecommendation = (
     };
   }
 
+  if (shiftType === 'second') {
+    const recommendedEndAt = plannedWindow.plannedEnd;
+    const recommendedStartAt = addMinutes(
+      plannedWindow.plannedStart,
+      -allocation.minutes
+    );
+
+    return {
+      date: allocation.date,
+      isToday: allocation.date === today,
+      kind: 'weekday',
+      shiftType,
+      minutes: allocation.minutes,
+      recommendedStartAt,
+      recommendedEndAt,
+      totalMinutes: MINUTES_PER_SHIFT + allocation.minutes
+    };
+  }
+
   const recommendationBase =
-    activeShift && new Date(now).getTime() > new Date(plannedWindow.plannedEnd).getTime()
+    activeShiftForDate && new Date(now).getTime() > new Date(plannedWindow.plannedEnd).getTime()
       ? now
       : plannedWindow.plannedEnd;
   const recommendedEarlyStartMinutes =
-    !activeShift && shiftType === 'first'
+    !activeShiftForDate && shiftType === 'first'
       ? Math.min(FIRST_SHIFT_MAX_EARLY_START_MINUTES, allocation.minutes)
       : 0;
-  const recommendedStartAt = activeShift?.startTime
+  const recommendedStartAt = activeShiftForDate?.startTime
     ?? addMinutes(plannedWindow.plannedStart, -recommendedEarlyStartMinutes);
   const recommendedEndAt = addMinutes(
     recommendationBase,
@@ -393,6 +437,7 @@ const getRecommendation = (
     date: allocation.date,
     isToday: allocation.date === today,
     kind: 'weekday',
+    shiftType,
     minutes: allocation.minutes,
     recommendedStartAt,
     recommendedEndAt,
@@ -419,7 +464,8 @@ export const calculateMonthlyOvertimePlan = ({
   overtimeStrategy,
   overtimeWeekdayMaxMinutes,
   overtimeSaturdayMaxMinutes,
-  overtimeUnavailableDates
+  overtimeUnavailableDates,
+  preferredShiftType
 }: CalculateMonthlyOvertimePlanInput): MonthlyOvertimePlan => {
   const today = now.slice(0, 10);
   const { year, month } = parseLocalDate(today);
@@ -465,7 +511,10 @@ export const calculateMonthlyOvertimePlan = ({
     }
 
     const shift = shiftsByDate.get(date);
-    return !shift || shift.endTime === null;
+    return (
+      !shift ||
+      (shift.endTime === null && !(shift.type === 'second' && shift.date === today))
+    );
   });
   const weekdayCapacities = availableDates
     .filter((date) => {
@@ -554,6 +603,7 @@ export const calculateMonthlyOvertimePlan = ({
       now,
       activeShift,
       referenceShift,
+      preferredShiftType,
       Boolean(todayShift?.endTime)
     )
   };
