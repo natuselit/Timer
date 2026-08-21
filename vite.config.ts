@@ -11,7 +11,7 @@ type AppManifest = Partial<ManifestOptions> & {
 };
 
 const createManifest = (basePath: string): AppManifest => ({
-  name: 'Облік робочого часу',
+  name: 'Облік часу',
   short_name: 'Облік часу',
   description: 'Offline-first PWA для обліку робочого часу',
   theme_color: '#0b0f14',

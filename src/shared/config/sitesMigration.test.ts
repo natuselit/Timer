@@ -8,7 +8,7 @@ import {
 
 describe('Sites migration config', () => {
   it('recognizes ChatGPT Sites hosts only', () => {
-    expect(isChatGptSitesHost('oblik-robochoho-chasu.natuselit.chatgpt.site')).toBe(true);
+    expect(isChatGptSitesHost('timer.natuselit.chatgpt.site')).toBe(true);
     expect(isChatGptSitesHost('chatgpt.site')).toBe(true);
     expect(isChatGptSitesHost('natuselit.github.io')).toBe(false);
     expect(isChatGptSitesHost('localhost')).toBe(false);
@@ -20,15 +20,11 @@ describe('Sites migration config', () => {
 
   it('recognizes the legacy GitHub Pages host only', () => {
     expect(isLegacyGitHubPagesHost('natuselit.github.io')).toBe(true);
-    expect(isLegacyGitHubPagesHost('oblik-robochoho-chasu.natuselit.chatgpt.site')).toBe(
-      false
-    );
+    expect(isLegacyGitHubPagesHost('timer.natuselit.chatgpt.site')).toBe(false);
     expect(isLegacyGitHubPagesHost('localhost')).toBe(false);
   });
 
   it('keeps the public Sites URL explicit', () => {
-    expect(SITES_APP_URL).toBe(
-      'https://oblik-robochoho-chasu.natuselit.chatgpt.site/'
-    );
+    expect(SITES_APP_URL).toBe('https://timer.natuselit.chatgpt.site/');
   });
 });
