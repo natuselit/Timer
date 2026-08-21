@@ -1,26 +1,55 @@
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { MainPage } from '../pages/main';
 import { OnboardingPage, type OnboardingValues } from '../pages/onboarding';
+import {
+  DataMigrationPage,
+  LegacyMigrationPrompt
+} from '../pages/data-migration';
 import type { Settings } from '../entities/settings';
-import { localDb, SettingsRepository } from '../shared/lib/local-db';
+import {
+  localDb,
+  SettingsRepository,
+  SitesMigrationRepository,
+  type SitesMigrationStatus
+} from '../shared/lib/local-db';
+import {
+  isChatGptSitesHost,
+  isLegacyGitHubPagesHost
+} from '../shared/config/sitesMigration';
+import { toLocalIsoString } from '../shared/lib/date-time';
 import { synchronizeTheme } from '../shared/lib/theme';
 import { AppSplash } from './AppSplash';
 
 const settingsRepository = new SettingsRepository(localDb);
+const sitesMigrationRepository = new SitesMigrationRepository(localDb);
+
+type AppMigrationStatus = SitesMigrationStatus | 'not-applicable';
 
 export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [migrationStatus, setMigrationStatus] = useState<AppMigrationStatus | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
+  const [isLegacyPromptOpen, setIsLegacyPromptOpen] = useState(true);
+  const isSitesHost =
+    typeof window !== 'undefined' && isChatGptSitesHost(window.location.hostname);
+  const isLegacyHost =
+    typeof window !== 'undefined' &&
+    isLegacyGitHubPagesHost(window.location.hostname);
 
   useEffect(() => {
     let isMounted = true;
 
-    settingsRepository
-      .getSettings()
-      .then((storedSettings) => {
+    Promise.all([
+      settingsRepository.getSettings(),
+      isSitesHost
+        ? sitesMigrationRepository.getStatus()
+        : Promise.resolve<AppMigrationStatus>('not-applicable')
+    ])
+      .then(([storedSettings, storedMigrationStatus]) => {
         if (isMounted) {
           setSettings(storedSettings);
+          setMigrationStatus(storedMigrationStatus);
         }
       })
       .catch(() => {
@@ -32,7 +61,7 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [isSitesHost]);
 
   useLayoutEffect(() => {
     if (!settings) {
@@ -77,6 +106,27 @@ export function App() {
     setDataRefreshKey((current) => current + 1);
   };
 
+  const completeSitesMigration = async (restoredSettings: Settings) => {
+    try {
+      await sitesMigrationRepository.markCompleted(toLocalIsoString(new Date()));
+    } catch {
+      // The restored data is still valid; onboarding state prevents a repeated migration.
+    }
+
+    setMigrationStatus('completed');
+    replaceLocalData(restoredSettings);
+  };
+
+  const skipSitesMigration = async () => {
+    try {
+      await sitesMigrationRepository.markSkipped(toLocalIsoString(new Date()));
+    } catch {
+      // Keep the choice for the current session even if appMeta is unavailable.
+    }
+
+    setMigrationStatus('skipped');
+  };
+
   if (loadError) {
     return (
       <main className="app-status" role="alert">
@@ -85,20 +135,43 @@ export function App() {
     );
   }
 
-  if (!settings) {
+  if (!settings || !migrationStatus) {
     return <AppSplash />;
   }
 
-  if (!settings.onboardingCompleted) {
-    return <OnboardingPage onComplete={completeOnboarding} />;
+  let appContent;
+
+  if (
+    isSitesHost &&
+    !settings.onboardingCompleted &&
+    migrationStatus === 'pending'
+  ) {
+    appContent = (
+      <DataMigrationPage
+        currentSettings={settings}
+        onComplete={completeSitesMigration}
+        onSkip={skipSitesMigration}
+      />
+    );
+  } else if (!settings.onboardingCompleted) {
+    appContent = <OnboardingPage onComplete={completeOnboarding} />;
+  } else {
+    appContent = (
+      <MainPage
+        settings={settings}
+        dataVersion={dataRefreshKey}
+        onSettingsChange={updateSettings}
+        onLocalDataReplace={replaceLocalData}
+      />
+    );
   }
 
   return (
-    <MainPage
-      settings={settings}
-      dataVersion={dataRefreshKey}
-      onSettingsChange={updateSettings}
-      onLocalDataReplace={replaceLocalData}
-    />
+    <>
+      {appContent}
+      {isLegacyHost && isLegacyPromptOpen ? (
+        <LegacyMigrationPrompt onDismiss={() => setIsLegacyPromptOpen(false)} />
+      ) : null}
+    </>
   );
 }

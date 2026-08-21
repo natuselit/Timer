@@ -85,6 +85,7 @@ import {
   ENTERPRISE_SCHEDULE_IMPORT_STEPS,
   type EnterpriseScheduleImportStep
 } from '../../../shared/config/enterpriseScheduleImportGuide';
+import { LEGACY_GITHUB_PAGES_URL } from '../../../shared/config/sitesMigration';
 import './SettingsPage.css';
 
 type SettingsPageProps = {
@@ -1642,6 +1643,18 @@ export function SettingsPage({
         summary={`Кожні ${values.backupReminderIntervalDays} днів`}
         icon={Database}
       >
+        <div className="settings-page__migration-note">
+          <strong>Перенесення з GitHub Pages</strong>
+          <p>
+            На старій адресі створіть JSON через «Експорт», а тут натисніть «Імпорт».
+            Старі дані та файл залишаться без змін, доки ви самі їх не видалите.
+            Якщо на Sites уже є записи, спочатку експортуйте їх окремо: імпорт
+            замінює поточні локальні дані.
+          </p>
+          <a href={LEGACY_GITHUB_PAGES_URL} target="_blank" rel="noreferrer">
+            Відкрити стару версію
+          </a>
+        </div>
         <label className="settings-page__field">
           <span>Нагадувати про backup</span>
           <select

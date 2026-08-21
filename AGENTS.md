@@ -31,6 +31,7 @@
 
 ```bash
 npm run build
+npm run build:pages
 npm test
 npm run dev
 ```
@@ -64,12 +65,13 @@ npm run dev
 - Для UI дотримуйся наявного стилю, але перевіряй мобільну зручність.
 - Після змін запускай найменший достатній набір перевірок. Для широких змін запускай `npm run build` і `npm test`.
 
-## Публікація вручну
+## Публікація через ChatGPT Sites
 
 - Після змін у репозиторії запусти потрібні перевірки, але не створюй коміт, не роби push і не запускай deploy без прямого прохання користувача.
-- Push у `main` і публікацію GitHub Pages користувач виконує самостійно.
+- Конфігурація Sites зберігається у `.openai/hosting.json`, а production build має бути сумісним із Cloudflare Workers.
+- `npm run build` створює Sites/Cloudflare Worker-збірку, а `npm run build:pages` — окрему статичну збірку GitHub Pages із базовим шляхом `/Timer/`.
+- Push у `main` запускає GitHub Pages workflow; Sites публікується окремим deployment-процесом.
 - Якщо користувач прямо попросив виконати push або deploy, не публікуй зламану версію: у разі помилки тестів, збірки, push або deploy зупинись і явно повідом про причину.
-- Не використовуй окрему гілку `gh-pages` і не публікуй `dist` вручну, доки deployment виконується через GitHub Actions.
 
 ## Очікувана поведінка Codex
 

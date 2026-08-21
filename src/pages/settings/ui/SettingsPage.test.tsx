@@ -178,6 +178,12 @@ describe('SettingsPage', () => {
     expect(
       screen.getByText(/Як зробити: натисніть «Експорт» нижче та збережіть JSON-файл/)
     ).toBeTruthy();
+    expect(screen.getByText('Перенесення з GitHub Pages')).toBeTruthy();
+    expect(screen.getByText(/Якщо на Sites уже є записи, спочатку експортуйте їх/)).toBeTruthy();
+    expect(
+      (screen.getByRole('link', { name: 'Відкрити стару версію' }) as HTMLAnchorElement)
+        .href
+    ).toBe('https://natuselit.github.io/Timer/');
     const feedbackLink = screen.getByRole('link', {
       name: /Зворотний звʼязок у Telegram/
     }) as HTMLAnchorElement;

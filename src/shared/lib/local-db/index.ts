@@ -5,6 +5,7 @@ export * from './repositories/backupReminderRepository';
 export * from './repositories/calendarTutorialRepository';
 export * from './repositories/scheduleWarningReviewRepository';
 export * from './repositories/settingsRepository';
+export * from './repositories/sitesMigrationRepository';
 export * from './repositories/shiftRepository';
 export * from './use-cases/backupUseCases';
 export * from './use-cases/dateRangeUseCases';
