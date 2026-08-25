@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MainPage } from '../pages/main';
 import { OnboardingPage, type OnboardingValues } from '../pages/onboarding';
 import {
@@ -14,7 +14,8 @@ import {
 } from '../shared/lib/local-db';
 import {
   isChatGptSitesHost,
-  isLegacyGitHubPagesHost
+  isLegacyGitHubPagesHost,
+  registerLegacyMigrationPromptLaunch
 } from '../shared/config/sitesMigration';
 import { toLocalIsoString } from '../shared/lib/date-time';
 import { synchronizeTheme } from '../shared/lib/theme';
@@ -30,7 +31,8 @@ export function App() {
   const [migrationStatus, setMigrationStatus] = useState<AppMigrationStatus | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
-  const [isLegacyPromptOpen, setIsLegacyPromptOpen] = useState(true);
+  const [isLegacyPromptOpen, setIsLegacyPromptOpen] = useState(false);
+  const hasRegisteredLegacyLaunch = useRef(false);
   const isSitesHost =
     typeof window !== 'undefined' && isChatGptSitesHost(window.location.hostname);
   const isLegacyHost =
@@ -79,6 +81,20 @@ export function App() {
       document.documentElement.removeAttribute('data-app-loading');
     }
   }, [loadError]);
+
+  useEffect(() => {
+    if (
+      !isLegacyHost ||
+      !settings ||
+      !migrationStatus ||
+      hasRegisteredLegacyLaunch.current
+    ) {
+      return;
+    }
+
+    hasRegisteredLegacyLaunch.current = true;
+    setIsLegacyPromptOpen(registerLegacyMigrationPromptLaunch(window.localStorage));
+  }, [isLegacyHost, migrationStatus, settings]);
 
   const completeOnboarding = async (values: OnboardingValues) => {
     if (!settings) {
