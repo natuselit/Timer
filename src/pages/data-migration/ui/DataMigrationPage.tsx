@@ -3,14 +3,12 @@ import { Check, Database, ExternalLink, FileUp, ShieldCheck } from 'lucide-react
 import type { Settings } from '../../../entities/settings';
 import { LEGACY_GITHUB_PAGES_URL } from '../../../shared/config/sitesMigration';
 import {
-  BackupReminderRepository,
   BackupValidationError,
   localDb,
   parseBackupImportJson,
   replaceShiftsFromLegacyBackup,
   restoreBackup
 } from '../../../shared/lib/local-db';
-import { toLocalIsoString } from '../../../shared/lib/date-time';
 import './DataMigrationPage.css';
 
 type DataMigrationPageProps = {
@@ -25,8 +23,6 @@ type MigrationResult = {
   shiftCount: number;
   scheduleCount: number;
 };
-
-const backupReminderRepository = new BackupReminderRepository(localDb);
 
 const getImportErrorMessage = (error: unknown): string => {
   if (error instanceof BackupValidationError) {
@@ -71,11 +67,6 @@ export function DataMigrationPage({
         }
 
         await replaceShiftsFromLegacyBackup(localDb, parsedImport.shifts);
-        try {
-          await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
-        } catch {
-          // Restored shifts are valid even if the reminder timestamp cannot be refreshed.
-        }
         setResult({
           kind: 'legacy',
           settings: currentSettings,
@@ -94,11 +85,6 @@ export function DataMigrationPage({
         }
 
         const restoredSettings = await restoreBackup(localDb, backup);
-        try {
-          await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
-        } catch {
-          // Restored data is valid even if the reminder timestamp cannot be refreshed.
-        }
         setResult({
           kind: 'shifter',
           settings: restoredSettings,

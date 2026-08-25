@@ -8,35 +8,27 @@ import {
 } from 'react';
 import {
   CalendarClock,
-  CalendarDays,
   CircleCheck,
   ChevronDown,
-  CircleHelp,
   Database,
   Download,
   Eraser,
   FileUp,
   FlaskConical,
-  Info,
   Palette,
   RotateCcw,
   Save,
   Shield,
   Smartphone,
-  TimerReset,
   Trophy,
   UserRound,
   WalletCards,
   X,
   type LucideIcon
 } from 'lucide-react';
-import appPackage from '../../../../package.json';
 import {
   DEFAULT_SETTINGS,
-  BACKUP_REMINDER_INTERVAL_DAYS,
   GRADE_VALUES,
-  HOLD_DELAY_MAX_MS,
-  HOLD_DELAY_MIN_MS,
   OVERTIME_LIMIT_PERCENT_MAX,
   OVERTIME_LIMIT_PERCENT_MIN,
   OVERTIME_STEP_MINUTES_MAX,
@@ -45,7 +37,6 @@ import {
   calculateGradeMonthlyBonus,
   calculateHourlyRateFromMonthlySalary,
   getNextDesiredGrade,
-  isBackupReminderIntervalDays,
   isOvertimeDailyMaxMinutes,
   isOvertimeStrategy,
   isOvertimeUnavailableDates,
@@ -58,7 +49,6 @@ import {
 import { INCOGNITO_FINANCIAL_MASK, formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import {
   BackupValidationError,
-  BackupReminderRepository,
   localDb,
   parseBackupImportJson,
   recalculateHourlyRateSnapshotsForPeriod,
@@ -83,11 +73,6 @@ import {
   MonthCalendar,
   type CalendarDateRange
 } from '../../../shared/ui/month-calendar';
-import {
-  ENTERPRISE_SCHEDULE_IMPORT_NOTE,
-  ENTERPRISE_SCHEDULE_IMPORT_STEPS,
-  type EnterpriseScheduleImportStep
-} from '../../../shared/config/enterpriseScheduleImportGuide';
 import { LEGACY_GITHUB_PAGES_URL } from '../../../shared/config/sitesMigration';
 import './SettingsPage.css';
 
@@ -96,7 +81,6 @@ type SettingsPageProps = {
   onSettingsChange: (settings: Settings) => Promise<void>;
   onLocalDataReplace: (settings: Settings) => void;
   onLocalDataChange?: () => void;
-  onOpenCalendarTutorial: () => void;
 };
 
 type FormValues = {
@@ -108,8 +92,6 @@ type FormValues = {
   desiredGrade: string;
   gradeSalaryBonusPercents: [string, string, string, string];
   gradeNormPercents: [string, string, string, string];
-  holdDelaySeconds: string;
-  backupReminderIntervalDays: string;
   overtimeLimitPercent: string;
   overtimeStepMinutes: string;
   overtimeStrategy: OvertimeStrategy;
@@ -153,13 +135,10 @@ type SettingsSectionId =
   | 'payment'
   | 'overtime'
   | 'grades'
-  | 'timer'
   | 'appearance'
   | 'installation'
   | 'privacy'
-  | 'data'
-  | 'help'
-  | 'information';
+  | 'data';
 
 type SettingsSectionProps = {
   id: SettingsSectionId;
@@ -205,8 +184,6 @@ const FORM_FIELD_SECTIONS: Record<keyof FormValues, SettingsSectionId> = {
   desiredGrade: 'grades',
   gradeSalaryBonusPercents: 'grades',
   gradeNormPercents: 'grades',
-  holdDelaySeconds: 'timer',
-  backupReminderIntervalDays: 'data',
   overtimeLimitPercent: 'overtime',
   overtimeStepMinutes: 'overtime',
   overtimeStrategy: 'overtime',
@@ -215,8 +192,6 @@ const FORM_FIELD_SECTIONS: Record<keyof FormValues, SettingsSectionId> = {
   overtimeUnavailableDates: 'overtime'
 };
 
-const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
-const delayMaxSeconds = HOLD_DELAY_MAX_MS / 1000;
 const OVERTIME_STRATEGY_DESCRIPTIONS: Record<OvertimeStrategy, string> = {
   standard: 'Використовуються дві найближчі суботи, решта — на будні.',
   'standard-plus': 'Використовуються три найближчі суботи, решта — на будні.',
@@ -233,57 +208,6 @@ const PWA_INSTALL_SUMMARIES: Record<PwaInstallStatus, string> = {
   ios: 'Через Safari',
   manual: 'Через меню'
 };
-const FAQ_ITEMS: Array<{
-  question: string;
-  answer: string;
-  steps?: readonly EnterpriseScheduleImportStep[];
-}> = [
-  {
-    question: 'Як почати й завершити зміну?',
-    answer:
-      'Утримуйте «Прийшов» для старту та «Пішов» для завершення. Активну зміну не можна завершити, доки активний тікет не закрито з фактичною кількістю.'
-  },
-  {
-    question: 'Як визначається тип зміни?',
-    answer:
-      'Тип визначається автоматично за найближчим плановим часом: 06:30–14:30 або 14:30–22:30. За день може бути лише одна зміна й лише одна активна зміна загалом.'
-  },
-  {
-    question: 'Як працює коефіцієнт?',
-    answer:
-      'У будні плановий час в auto оплачується за x1, а час до початку або після завершення — за x1.5. У суботу й неділю режим auto оплачує всю фактичну тривалість за x1.5.'
-  },
-  {
-    question: 'Як працює ліміт перепрацювань?',
-    answer:
-      'Ліміт рахується як відсоток від плану 5/2 по 8 годин. У будні враховується час до або після планової зміни, а у вихідні — вся фактична тривалість. Денний максимум і недоступні дати задаються в налаштуваннях. Перевищення показується, але не блокує таймер.'
-  },
-  {
-    question: 'Як працюють тікети та простій?',
-    answer:
-      'Одночасно активний лише один тікет. Простій додається або віднімається через меню «…» активного тікета. Під час завершення вкажіть фактичну кількість у модальному вікні.'
-  },
-  {
-    question: 'Як рахуються оплата та рівні?',
-    answer:
-      'Базова погодинна ставка для нової зміни рахується з місячної ставки, робочих днів 5/2 і восьми годин. Премія за рівень додається окремо за повний календарний місяць.'
-  },
-  {
-    question: 'Що робить режим інкогніто?',
-    answer:
-      'Інкогніто приховує фінансові значення та блокує редагування грошових полів, але не видаляє й не змінює реальні дані.'
-  },
-  {
-    question: 'Як працюють backup та імпорт зі старого додатку?',
-    answer:
-      'Звичайний backup «Таймера» повністю відновлює налаштування, зміни й графік. Backup старого додатку замінює лише історію змін, залишаючи чинні налаштування та графік.'
-  },
-  {
-    question: 'Як імпортувати графік підприємства?',
-    answer: ENTERPRISE_SCHEDULE_IMPORT_NOTE,
-    steps: ENTERPRISE_SCHEDULE_IMPORT_STEPS
-  }
-];
 
 const parseNumber = (value: string): number => Number(value.replace(',', '.'));
 
@@ -329,8 +253,6 @@ const toFormValues = (settings: Settings): FormValues => ({
   desiredGrade: String(settings.desiredGrade),
   gradeSalaryBonusPercents: toPercentFormValues(settings.gradeSalaryBonusPercents),
   gradeNormPercents: toPercentFormValues(settings.gradeNormPercents),
-  holdDelaySeconds: String(settings.arriveHoldDelayMs / 1000),
-  backupReminderIntervalDays: String(settings.backupReminderIntervalDays),
   overtimeLimitPercent: String(settings.overtimeLimitPercent),
   overtimeStepMinutes: String(settings.overtimeStepMinutes),
   overtimeStrategy: settings.overtimeStrategy,
@@ -353,8 +275,6 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   const desiredGrade = Number(values.desiredGrade);
   const gradeSalaryBonusPercents = parsePercentFormValues(values.gradeSalaryBonusPercents);
   const gradeNormPercents = parsePercentFormValues(values.gradeNormPercents);
-  const holdDelay = parseNumber(values.holdDelaySeconds);
-  const backupReminderIntervalDays = Number(values.backupReminderIntervalDays);
   const overtimeLimitPercent = parseNumber(values.overtimeLimitPercent);
   const overtimeStepMinutes = Number(values.overtimeStepMinutes);
   const overtimeWeekdayMaxMinutes = getMinutesUntilTime(
@@ -402,18 +322,6 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   }
 
   if (
-    !Number.isFinite(holdDelay) ||
-    holdDelay < delayMinSeconds ||
-    holdDelay > delayMaxSeconds
-  ) {
-    errors.holdDelaySeconds = `Затримка має бути від ${delayMinSeconds} до ${delayMaxSeconds} с.`;
-  }
-
-  if (!isBackupReminderIntervalDays(backupReminderIntervalDays)) {
-    errors.backupReminderIntervalDays = 'Оберіть 7, 14 або 30 днів.';
-  }
-
-  if (
     !Number.isFinite(overtimeLimitPercent) ||
     overtimeLimitPercent < OVERTIME_LIMIT_PERCENT_MIN ||
     overtimeLimitPercent > OVERTIME_LIMIT_PERCENT_MAX
@@ -449,15 +357,6 @@ const validateForm = (values: FormValues, incognitoEnabled: boolean): FormErrors
   return errors;
 };
 
-const formatDateTime = (value: string): string =>
-  new Intl.DateTimeFormat('uk-UA', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  }).format(new Date(value));
-
 const getImportErrorMessage = (error: unknown): string => {
   if (error instanceof BackupValidationError) {
     return error.message;
@@ -467,14 +366,12 @@ const getImportErrorMessage = (error: unknown): string => {
 };
 
 const shiftRepository = new ShiftRepository(localDb);
-const backupReminderRepository = new BackupReminderRepository(localDb);
 
 export function SettingsPage({
   settings,
   onSettingsChange,
   onLocalDataReplace,
-  onLocalDataChange,
-  onOpenCalendarTutorial
+  onLocalDataChange
 }: SettingsPageProps) {
   const [values, setValues] = useState<FormValues>(() => toFormValues(settings));
   const [errors, setErrors] = useState<FormErrors>({});
@@ -722,7 +619,6 @@ export function SettingsPage({
     setIsSaving(true);
     setNotice(null);
 
-    const holdDelayMs = Math.round(parseNumber(values.holdDelaySeconds) * 1000);
     const overtimeWeekdayMaxMinutes = getMinutesUntilTime(
       WEEKDAY_OVERTIME_START_TIME,
       values.overtimeWeekdayEndTime
@@ -750,11 +646,8 @@ export function SettingsPage({
         ? settings.gradeSalaryBonusPercents
         : parsePercentFormValues(values.gradeSalaryBonusPercents),
       gradeNormPercents: parsePercentFormValues(values.gradeNormPercents),
-      arriveHoldDelayMs: holdDelayMs,
-      leaveHoldDelayMs: holdDelayMs,
-      backupReminderIntervalDays: Number(
-        values.backupReminderIntervalDays
-      ) as Settings['backupReminderIntervalDays'],
+      arriveHoldDelayMs: DEFAULT_SETTINGS.arriveHoldDelayMs,
+      leaveHoldDelayMs: DEFAULT_SETTINGS.leaveHoldDelayMs,
       overtimeLimitPercent: parseNumber(values.overtimeLimitPercent),
       overtimeStepMinutes: Number(values.overtimeStepMinutes),
       overtimeStrategy: values.overtimeStrategy,
@@ -978,9 +871,7 @@ export function SettingsPage({
 
     try {
       const exportedAt = toLocalIsoString(new Date());
-      const backup = await downloadBackup(localDb, exportedAt);
-      await backupReminderRepository.markExported(backup.exportedAt);
-      onLocalDataChange?.();
+      await downloadBackup(localDb, exportedAt);
       setNotice({ tone: 'success', text: 'JSON backup створено.' });
     } catch {
       setNotice({ tone: 'error', text: 'Не вдалося створити JSON backup.' });
@@ -1018,7 +909,6 @@ export function SettingsPage({
         }
 
         await replaceShiftsFromLegacyBackup(localDb, parsedImport.shifts);
-        await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
         onLocalDataChange?.();
         setNotice({
           tone: 'success',
@@ -1036,7 +926,6 @@ export function SettingsPage({
         }
 
         const restoredSettings = await restoreBackup(localDb, backup);
-        await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
 
         setValues(toFormValues(restoredSettings));
         setOvertimeUnavailableDateDraft('');
@@ -1114,7 +1003,6 @@ export function SettingsPage({
       setValues(toFormValues(resetSettings));
       setOvertimeUnavailableDateDraft('');
       setErrors({});
-      await backupReminderRepository.resetAnchor(toLocalIsoString(new Date()));
       onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'Локальні дані очищено.' });
     } catch {
@@ -1139,7 +1027,6 @@ export function SettingsPage({
     try {
       const now = toLocalIsoString(new Date());
       const demoData = await replaceLocalDataWithDemo(localDb, now.slice(0, 10), now);
-      await backupReminderRepository.resetAnchor(now);
 
       setValues(toFormValues(demoData.settings));
       setOvertimeUnavailableDateDraft('');
@@ -1600,33 +1487,6 @@ export function SettingsPage({
       </SettingsSection>
 
       <SettingsSection
-        id="timer"
-        title="Таймер"
-        description="Захист від випадкового натискання"
-        summary={`${values.holdDelaySeconds} с`}
-        icon={TimerReset}
-      >
-        <div className="settings-page__grid">
-          <label className="settings-page__field">
-            <span>Затримка кнопок, с</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              autoComplete="off"
-              pattern="[0-9]*([.,][0-9]*)?"
-              aria-invalid={errors.holdDelaySeconds ? 'true' : 'false'}
-              aria-describedby={errors.holdDelaySeconds ? 'holdDelaySeconds-error' : undefined}
-              value={values.holdDelaySeconds}
-              onChange={updateField('holdDelaySeconds')}
-            />
-            {errors.holdDelaySeconds ? (
-              <small id="holdDelaySeconds-error">{errors.holdDelaySeconds}</small>
-            ) : null}
-          </label>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection
         id="appearance"
         title="Вигляд"
         description="Тема інтерфейсу"
@@ -1739,7 +1599,7 @@ export function SettingsPage({
         id="data"
         title="Дані та backup"
         description="Експорт, імпорт і очищення"
-        summary={`Кожні ${values.backupReminderIntervalDays} днів`}
+        summary="JSON локально"
         icon={Database}
       >
         <div className="settings-page__migration-note">
@@ -1754,34 +1614,6 @@ export function SettingsPage({
             Відкрити стару версію
           </a>
         </div>
-        <label className="settings-page__field">
-          <span>Нагадувати про backup</span>
-          <select
-            aria-invalid={errors.backupReminderIntervalDays ? 'true' : 'false'}
-            aria-describedby={
-              errors.backupReminderIntervalDays
-                ? 'backupReminderIntervalDays-error'
-                : 'backupReminderIntervalDays-help'
-            }
-            value={values.backupReminderIntervalDays}
-            onChange={updateField('backupReminderIntervalDays')}
-          >
-            {BACKUP_REMINDER_INTERVAL_DAYS.map((days) => (
-              <option value={days} key={days}>
-                Кожні {days} днів
-              </option>
-            ))}
-          </select>
-          <small id="backupReminderIntervalDays-help">
-            Як зробити: натисніть «Експорт» нижче та збережіть JSON-файл у надійному
-            місці. Після цього нагадування зникне.
-          </small>
-          {errors.backupReminderIntervalDays ? (
-            <small id="backupReminderIntervalDays-error">
-              {errors.backupReminderIntervalDays}
-            </small>
-          ) : null}
-        </label>
         <div className="settings-page__actions">
           <button
             type="button"
@@ -1846,82 +1678,6 @@ export function SettingsPage({
               Демо 2 міс.
             </button>
           ) : null}
-        </div>
-      </SettingsSection>
-
-      <SettingsSection
-        id="help"
-        title="Допомога"
-        description="Календар і щоденні сценарії"
-        summary={`${FAQ_ITEMS.length} відповідей`}
-        icon={CircleHelp}
-      >
-        <button
-          className="settings-page__help-button"
-          type="button"
-          onClick={onOpenCalendarTutorial}
-        >
-          <CalendarDays size={19} aria-hidden="true" />
-          Як користуватися календарем
-        </button>
-
-        <details className="settings-page__faq-dropdown">
-          <summary>
-            <span
-              id="faq-settings-title"
-              className="settings-page__faq-title"
-              role="heading"
-              aria-level={2}
-            >
-              FAQ
-            </span>
-            <span className="settings-page__faq-count">{FAQ_ITEMS.length} питань</span>
-            <ChevronDown size={20} aria-hidden="true" />
-          </summary>
-          <div className="settings-page__faq">
-            {FAQ_ITEMS.map((item) => (
-              <details key={item.question}>
-                <summary>{item.question}</summary>
-                {item.steps ? (
-                  <ol>
-                    {item.steps.map((step) => (
-                      <li key={step.title}>
-                        <strong>{step.title}</strong>
-                        <span>{step.description}</span>
-                      </li>
-                    ))}
-                  </ol>
-                ) : null}
-                <p>{item.answer}</p>
-              </details>
-            ))}
-          </div>
-        </details>
-      </SettingsSection>
-
-      <SettingsSection
-        id="information"
-        title="Про застосунок"
-        description="Версія та зворотний звʼязок"
-        summary={`v${appPackage.version}`}
-        icon={Info}
-      >
-        <a
-          className="settings-page__feedback-link"
-          href="https://t.me/natuselit"
-          target="_blank"
-          rel="noreferrer noopener"
-          aria-label="Зворотний звʼязок у Telegram"
-        >
-          <span>Зворотний звʼязок</span>
-        </a>
-        <div className="settings-page__readonly-row">
-          <span>Версія додатку</span>
-          <strong>{appPackage.version}</strong>
-        </div>
-        <div className="settings-page__readonly-row">
-          <span>Дата останнього оновлення</span>
-          <strong>{formatDateTime(settings.updatedAt)}</strong>
         </div>
       </SettingsSection>
 

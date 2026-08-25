@@ -849,7 +849,7 @@
   }
 }
 
-@media (max-width: 430px) {
+@media (max-width: 480px) {
   .analytics-page__shift-types {
     grid-template-columns: 1fr;
   }

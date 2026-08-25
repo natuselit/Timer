@@ -48,13 +48,14 @@ describe('OnboardingPage', () => {
     expect(onComplete).not.toHaveBeenCalled();
   });
 
-  it('submits normalized settings and preserves the existing hold delay behavior', async () => {
+  it('submits normalized settings with the fixed 1.5 second hold delay', async () => {
     const user = userEvent.setup();
     const onComplete = vi.fn().mockResolvedValue(undefined);
 
     render(<OnboardingPage onComplete={onComplete} />);
 
     await user.click(screen.getByRole('button', { name: 'Пропустити' }));
+    expect(screen.queryByLabelText('Затримка кнопок, с')).toBeNull();
     await user.type(screen.getByLabelText('Імʼя'), '  Тарас  ');
     await user.type(screen.getByLabelText('Прізвище'), '  Шевченко  ');
     await user.type(screen.getByLabelText('Ставка за місяць, ₴'), '17600');

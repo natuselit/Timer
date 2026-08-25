@@ -150,7 +150,7 @@ describe('MainPage active shift', () => {
     ).toBe('false');
   });
 
-  it('shows the calendar tutorial once and allows reopening it from settings', async () => {
+  it('shows the calendar tutorial only on the first calendar visit', async () => {
     const user = userEvent.setup();
 
     render(
@@ -178,15 +178,6 @@ describe('MainPage active shift', () => {
     await user.click(screen.getByRole('button', { name: 'Історія' }));
 
     expect(screen.queryByRole('dialog', { name: 'Почніть із потрібного періоду' })).toBeNull();
-
-    await user.click(screen.getByRole('button', { name: 'Налашт.' }));
-    await user.click(
-      screen.getByRole('button', { name: 'Як користуватися календарем' })
-    );
-
-    expect(
-      screen.getByRole('dialog', { name: 'Почніть із потрібного періоду' })
-    ).toBeTruthy();
   });
 
   it('shows compact downtime and opens the accessible action modal from the menu', async () => {
@@ -680,13 +671,7 @@ describe('MainPage active shift', () => {
     expect(progress.getAttribute('aria-valuetext')).toContain('з');
   });
 
-  it('keeps the mandatory reminder visible until backup export succeeds', async () => {
-    const user = userEvent.setup();
-    vi.stubGlobal('URL', {
-      createObjectURL: vi.fn(() => 'blob:backup'),
-      revokeObjectURL: vi.fn()
-    });
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+  it('does not show the removed backup reminder for legacy metadata', async () => {
     await localDb.appMeta.put({
       key: BACKUP_REMINDER_ANCHOR_KEY,
       value: '2000-01-01T00:00:00.000Z',
@@ -702,14 +687,8 @@ describe('MainPage active shift', () => {
       />
     );
 
-    expect(await screen.findByText('Час зберегти backup')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Закрити/ })).toBeNull();
-
-    await user.click(screen.getByRole('button', { name: 'Створити backup' }));
-
-    await waitFor(() => {
-      expect(screen.queryByText('Час зберегти backup')).toBeNull();
-    });
+    expect(await screen.findByLabelText('Поточний коефіцієнт: x2')).toBeTruthy();
+    expect(screen.queryByText('Час зберегти backup')).toBeNull();
   });
 });
 
@@ -745,18 +724,24 @@ describe('MainPage inactive state', () => {
       ).not.toBe(firstShiftRecommendation);
     });
 
-    fireEvent.pointerDown(screen.getByRole('button', { name: /Прийшов/ }));
-
-    await waitFor(async () => {
-      const storedShift = (await localDb.shifts.toArray())[0];
-
-      expect(storedShift).toMatchObject({
-        type: 'second',
-        detectionMode: 'manual',
-        plannedStartTime: '14:30',
-        plannedEndTime: '22:30'
-      });
+    const arriveButton = screen.getByRole('button', {
+      name: 'Прийшов. Утримуйте 1.5 с'
     });
+    fireEvent.pointerDown(arriveButton);
+
+    await waitFor(
+      async () => {
+        const storedShift = (await localDb.shifts.toArray())[0];
+
+        expect(storedShift).toMatchObject({
+          type: 'second',
+          detectionMode: 'manual',
+          plannedStartTime: '14:30',
+          plannedEndTime: '22:30'
+        });
+      },
+      { timeout: 3000 }
+    );
     expect(screen.queryByRole('group', { name: 'Вибір зміни перед стартом' })).toBeNull();
   });
 
@@ -818,7 +803,7 @@ describe('MainPage inactive state', () => {
     expect(
       await screen.findByRole('heading', { name: 'Планувальник вимкнено' })
     ).toBeTruthy();
-    expect(screen.getByRole('group', { name: 'Вибір зміни перед стартом' })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'Вибір зміни перед стартом' })).toBeNull();
     expect(screen.queryByText('Зміна не активна')).toBeNull();
     expect(screen.queryByText('Остання зміна')).toBeNull();
   });

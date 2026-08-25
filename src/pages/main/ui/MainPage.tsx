@@ -4,7 +4,6 @@ import {
   CalendarClock,
   Check,
   Clock3,
-  Download,
   Edit3,
   Ellipsis,
   Eye,
@@ -19,6 +18,7 @@ import { AppShell } from '../../../shared/ui/app-shell';
 import {
   calculateHourlyRateFromMonthlySalary,
   createGradeSnapshot,
+  SHIFT_HOLD_DELAY_MS,
   type OvertimeStrategy,
   type Settings
 } from '../../../entities/settings';
@@ -40,7 +40,6 @@ import {
 import {
   adjustWorkTicketDowntime,
   addWorkTicketToActiveShift,
-  BackupReminderRepository,
   CalendarTutorialRepository,
   completeWorkTicket,
   createShift,
@@ -54,10 +53,8 @@ import {
   ShiftRepository,
   updateWorkTicketInActiveShift,
   updateActiveShiftNote,
-  updateShift,
-  type BackupReminderStatus
+  updateShift
 } from '../../../shared/lib/local-db';
-import { downloadBackup } from '../../../shared/lib/backup';
 import { CalendarTutorial } from '../../../shared/ui/calendar-tutorial';
 import {
   combineLocalDateAndTime,
@@ -102,7 +99,6 @@ type MainPageProps = {
 
 type HoldButtonProps = {
   label: string;
-  delayMs: number;
   disabled?: boolean;
   tone?: 'default' | 'danger';
   onConfirm: () => Promise<void>;
@@ -133,7 +129,6 @@ const createEmptyTicketEditDraft = (): TicketEditDraft => ({
 
 const shiftRepository = new ShiftRepository(localDb);
 const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
-const backupReminderRepository = new BackupReminderRepository(localDb);
 const calendarTutorialRepository = new CalendarTutorialRepository(localDb);
 const calendarPageIds = new Set<NavigationItem['id']>(['history', 'analytics', 'schedule']);
 
@@ -194,7 +189,7 @@ const getTicketTargets = (
   });
 };
 
-function HoldButton({ label, delayMs, disabled = false, tone = 'default', onConfirm }: HoldButtonProps) {
+function HoldButton({ label, disabled = false, tone = 'default', onConfirm }: HoldButtonProps) {
   const [isHolding, setIsHolding] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const timeoutRef = useRef<number | null>(null);
@@ -226,7 +221,7 @@ function HoldButton({ label, delayMs, disabled = false, tone = 'default', onConf
       } finally {
         setIsSubmitting(false);
       }
-    }, delayMs);
+    }, SHIFT_HOLD_DELAY_MS);
   };
 
   return (
@@ -235,7 +230,7 @@ function HoldButton({ label, delayMs, disabled = false, tone = 'default', onConf
       data-tone={tone}
       type="button"
       disabled={disabled || isSubmitting}
-      aria-label={`${label}. Утримуйте ${Math.round(delayMs / 100) / 10} с`}
+      aria-label={`${label}. Утримуйте ${SHIFT_HOLD_DELAY_MS / 1000} с`}
       onPointerDown={startHold}
       onPointerUp={clearHold}
       onPointerCancel={clearHold}
@@ -245,7 +240,7 @@ function HoldButton({ label, delayMs, disabled = false, tone = 'default', onConf
       <span
         className="main-page__hold-progress"
         style={{
-          transitionDuration: isHolding ? `${delayMs}ms` : '120ms',
+          transitionDuration: isHolding ? `${SHIFT_HOLD_DELAY_MS}ms` : '120ms',
           transform: isHolding ? 'scaleX(1)' : 'scaleX(0)'
         }}
       />
@@ -378,7 +373,6 @@ function OvertimePlannerCard({
           <p className="main-page__label">Перепрацювання</p>
           <h3>Планувальник вимкнено</h3>
           <p>Вкажіть відсоток ліміту, щоб отримувати рекомендації на місяць.</p>
-          {shiftTypeSelector}
         </div>
         <button type="button" onClick={onOpenSettings}>
           Налаштувати
@@ -666,10 +660,6 @@ export function MainPage({
     message: string;
   } | null>(null);
   const [isTogglingIncognito, setIsTogglingIncognito] = useState(false);
-  const [backupReminderStatus, setBackupReminderStatus] =
-    useState<BackupReminderStatus | null>(null);
-  const [isExportingBackup, setIsExportingBackup] = useState(false);
-  const [backupReminderError, setBackupReminderError] = useState<string | null>(null);
   const [localDataRefreshKey, setLocalDataRefreshKey] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
   const [sharedCalendarRange, setSharedCalendarRange] = useState<CalendarDateRange | null>(
@@ -694,63 +684,11 @@ export function MainPage({
     setLocalDataRefreshKey((current) => current + 1);
   }, []);
 
-  const openCalendarTutorial = useCallback(() => {
-    setIsCalendarTutorialOpen(true);
-  }, []);
-
   const dismissCalendarTutorial = useCallback(() => {
     calendarTutorialDismissedRef.current = true;
     setIsCalendarTutorialOpen(false);
     void calendarTutorialRepository.markSeen(toLocalIsoString(new Date())).catch(() => undefined);
   }, []);
-
-  useEffect(() => {
-    let isMounted = true;
-    let timeoutId: number | null = null;
-
-    const loadBackupReminder = async () => {
-      const checkedAt = toLocalIsoString(new Date());
-
-      try {
-        const status = await backupReminderRepository.getStatus(
-          settings.backupReminderIntervalDays,
-          checkedAt
-        );
-
-        if (!isMounted) {
-          return;
-        }
-
-        setBackupReminderStatus(status);
-
-        if (!status.isDue) {
-          const remainingMs = Math.max(
-            1_000,
-            new Date(status.dueAt).getTime() - new Date(checkedAt).getTime()
-          );
-
-          timeoutId = window.setTimeout(
-            () => void loadBackupReminder(),
-            Math.min(remainingMs, 24 * 60 * 60 * 1_000)
-          );
-        }
-      } catch {
-        if (isMounted) {
-          setBackupReminderStatus(null);
-        }
-      }
-    };
-
-    void loadBackupReminder();
-
-    return () => {
-      isMounted = false;
-
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [dataVersion, localDataRefreshKey, settings.backupReminderIntervalDays]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -1059,28 +997,6 @@ export function MainPage({
       actualQuantityInputRef.current?.focus();
     }
   }, [isCompletionModalOpen]);
-
-  const exportBackupFromReminder = async () => {
-    setIsExportingBackup(true);
-    setBackupReminderError(null);
-
-    try {
-      const exportedAt = toLocalIsoString(new Date());
-      const backup = await downloadBackup(localDb, exportedAt);
-
-      await backupReminderRepository.markExported(backup.exportedAt);
-      setBackupReminderStatus(
-        await backupReminderRepository.getStatus(
-          settings.backupReminderIntervalDays,
-          backup.exportedAt
-        )
-      );
-    } catch {
-      setBackupReminderError('Не вдалося створити JSON backup. Спробуйте ще раз.');
-    } finally {
-      setIsExportingBackup(false);
-    }
-  };
 
   const toggleIncognito = async () => {
     setTimerError(null);
@@ -1591,28 +1507,6 @@ export function MainPage({
         ) : null
       }
     >
-      {backupReminderStatus?.isDue ? (
-        <aside className="main-page__backup-reminder" role="alert" aria-live="assertive">
-          <div className="main-page__backup-reminder-copy">
-            <strong>Час зберегти backup</strong>
-            <p>
-              Створіть актуальну резервну копію локальних даних. Нагадування зникне
-              після завантаження JSON-файлу.
-            </p>
-          </div>
-          <button
-            type="button"
-            disabled={isExportingBackup}
-            onClick={() => void exportBackupFromReminder()}
-          >
-            <Download size={18} aria-hidden="true" />
-            {isExportingBackup ? 'Створення...' : 'Створити backup'}
-          </button>
-          {backupReminderError ? (
-            <p className="main-page__backup-reminder-error">{backupReminderError}</p>
-          ) : null}
-        </aside>
-      ) : null}
       {activePage === 'history' ? (
         <HistoryPage
           key={`history-${dataVersion}-${localDataRefreshKey}`}
@@ -1657,7 +1551,6 @@ export function MainPage({
           onSettingsChange={onSettingsChange}
           onLocalDataReplace={onLocalDataReplace}
           onLocalDataChange={notifyLocalDataChange}
-          onOpenCalendarTutorial={openCalendarTutorial}
         />
       ) : isLoadingShift ? (
         <section className="main-page__summary main-page__timer-screen">
@@ -2270,7 +2163,6 @@ export function MainPage({
             <div className="main-page__action-bar">
               <HoldButton
                 label="Пішов"
-                delayMs={settings.leaveHoldDelayMs}
                 onConfirm={leave}
                 tone="danger"
               />
@@ -2521,7 +2413,6 @@ export function MainPage({
               <p className="main-page__hold-hint">Утримай “Прийшов”, щоб почати зміну</p>
               <HoldButton
                 label="Прийшов"
-                delayMs={settings.arriveHoldDelayMs}
                 onConfirm={arrive}
               />
             </div>

@@ -2,18 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Download, ExternalLink, MoveRight, ShieldCheck } from 'lucide-react';
 import { SITES_APP_URL } from '../../../shared/config/sitesMigration';
 import { downloadBackup } from '../../../shared/lib/backup';
-import {
-  BackupReminderRepository,
-  localDb
-} from '../../../shared/lib/local-db';
+import { localDb } from '../../../shared/lib/local-db';
 import { toLocalIsoString } from '../../../shared/lib/date-time';
 import './LegacyMigrationPrompt.css';
 
 type LegacyMigrationPromptProps = {
   onDismiss: () => void;
 };
-
-const backupReminderRepository = new BackupReminderRepository(localDb);
 
 export function LegacyMigrationPrompt({ onDismiss }: LegacyMigrationPromptProps) {
   const [isExporting, setIsExporting] = useState(false);
@@ -45,14 +40,7 @@ export function LegacyMigrationPrompt({ onDismiss }: LegacyMigrationPromptProps)
     setError(null);
 
     try {
-      const backup = await downloadBackup(localDb, toLocalIsoString(new Date()));
-
-      try {
-        await backupReminderRepository.markExported(backup.exportedAt);
-      } catch {
-        // The downloaded JSON remains valid if reminder metadata cannot be updated.
-      }
-
+      await downloadBackup(localDb, toLocalIsoString(new Date()));
       setBackupCreated(true);
     } catch {
       setError('Не вдалося створити JSON backup. Спробуйте ще раз.');

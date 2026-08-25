@@ -1,14 +1,11 @@
 // @vitest-environment jsdom
 
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SITES_APP_URL } from '../../../shared/config/sitesMigration';
-import {
-  LAST_BACKUP_EXPORTED_KEY,
-  localDb
-} from '../../../shared/lib/local-db';
+import { localDb } from '../../../shared/lib/local-db';
 import { LegacyMigrationPrompt } from './LegacyMigrationPrompt';
 
 beforeEach(async () => {
@@ -48,18 +45,13 @@ describe('LegacyMigrationPrompt', () => {
     expect(sitesLink.href).toBe(SITES_APP_URL);
   });
 
-  it('creates a JSON backup and marks the backup reminder as exported', async () => {
+  it('creates a JSON backup', async () => {
     const user = userEvent.setup();
     render(<LegacyMigrationPrompt onDismiss={vi.fn()} />);
 
     await user.click(screen.getByRole('button', { name: 'Створити backup' }));
 
     expect((await screen.findByRole('status')).textContent).toContain('Backup створено');
-    await waitFor(async () => {
-      await expect(localDb.appMeta.get(LAST_BACKUP_EXPORTED_KEY)).resolves.toMatchObject({
-        value: expect.any(String)
-      });
-    });
   });
 
   it('keeps the prompt open and shows an error when export fails', async () => {

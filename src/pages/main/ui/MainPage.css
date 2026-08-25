@@ -14,64 +14,6 @@
   justify-content: space-between;
 }
 
-.main-page__backup-reminder {
-  display: grid;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--color-warning-border);
-  border-radius: var(--radius-panel);
-  background: var(--color-warning-surface);
-  color: var(--color-text-primary);
-  box-shadow: var(--shadow-card);
-}
-
-.main-page__backup-reminder-copy {
-  display: grid;
-  gap: 4px;
-}
-
-.main-page__backup-reminder-copy strong {
-  color: var(--color-warning);
-  font-size: 1rem;
-}
-
-.main-page__backup-reminder-copy p,
-.main-page__backup-reminder-error {
-  margin: 0;
-  font-size: 0.84rem;
-  line-height: 1.4;
-}
-
-.main-page__backup-reminder-copy p {
-  color: var(--color-text-secondary);
-}
-
-.main-page__backup-reminder button {
-  display: inline-flex;
-  min-height: 48px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 14px;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--color-warning);
-  color: var(--color-on-primary);
-  cursor: pointer;
-  font: inherit;
-  font-weight: 850;
-}
-
-.main-page__backup-reminder button:disabled {
-  cursor: wait;
-  opacity: 0.7;
-}
-
-.main-page__backup-reminder-error {
-  color: var(--color-error);
-  font-weight: 700;
-}
-
 .main-page__eyebrow,
 .main-page__label,
 .main-page__muted,
@@ -723,10 +665,6 @@
   border: 1px solid var(--color-border);
   border-radius: 14px;
   background: var(--color-background);
-}
-
-.main-page__overtime-card--disabled .main-page__shift-type-selector {
-  margin-top: 10px;
 }
 
 .main-page__shift-type-selector > span {

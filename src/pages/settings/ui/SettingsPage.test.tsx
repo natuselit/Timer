@@ -76,7 +76,6 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -99,104 +98,44 @@ describe('SettingsPage', () => {
     expect(screen.queryByRole('button', { name: 'Зберегти налаштування' })).toBeNull();
   });
 
-  it('shows an accessible offline FAQ accordion', async () => {
-    const user = userEvent.setup();
-    const onOpenCalendarTutorial = vi.fn();
-
-    render(
-      <SettingsPage
-        settings={settings}
-        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
-        onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={onOpenCalendarTutorial}
-      />
-    );
-
-    const faqHeading = screen.getByRole('heading', { name: 'FAQ' });
-    const faqDropdown = faqHeading.closest('details');
-
-    expect(faqDropdown?.open).toBe(false);
-    await user.click(faqHeading.closest('summary')!);
-    expect(faqDropdown?.open).toBe(true);
-
-    const coefficientQuestion = screen.getByText('Як працює коефіцієнт?');
-    const details = coefficientQuestion.closest('details');
-
-    expect(details?.open).toBe(false);
-    await user.click(coefficientQuestion);
-    expect(details?.open).toBe(true);
-    expect(screen.getByText(/У суботу й неділю режим auto.*x1.5/)).toBeTruthy();
-    expect(screen.getByText(/Ліміт рахується як відсоток від плану 5\/2/)).toBeTruthy();
-    expect(screen.getByText('Відкрийте «Таймер»')).toBeTruthy();
-    expect(screen.getByText(/Натисніть ⋮/)).toBeTruthy();
-    expect(screen.getByText(/Ваш PDF залишається на пристрої/)).toBeTruthy();
-
-    await user.click(
-      screen.getByRole('button', { name: 'Як користуватися календарем' })
-    );
-    expect(onOpenCalendarTutorial).toHaveBeenCalledTimes(1);
-  });
-
   it('requests the native decimal keyboard for numeric settings', () => {
     render(
       <SettingsPage
         settings={settings}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
     const monthlySalary = screen.getByLabelText(
       /Ставка за місяць/
     ) as HTMLInputElement;
-    const holdDelay = screen.getByLabelText(
-      'Затримка кнопок, с'
-    ) as HTMLInputElement;
-
     expect(monthlySalary.type).toBe('text');
     expect(monthlySalary.inputMode).toBe('decimal');
     expect(monthlySalary.pattern).toBe('[0-9]*([.,][0-9]*)?');
-    expect(holdDelay.type).toBe('text');
-    expect(holdDelay.inputMode).toBe('decimal');
+    expect(screen.queryByLabelText('Затримка кнопок, с')).toBeNull();
   });
 
-  it('shows backup instructions and Telegram feedback without an author row', async () => {
-    const user = userEvent.setup();
-    const onSettingsChange = vi.fn().mockResolvedValue(undefined);
-
+  it('keeps manual backup tools and hides removed settings sections', () => {
     render(
       <SettingsPage
         settings={settings}
-        onSettingsChange={onSettingsChange}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
-    expect(screen.queryByText('Автор')).toBeNull();
-    expect(screen.queryByText('natuselit')).toBeNull();
-    expect(
-      screen.getByText(/Як зробити: натисніть «Експорт» нижче та збережіть JSON-файл/)
-    ).toBeTruthy();
     expect(screen.getByText('Перенесення з GitHub Pages')).toBeTruthy();
     expect(screen.getByText(/Якщо на Sites уже є записи, спочатку експортуйте їх/)).toBeTruthy();
     expect(
       (screen.getByRole('link', { name: 'Відкрити стару версію' }) as HTMLAnchorElement)
         .href
     ).toBe('https://natuselit.github.io/Timer/');
-    const feedbackLink = screen.getByRole('link', {
-      name: /Зворотний звʼязок у Telegram/
-    }) as HTMLAnchorElement;
-    expect(feedbackLink.href).toBe('https://t.me/natuselit');
-    expect(feedbackLink.querySelector('svg')).toBeNull();
-
-    await user.selectOptions(screen.getByLabelText(/Нагадувати про backup/), '30');
-    await user.click(screen.getByRole('button', { name: 'Зберегти налаштування' }));
-
-    expect(onSettingsChange).toHaveBeenCalledWith(
-      expect.objectContaining({ backupReminderIntervalDays: 30 })
-    );
+    expect(screen.getByRole('button', { name: 'Експорт даних' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Імпорт даних' })).toBeTruthy();
+    expect(screen.queryByLabelText(/Нагадувати про backup/)).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Допомога' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Про застосунок' })).toBeNull();
   });
 
   it('shows browser installation instructions when the native prompt is unavailable', async () => {
@@ -207,7 +146,6 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -231,7 +169,6 @@ describe('SettingsPage', () => {
           settings={settings}
           onSettingsChange={vi.fn().mockResolvedValue(undefined)}
           onLocalDataReplace={vi.fn()}
-          onOpenCalendarTutorial={vi.fn()}
         />
       </PwaInstallProvider>
     );
@@ -271,7 +208,6 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={onSettingsChange}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -337,7 +273,6 @@ describe('SettingsPage', () => {
         }}
         onSettingsChange={onSettingsChange}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -364,7 +299,6 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={onSettingsChange}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -417,7 +351,6 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={onSettingsChange}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -473,7 +406,6 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 
@@ -495,7 +427,6 @@ describe('SettingsPage', () => {
         settings={settings}
         onSettingsChange={vi.fn().mockResolvedValue(undefined)}
         onLocalDataReplace={vi.fn()}
-        onOpenCalendarTutorial={vi.fn()}
       />
     );
 

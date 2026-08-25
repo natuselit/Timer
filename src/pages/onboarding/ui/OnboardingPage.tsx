@@ -9,11 +9,7 @@ import {
   ShieldCheck,
   type LucideIcon
 } from 'lucide-react';
-import {
-  DEFAULT_SETTINGS,
-  HOLD_DELAY_MAX_MS,
-  HOLD_DELAY_MIN_MS
-} from '../../../entities/settings';
+import { DEFAULT_SETTINGS, SHIFT_HOLD_DELAY_MS } from '../../../entities/settings';
 import './OnboardingPage.css';
 
 export type OnboardingValues = {
@@ -34,7 +30,6 @@ type FormValues = {
   employeeLastName: string;
   monthlySalary: string;
   monthlyBonus: string;
-  holdDelaySeconds: string;
 };
 
 type FormErrors = Partial<Record<keyof FormValues, string>>;
@@ -109,15 +104,12 @@ const TUTORIAL_STEPS: TutorialStep[] = [
 
 const SETTINGS_STEP_INDEX = TUTORIAL_STEPS.length;
 const TOTAL_STEPS = SETTINGS_STEP_INDEX + 1;
-const delayMinSeconds = HOLD_DELAY_MIN_MS / 1000;
-const delayMaxSeconds = HOLD_DELAY_MAX_MS / 1000;
 
 const initialValues: FormValues = {
   employeeFirstName: '',
   employeeLastName: '',
   monthlySalary: '',
-  monthlyBonus: String(DEFAULT_SETTINGS.monthlyBonus),
-  holdDelaySeconds: String(DEFAULT_SETTINGS.arriveHoldDelayMs / 1000)
+  monthlyBonus: String(DEFAULT_SETTINGS.monthlyBonus)
 };
 
 const parsePositiveNumber = (value: string): number => Number(value.replace(',', '.'));
@@ -128,7 +120,6 @@ const validateForm = (values: FormValues): FormErrors => {
   const lastName = values.employeeLastName.trim();
   const monthlySalary = parsePositiveNumber(values.monthlySalary);
   const monthlyBonus = parsePositiveNumber(values.monthlyBonus);
-  const holdDelay = parsePositiveNumber(values.holdDelaySeconds);
 
   if (!firstName) {
     errors.employeeFirstName = 'Вкажіть імʼя.';
@@ -144,14 +135,6 @@ const validateForm = (values: FormValues): FormErrors => {
 
   if (!Number.isFinite(monthlyBonus) || monthlyBonus < 0) {
     errors.monthlyBonus = 'Премія не може бути відʼємною.';
-  }
-
-  if (
-    !Number.isFinite(holdDelay) ||
-    holdDelay < delayMinSeconds ||
-    holdDelay > delayMaxSeconds
-  ) {
-    errors.holdDelaySeconds = `Затримка має бути від ${delayMinSeconds} до ${delayMaxSeconds} с.`;
   }
 
   return errors;
@@ -209,15 +192,13 @@ export function OnboardingPage({ onComplete }: OnboardingPageProps) {
     setSubmitError(null);
 
     try {
-      const holdDelayMs = Math.round(parsePositiveNumber(values.holdDelaySeconds) * 1000);
-
       await onComplete({
         employeeFirstName: values.employeeFirstName.trim(),
         employeeLastName: values.employeeLastName.trim(),
         monthlySalary: parsePositiveNumber(values.monthlySalary),
         monthlyBonus: parsePositiveNumber(values.monthlyBonus),
-        arriveHoldDelayMs: holdDelayMs,
-        leaveHoldDelayMs: holdDelayMs
+        arriveHoldDelayMs: SHIFT_HOLD_DELAY_MS,
+        leaveHoldDelayMs: SHIFT_HOLD_DELAY_MS
       });
     } catch (_error) {
       setSubmitError('Не вдалося зберегти налаштування. Спробуйте ще раз.');
@@ -338,23 +319,6 @@ export function OnboardingPage({ onComplete }: OnboardingPageProps) {
                 />
                 {errors.monthlyBonus ? (
                   <small id="monthlyBonus-error">{errors.monthlyBonus}</small>
-                ) : null}
-              </label>
-
-              <label className="onboarding-page__field">
-                <span>Затримка кнопок, с</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  autoComplete="off"
-                  pattern="[0-9]*([.,][0-9]*)?"
-                  aria-invalid={errors.holdDelaySeconds ? 'true' : 'false'}
-                  aria-describedby={errors.holdDelaySeconds ? 'holdDelaySeconds-error' : undefined}
-                  value={values.holdDelaySeconds}
-                  onChange={updateField('holdDelaySeconds')}
-                />
-                {errors.holdDelaySeconds ? (
-                  <small id="holdDelaySeconds-error">{errors.holdDelaySeconds}</small>
                 ) : null}
               </label>
 

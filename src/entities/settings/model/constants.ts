@@ -29,6 +29,7 @@ export const OVERTIME_DAILY_MAX_MINUTES_MIN = 5;
 export const OVERTIME_DAILY_MAX_MINUTES_MAX = 12 * 60;
 export const DEFAULT_OVERTIME_WEEKDAY_MAX_MINUTES = 4 * 60;
 export const DEFAULT_OVERTIME_SATURDAY_MAX_MINUTES = 8 * 60;
+export const SHIFT_HOLD_DELAY_MS = 1500;
 
 export const isBackupReminderIntervalDays = (
   value: unknown
@@ -84,8 +85,8 @@ export const DEFAULT_SETTINGS: Settings = {
   gradeSalaryBonusPercents: [...DEFAULT_GRADE_SALARY_BONUS_PERCENTS],
   gradeNormPercents: [...DEFAULT_GRADE_NORM_PERCENTS],
   forecastDays: 30,
-  arriveHoldDelayMs: 1500,
-  leaveHoldDelayMs: 1500,
+  arriveHoldDelayMs: SHIFT_HOLD_DELAY_MS,
+  leaveHoldDelayMs: SHIFT_HOLD_DELAY_MS,
   shiftDetectionMode: 'auto',
   themePreference: DEFAULT_THEME_PREFERENCE,
   backupReminderIntervalDays: DEFAULT_BACKUP_REMINDER_INTERVAL_DAYS,
