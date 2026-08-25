@@ -1,0 +1,64 @@
+.pull-to-refresh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.pull-to-refresh__track {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  transform: translate3d(
+    -50%,
+    calc(var(--pull-distance) - 56px),
+    0
+  );
+  will-change: transform;
+}
+
+.pull-to-refresh__indicator {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 50%;
+  background: var(--color-surface);
+  color: var(--color-primary);
+  box-shadow: var(--shadow-subtle);
+  opacity: var(--pull-progress);
+  transform: rotate(var(--pull-rotation));
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+
+.pull-to-refresh__track--ready .pull-to-refresh__indicator {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.pull-to-refresh__track--refreshing .pull-to-refresh__indicator svg {
+  animation: pull-to-refresh-spin 700ms linear infinite;
+}
+
+@keyframes pull-to-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pull-to-refresh__indicator {
+    transition: none;
+  }
+
+  .pull-to-refresh__track--refreshing .pull-to-refresh__indicator svg {
+    animation-duration: 1.4s;
+  }
+}
