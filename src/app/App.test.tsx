@@ -4,12 +4,14 @@
 import 'fake-indexeddb/auto';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../entities/settings';
 import { SettingsRepository } from '../shared/lib/local-db';
 import { App } from './App';
 
 beforeEach(() => {
+  window.localStorage.clear();
   vi.stubGlobal(
     'matchMedia',
     vi.fn(() => ({
@@ -43,22 +45,39 @@ describe('App launch state', () => {
     expect(document.documentElement.hasAttribute('data-app-loading')).toBe(false);
   });
 
-  it('shows the legacy prompt again after the app is remounted', async () => {
+  it('shows the legacy prompt on every third app launch', async () => {
     const user = userEvent.setup();
+    const renderApp = () => render(<StrictMode><App /></StrictMode>);
     vi.spyOn(SettingsRepository.prototype, 'getSettings').mockResolvedValue({
       ...DEFAULT_SETTINGS,
       onboardingCompleted: false
     });
 
-    const firstRender = render(<App />);
+    const firstRender = renderApp();
+    await screen.findByRole('heading', {
+      name: 'Відмічайте початок і кінець зміни'
+    });
+    expect(screen.queryByRole('dialog', { name: 'Доступна нова версія' })).toBeNull();
+
+    firstRender.unmount();
+    const secondRender = renderApp();
+    await screen.findByRole('heading', {
+      name: 'Відмічайте початок і кінець зміни'
+    });
+    expect(screen.queryByRole('dialog', { name: 'Доступна нова версія' })).toBeNull();
+
+    secondRender.unmount();
+    const thirdRender = renderApp();
     expect(await screen.findByRole('dialog', { name: 'Доступна нова версія' })).toBeTruthy();
 
     await user.click(screen.getByRole('button', { name: 'Залишитися тут' }));
     expect(screen.queryByRole('dialog', { name: 'Доступна нова версія' })).toBeNull();
 
-    firstRender.unmount();
-    render(<App />);
-
-    expect(await screen.findByRole('dialog', { name: 'Доступна нова версія' })).toBeTruthy();
+    thirdRender.unmount();
+    renderApp();
+    await screen.findByRole('heading', {
+      name: 'Відмічайте початок і кінець зміни'
+    });
+    expect(screen.queryByRole('dialog', { name: 'Доступна нова версія' })).toBeNull();
   });
 });
