@@ -633,6 +633,10 @@
   background: color-mix(in srgb, var(--color-primary-soft) 36%, var(--color-surface));
 }
 
+.main-page__overtime-metrics > div:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 .main-page__overtime-metrics dt,
 .main-page__overtime-metrics dd {
   margin: 0;

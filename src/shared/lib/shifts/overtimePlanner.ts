@@ -70,6 +70,7 @@ export type TodayOvertimeRecommendation = {
 export type MonthlyOvertimePlan = {
   month: string;
   plannedMinutes: number;
+  workedMinutes: number;
   limitMinutes: number;
   usedMinutes: number;
   remainingMinutes: number;
@@ -546,7 +547,8 @@ export const calculateMonthlyOvertimePlan = ({
     })
     .filter(({ capacityMinutes }) => capacityMinutes > 0);
   const hourlyRate = calculateHourlyRateFromMonthlySalary(baseSalaryAmount, today);
-  const earnedAmount = calculateMonthShiftSummary(monthShifts, now).totalAmount;
+  const monthShiftSummary = calculateMonthShiftSummary(monthShifts, now);
+  const earnedAmount = monthShiftSummary.totalAmount;
   const overtimeMaximumAmount = (hourlyRate / 60) * limitMinutes * 1.5;
   const monthlyBonusAmount = Math.max(0, monthlyBonus);
   const gradeBonusAmount = calculateGradeMonthlyBonus(
@@ -584,6 +586,7 @@ export const calculateMonthlyOvertimePlan = ({
   return {
     month: monthKey,
     plannedMinutes,
+    workedMinutes: monthShiftSummary.totalMinutes,
     limitMinutes,
     usedMinutes,
     remainingMinutes,

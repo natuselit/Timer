@@ -472,6 +472,10 @@ function OvertimePlannerCard({
           <dd>{formatDurationMinutes(plan.plannedMinutes)}</dd>
         </div>
         <div>
+          <dt>Відпрацьовано</dt>
+          <dd>{formatDurationMinutes(plan.workedMinutes)}</dd>
+        </div>
+        <div>
           <dt>Ліміт</dt>
           <dd>{formatDurationMinutes(plan.limitMinutes)}</dd>
         </div>

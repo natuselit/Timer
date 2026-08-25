@@ -560,6 +560,7 @@ describe('MainPage active shift', () => {
     const moneyPanel = moneyProgress.closest('.main-page__money-panel') as HTMLElement | null;
     expect(moneyPanel).toBeTruthy();
     expect(screen.getByText('План місяця')).toBeTruthy();
+    expect(screen.getByText('Відпрацьовано')).toBeTruthy();
     expect(screen.getAllByText('Ліміт')).toHaveLength(1);
     expect(
       screen.queryByLabelText('Ліміт перепрацювань: 10% від планових годин')

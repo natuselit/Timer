@@ -74,6 +74,7 @@ describe('monthly overtime planner', () => {
     });
 
     expect(plan.earnedAmount).toBeCloseTo(510);
+    expect(plan.workedMinutes).toBe(150);
     expect(plan.baseSalaryAmount).toBe(22_400);
     expect(plan.overtimeMaximumAmount).toBeCloseTo(3_360);
     expect(plan.monthlyBonusAmount).toBe(1_000);
