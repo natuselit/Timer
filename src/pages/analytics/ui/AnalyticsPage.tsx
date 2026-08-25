@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CalendarCheck2,
@@ -10,16 +10,23 @@ import {
   TrendingUp,
   type LucideIcon
 } from 'lucide-react';
-import type { Settings } from '../../../entities/settings';
+import {
+  calculateCumulativeGradePercent,
+  type Settings
+} from '../../../entities/settings';
 import type { LocalDateString, Shift, ShiftType } from '../../../entities/shift';
 import { getShiftsBetween, localDb, ShiftRepository } from '../../../shared/lib/local-db';
 import {
   formatDurationMinutes,
   formatShortMinuteDuration,
   formatShortNumericDate,
+  closeCalendarDateRange,
+  getCalendarMonthRange,
   getDateFromDateTime,
   getNextHeldCalendarRange,
   getSingleDateRange,
+  isCalendarRangeWithin,
+  isFullCalendarMonthRange,
   shouldResetCalendarRangeOnMonthNavigation,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
@@ -53,6 +60,7 @@ type AnalyticsPageProps = {
   activeRangePreset: CalendarRangePreset | null;
   isAllTimePresetEnabled: boolean;
   onRangePresetSelect: (preset: CalendarRangePreset) => void;
+  dataRevision?: number;
 };
 
 type CalendarMonth = {
@@ -61,38 +69,6 @@ type CalendarMonth = {
 };
 
 const shiftRepository = new ShiftRepository(localDb);
-
-const toLocalDateString = (date: Date): LocalDateString =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
-    date.getDate()
-  ).padStart(2, '0')}`;
-
-const getMonthRange = (
-  year: number,
-  month: number
-): { start: LocalDateString; end: LocalDateString } => ({
-  start: toLocalDateString(new Date(year, month - 1, 1)),
-  end: toLocalDateString(new Date(year, month, 0))
-});
-
-const getSelectedRangeBounds = (
-  range: CalendarDateRange
-): { start: LocalDateString; end: LocalDateString } => ({
-  start: range.start,
-  end: range.end ?? range.start
-});
-
-const isFullMonthRange = ({ start, end }: { start: LocalDateString; end: LocalDateString }): boolean => {
-  const [year, month, day] = start.split('-').map(Number);
-
-  if (day !== 1) {
-    return false;
-  }
-
-  const lastDay = new Date(year, month, 0).getDate();
-
-  return end === `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-};
 
 const getShiftCountLabel = (value: number): string => {
   const lastTwoDigits = value % 100;
@@ -255,7 +231,8 @@ export function AnalyticsPage({
   onSelectedRangeChange,
   activeRangePreset,
   isAllTimePresetEnabled,
-  onRangePresetSelect
+  onRangePresetSelect,
+  dataRevision = 0
 }: AnalyticsPageProps) {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [previousShifts, setPreviousShifts] = useState<Shift[]>([]);
@@ -267,14 +244,15 @@ export function AnalyticsPage({
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [comparisonPreset, setComparisonPreset] =
     useState<AnalyticsComparisonPreset>('month');
+  const loadRequestSequenceRef = useRef(0);
   const calendarMonthRange = useMemo(
-    () => getMonthRange(calendarMonth.year, calendarMonth.month),
+    () => getCalendarMonthRange(calendarMonth),
     [calendarMonth]
   );
   const loadedDateRange = useMemo(
     () =>
       selectedRange
-        ? getSelectedRangeBounds(selectedRange)
+        ? closeCalendarDateRange(selectedRange)
         : calendarMonthRange,
     [selectedRange, calendarMonthRange]
   );
@@ -284,8 +262,13 @@ export function AnalyticsPage({
     [comparisonPreset, loadedDateRange, today]
   );
   const previousDateRange = comparisonRanges.previous;
+  const previousPeriodNow = useMemo(
+    () => toLocalIsoString(new Date()),
+    [previousDateRange.end, previousDateRange.start]
+  );
 
   const loadAnalytics = useCallback(async () => {
+    const requestSequence = ++loadRequestSequenceRef.current;
     setIsLoading(true);
     setError(null);
 
@@ -293,22 +276,44 @@ export function AnalyticsPage({
       const currentDate = new Date();
 
       setNow(toLocalIsoString(currentDate));
-      const [nextShifts, nextCalendarShifts] = await Promise.all([
-        getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
-        getShiftsBetween(shiftRepository, calendarMonthRange.start, calendarMonthRange.end)
-      ]);
+      const nextCalendarShifts = await getShiftsBetween(
+        shiftRepository,
+        calendarMonthRange.start,
+        calendarMonthRange.end
+      );
+      const nextShifts = isCalendarRangeWithin(loadedDateRange, calendarMonthRange)
+        ? nextCalendarShifts.filter(
+            (shift) => shift.date >= loadedDateRange.start && shift.date <= loadedDateRange.end
+          )
+        : await getShiftsBetween(
+            shiftRepository,
+            loadedDateRange.start,
+            loadedDateRange.end
+          );
+
+      if (requestSequence !== loadRequestSequenceRef.current) {
+        return;
+      }
 
       setShifts(nextShifts);
       setCalendarShifts(nextCalendarShifts);
     } catch {
-      setError('Не вдалося завантажити аналітику.');
+      if (requestSequence === loadRequestSequenceRef.current) {
+        setError('Не вдалося завантажити аналітику.');
+      }
     } finally {
-      setIsLoading(false);
+      if (requestSequence === loadRequestSequenceRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [calendarMonthRange, loadedDateRange]);
+  }, [calendarMonthRange, dataRevision, loadedDateRange]);
 
   useEffect(() => {
     void loadAnalytics();
+
+    return () => {
+      loadRequestSequenceRef.current += 1;
+    };
   }, [loadAnalytics]);
 
   useEffect(() => {
@@ -337,15 +342,19 @@ export function AnalyticsPage({
     return () => {
       isCurrentRequest = false;
     };
-  }, [previousDateRange.end, previousDateRange.start]);
+  }, [dataRevision, previousDateRange.end, previousDateRange.start]);
 
   useEffect(() => {
+    if (!shifts.some((shift) => shift.endTime === null)) {
+      return;
+    }
+
     const intervalId = window.setInterval(() => {
       setNow(toLocalIsoString(new Date()));
-    }, 15_000);
+    }, 60_000);
 
     return () => window.clearInterval(intervalId);
-  }, []);
+  }, [shifts]);
 
   const summary = useMemo(
     () =>
@@ -355,9 +364,24 @@ export function AnalyticsPage({
         periodStart: loadedDateRange.start,
         periodEnd: loadedDateRange.end,
         monthlyBonus: settings.monthlyBonus,
-        includeMonthlyBonus: isFullMonthRange(loadedDateRange)
+        includeMonthlyBonus: isFullCalendarMonthRange(loadedDateRange),
+        fallbackGradeBonusSnapshot: {
+          monthlySalarySnapshot: settings.monthlySalary,
+          cumulativeSalaryBonusPercent: calculateCumulativeGradePercent(
+            settings.currentGrade,
+            settings.gradeSalaryBonusPercents
+          )
+        }
       }),
-    [shifts, now, loadedDateRange, settings.monthlyBonus]
+    [
+      shifts,
+      now,
+      loadedDateRange,
+      settings.monthlyBonus,
+      settings.monthlySalary,
+      settings.currentGrade,
+      settings.gradeSalaryBonusPercents
+    ]
   );
   const comparisonCurrentShifts = useMemo(
     () =>
@@ -372,29 +396,33 @@ export function AnalyticsPage({
     () =>
       calculateAnalyticsSummary({
         shifts: comparisonCurrentShifts,
-        now,
+        now: previousPeriodNow,
         periodStart: comparisonRanges.current.start,
         periodEnd: comparisonRanges.current.end,
         monthlyBonus: 0,
         includeMonthlyBonus: false
       }),
-    [comparisonCurrentShifts, comparisonRanges.current, now]
+    [comparisonCurrentShifts, comparisonRanges.current, previousPeriodNow]
   );
   const previousSummary = useMemo(
     () =>
       calculateAnalyticsSummary({
         shifts: previousShifts,
-        now,
+        now: previousPeriodNow,
         periodStart: previousDateRange.start,
         periodEnd: previousDateRange.end,
         monthlyBonus: 0,
         includeMonthlyBonus: false
       }),
-    [previousShifts, now, previousDateRange]
+    [previousDateRange, previousPeriodNow, previousShifts]
   );
   const periodComparison = useMemo(
     () => calculateAnalyticsPeriodComparison(comparisonCurrentSummary, previousSummary),
     [comparisonCurrentSummary, previousSummary]
+  );
+  const calendarShiftMarkers = useMemo(
+    () => calendarShifts.map((shift) => ({ id: shift.id, date: shift.date })),
+    [calendarShifts]
   );
   const moveMonth = (direction: -1 | 1) => {
     const next = new Date(calendarMonth.year, calendarMonth.month - 1 + direction, 1);
@@ -443,7 +471,7 @@ export function AnalyticsPage({
         shiftCountTitle="Змін"
         hoursLabel={formatMoney(summary.currentSalary, settings.incognitoEnabled)}
         hoursTitle="Зароблено"
-        shifts={calendarShifts.map((shift) => ({ id: shift.id, date: shift.date }))}
+        shifts={calendarShiftMarkers}
         selectedRange={selectedRange}
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}

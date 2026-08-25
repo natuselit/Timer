@@ -46,8 +46,11 @@ import {
   formatShortNumericDate,
   formatTime,
   countWeekdaysInDateRange,
+  closeCalendarDateRange,
+  getCalendarMonthRange,
   getNextHeldCalendarRange,
   getSingleDateRange,
+  isCalendarRangeWithin,
   shouldResetCalendarRangeOnMonthNavigation,
   toLocalIsoString
 } from '../../../shared/lib/date-time';
@@ -85,6 +88,7 @@ type SchedulePageProps = {
   activeRangePreset: CalendarRangePreset | null;
   isAllTimePresetEnabled: boolean;
   onRangePresetSelect: (preset: CalendarRangePreset) => void;
+  dataRevision?: number;
   onDataChange?: () => void;
 };
 
@@ -148,24 +152,6 @@ const getScheduleStartTime = (item: EnterpriseScheduleItem): string =>
 const getScheduleEndTime = (item: EnterpriseScheduleItem): string =>
   item.enterpriseEndTime ?? item.plannedEndTime;
 
-const toDateKey = (year: number, month: number, day: number): LocalDateString =>
-  `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-const getMonthRange = (
-  year: number,
-  month: number
-): { start: LocalDateString; end: LocalDateString } => ({
-  start: toDateKey(year, month, 1),
-  end: toDateKey(year, month, new Date(year, month, 0).getDate())
-});
-
-const getSelectedRangeBounds = (
-  range: CalendarDateRange
-): { start: LocalDateString; end: LocalDateString } => ({
-  start: range.start,
-  end: range.end ?? range.start
-});
-
 const getActualShiftDurationMinutes = (shift: Shift): number => {
   if (!shift.endTime) {
     return 0;
@@ -224,6 +210,7 @@ export function SchedulePage({
   activeRangePreset,
   isAllTimePresetEnabled,
   onRangePresetSelect,
+  dataRevision = 0,
   onDataChange
 }: SchedulePageProps) {
   const importInputRef = useRef<HTMLInputElement>(null);
@@ -244,6 +231,7 @@ export function SchedulePage({
   const [pendingImportMessage, setPendingImportMessage] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestSequenceRef = useRef(0);
 
   const canImport =
     pdfParseResult !== null &&
@@ -251,13 +239,13 @@ export function SchedulePage({
     !isReadingPdf &&
     !isImporting;
   const calendarMonthRange = useMemo(
-    () => getMonthRange(calendarMonth.year, calendarMonth.month),
+    () => getCalendarMonthRange(calendarMonth),
     [calendarMonth]
   );
   const loadedDateRange = useMemo(
     () =>
       selectedRange
-        ? getSelectedRangeBounds(selectedRange)
+        ? closeCalendarDateRange(selectedRange)
         : calendarMonthRange,
     [selectedRange, calendarMonthRange]
   );
@@ -291,34 +279,57 @@ export function SchedulePage({
         reviewedFingerprintByShiftId.get(warning.shiftId) !== warning.fingerprint
     );
   }, [reviewedWarnings, scheduleControl.warnings]);
+  const calendarScheduleMarkers = useMemo(
+    () => calendarScheduleItems.map((item) => ({ id: item.id, date: item.date })),
+    [calendarScheduleItems]
+  );
 
   const loadSchedule = useCallback(async () => {
+    const requestSequence = ++loadRequestSequenceRef.current;
     setIsLoading(true);
     setError(null);
 
     try {
-      const [
-        nextScheduleItems,
-        nextShifts,
-        nextCalendarScheduleItems,
-        nextCalendarShifts,
-        nextReviewedWarnings
-      ] =
-        await Promise.all([
-          getEnterpriseScheduleBetween(
-            enterpriseScheduleRepository,
-            loadedDateRange.start,
-            loadedDateRange.end
-          ),
-          getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
-          getEnterpriseScheduleBetween(
-            enterpriseScheduleRepository,
-            calendarMonthRange.start,
-            calendarMonthRange.end
-          ),
-          getShiftsBetween(shiftRepository, calendarMonthRange.start, calendarMonthRange.end),
-          scheduleWarningReviewRepository.getAll()
-        ]);
+      const [nextCalendarScheduleItems, nextCalendarShifts] = await Promise.all([
+        getEnterpriseScheduleBetween(
+          enterpriseScheduleRepository,
+          calendarMonthRange.start,
+          calendarMonthRange.end
+        ),
+        getShiftsBetween(
+          shiftRepository,
+          calendarMonthRange.start,
+          calendarMonthRange.end
+        )
+      ]);
+      const isLoadedRangeInCalendar = isCalendarRangeWithin(
+        loadedDateRange,
+        calendarMonthRange
+      );
+      const [nextScheduleItems, nextShifts] = isLoadedRangeInCalendar
+        ? [
+            nextCalendarScheduleItems.filter(
+              (item) => item.date >= loadedDateRange.start && item.date <= loadedDateRange.end
+            ),
+            nextCalendarShifts.filter(
+              (shift) => shift.date >= loadedDateRange.start && shift.date <= loadedDateRange.end
+            )
+          ]
+        : await Promise.all([
+            getEnterpriseScheduleBetween(
+              enterpriseScheduleRepository,
+              loadedDateRange.start,
+              loadedDateRange.end
+            ),
+            getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end)
+          ]);
+      const nextReviewedWarnings = await scheduleWarningReviewRepository.getByShiftIds(
+        nextShifts.map((shift) => shift.id)
+      );
+
+      if (requestSequence !== loadRequestSequenceRef.current) {
+        return;
+      }
 
       setScheduleItems(nextScheduleItems);
       setShifts(nextShifts);
@@ -326,14 +337,22 @@ export function SchedulePage({
       setCalendarShifts(nextCalendarShifts);
       setReviewedWarnings(nextReviewedWarnings);
     } catch {
-      setError('Не вдалося завантажити графік.');
+      if (requestSequence === loadRequestSequenceRef.current) {
+        setError('Не вдалося завантажити графік.');
+      }
     } finally {
-      setIsLoading(false);
+      if (requestSequence === loadRequestSequenceRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [calendarMonthRange, loadedDateRange]);
+  }, [calendarMonthRange, dataRevision, loadedDateRange]);
 
   useEffect(() => {
     void loadSchedule();
+
+    return () => {
+      loadRequestSequenceRef.current += 1;
+    };
   }, [loadSchedule]);
 
   useEffect(() => {
@@ -383,7 +402,7 @@ export function SchedulePage({
   };
 
   const getComparisonForMonth = async (month: CalendarMonth) => {
-    const monthRange = getMonthRange(month.year, month.month);
+    const monthRange = getCalendarMonthRange(month);
     const [monthScheduleItems, monthShifts] = await Promise.all([
       getEnterpriseScheduleBetween(
         enterpriseScheduleRepository,
@@ -535,11 +554,10 @@ export function SchedulePage({
 
     try {
       const result = await importParsedEnterpriseSchedule(
-        enterpriseScheduleRepository,
+        localDb,
         pdfParseResult,
         toLocalIsoString(new Date()),
         {
-          shiftRepository,
           settings
         }
       );
@@ -570,7 +588,6 @@ export function SchedulePage({
         setMessage(importMessage);
       }
 
-      onDataChange?.();
       onSelectedRangeChange(null);
       if (primaryMonth) {
         onCalendarMonthChange(primaryMonth);
@@ -580,7 +597,11 @@ export function SchedulePage({
       if (importInputRef.current) {
         importInputRef.current.value = '';
       }
-      await loadSchedule();
+      if (onDataChange) {
+        onDataChange();
+      } else {
+        await loadSchedule();
+      }
     } catch {
       setError('Не вдалося зберегти графік.');
     } finally {
@@ -604,7 +625,11 @@ export function SchedulePage({
         scheduleId
       );
       setMessage('Зміну синхронізовано з графіком підприємства.');
-      await loadSchedule();
+      if (onDataChange) {
+        onDataChange();
+      } else {
+        await loadSchedule();
+      }
       if (discrepancyModal) {
         await refreshDiscrepancyModal(discrepancyModal.month);
       }
@@ -626,7 +651,11 @@ export function SchedulePage({
     try {
       await skipEnterpriseScheduleDiscrepancy(enterpriseScheduleRepository, scheduleId);
       setMessage('Розбіжність позначено як пропущену.');
-      await loadSchedule();
+      if (onDataChange) {
+        onDataChange();
+      } else {
+        await loadSchedule();
+      }
       if (discrepancyModal) {
         await refreshDiscrepancyModal(discrepancyModal.month);
       }
@@ -681,7 +710,7 @@ export function SchedulePage({
         shiftCountTitle="Відробив"
         hoursLabel={formatDurationClock(periodNormMinutes)}
         hoursTitle="Норма"
-        shifts={calendarScheduleItems.map((item) => ({ id: item.id, date: item.date }))}
+        shifts={calendarScheduleMarkers}
         selectedRange={selectedRange}
         onPreviousMonth={() => moveMonth(-1)}
         onNextMonth={() => moveMonth(1)}

@@ -618,16 +618,6 @@
   color: var(--color-info);
 }
 
-.analytics-page__note--warning {
-  border-color: var(--color-warning-border);
-  background: var(--color-warning-surface);
-  color: var(--color-warning);
-}
-
-.analytics-page__note--warning span {
-  color: var(--color-warning);
-}
-
 .analytics-page__discipline {
   gap: 14px;
   border-color: var(--color-primary-border-muted);

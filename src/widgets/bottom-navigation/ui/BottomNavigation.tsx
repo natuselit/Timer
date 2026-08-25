@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { BarChart3, CalendarCheck2, CalendarDays, Settings, Timer } from 'lucide-react';
 import { navigationItems, type NavigationItem } from '../../../shared/config/navigation';
 import './BottomNavigation.css';
@@ -15,7 +16,10 @@ type BottomNavigationProps = {
   onSelect: (item: NavigationItem['id']) => void;
 };
 
-export function BottomNavigation({ activeItem, onSelect }: BottomNavigationProps) {
+export const BottomNavigation = memo(function BottomNavigation({
+  activeItem,
+  onSelect
+}: BottomNavigationProps) {
   return (
     <nav className="bottom-navigation" aria-label="Основна навігація">
       {navigationItems.map((item) => {
@@ -37,4 +41,4 @@ export function BottomNavigation({ activeItem, onSelect }: BottomNavigationProps
       })}
     </nav>
   );
-}
+});

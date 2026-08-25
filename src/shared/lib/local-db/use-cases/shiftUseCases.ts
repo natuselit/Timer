@@ -1,6 +1,7 @@
 import {
   detectShiftType,
   getPlannedShiftWindow,
+  assertWorkTicketNorm,
   SHIFT_NOTE_MAX_LENGTH,
   validateAndSortWorkTickets,
   type CoefficientMode,
@@ -74,16 +75,6 @@ const assertDowntimeMinutes = (downtimeMinutes: number): void => {
   }
 };
 
-const assertTicketNorm = (normPerEightHours: number): void => {
-  if (!Number.isFinite(normPerEightHours) || normPerEightHours <= 0) {
-    throw new Error('Норма має бути більшою за 0.');
-  }
-
-  if (normPerEightHours > 999) {
-    throw new Error('Норма має бути не більшою за 999.');
-  }
-};
-
 export const createShift = (
   repository: ShiftRepository,
   input: CreateShiftInput
@@ -114,14 +105,11 @@ export const createShift = (
   });
 };
 
-export const createManualShift = (
-  repository: ShiftRepository,
-  input: CreateManualShiftInput
-): Promise<Shift> => {
+export const buildManualShift = (input: CreateManualShiftInput): Shift => {
   const plannedWindow = getPlannedShiftWindow(input.date, input.type, input.startTime);
   const now = input.now ?? new Date().toISOString();
 
-  return repository.createShift({
+  return {
     id: input.id ?? createId(),
     date: input.date,
     type: input.type,
@@ -139,8 +127,13 @@ export const createManualShift = (
     isAutoClosed: false,
     createdAt: now,
     updatedAt: now
-  });
+  };
 };
+
+export const createManualShift = (
+  repository: ShiftRepository,
+  input: CreateManualShiftInput
+): Promise<Shift> => repository.createShift(buildManualShift(input));
 
 export const updateShift = (
   repository: ShiftRepository,
@@ -223,7 +216,7 @@ export const addWorkTicketToActiveShift = async (
     id?: string;
   }
 ): Promise<Shift> => {
-  assertTicketNorm(input.normPerEightHours);
+  assertWorkTicketNorm(input.normPerEightHours);
 
   const shift = await repository.getShiftById(input.shiftId);
 
@@ -387,7 +380,7 @@ export const updateWorkTicketInActiveShift = async (
     updatedAt: ISODateTimeString;
   }
 ): Promise<Shift> => {
-  assertTicketNorm(input.normPerEightHours);
+  assertWorkTicketNorm(input.normPerEightHours);
   if (input.actualQuantity !== undefined && input.actualQuantity !== null) {
     assertActualQuantity(input.actualQuantity);
   }

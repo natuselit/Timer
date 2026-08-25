@@ -1,10 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { MainPage } from '../pages/main';
-import { OnboardingPage, type OnboardingValues } from '../pages/onboarding';
-import {
-  DataMigrationPage,
-  LegacyMigrationPrompt
-} from '../pages/data-migration';
+import type { OnboardingValues } from '../pages/onboarding';
 import type { Settings } from '../entities/settings';
 import {
   localDb,
@@ -20,6 +16,16 @@ import {
 import { toLocalIsoString } from '../shared/lib/date-time';
 import { synchronizeTheme } from '../shared/lib/theme';
 import { AppSplash } from './AppSplash';
+
+const OnboardingPage = lazy(() =>
+  import('../pages/onboarding').then((module) => ({ default: module.OnboardingPage }))
+);
+const DataMigrationPage = lazy(() =>
+  import('../pages/data-migration').then((module) => ({ default: module.DataMigrationPage }))
+);
+const LegacyMigrationPrompt = lazy(() =>
+  import('../pages/data-migration').then((module) => ({ default: module.LegacyMigrationPrompt }))
+);
 
 const settingsRepository = new SettingsRepository(localDb);
 const sitesMigrationRepository = new SitesMigrationRepository(localDb);
@@ -183,11 +189,11 @@ export function App() {
   }
 
   return (
-    <>
+    <Suspense fallback={<AppSplash />}>
       {appContent}
       {isLegacyHost && isLegacyPromptOpen ? (
         <LegacyMigrationPrompt onDismiss={() => setIsLegacyPromptOpen(false)} />
       ) : null}
-    </>
+    </Suspense>
   );
 }

@@ -154,55 +154,6 @@
         document.documentElement.style.colorScheme = theme;
         document.documentElement.style.backgroundColor = '#0b0f14';
 
-        const isIPhone = /iPhone/i.test(navigator.userAgent);
-
-        if (isIPhone) {
-          const pixelRatio = Math.max(1, window.devicePixelRatio || 1);
-          const width = Math.round(Math.min(screen.width, screen.height) * pixelRatio);
-          const height = Math.round(Math.max(screen.width, screen.height) * pixelRatio);
-          const canvas = document.createElement('canvas');
-          const context = canvas.getContext('2d');
-
-          canvas.width = width;
-          canvas.height = height;
-
-          if (context) {
-            ['light', 'dark'].forEach((colorScheme) => {
-              const iconRadius = Math.round(Math.min(width, height) * 0.1);
-              const iconCenterY = Math.round(height * 0.43);
-
-              context.fillStyle = '#0b0f14';
-              context.fillRect(0, 0, width, height);
-              context.fillStyle = '#2563eb';
-              context.beginPath();
-              context.arc(width / 2, iconCenterY, iconRadius, 0, Math.PI * 2);
-              context.fill();
-              context.fillStyle = '#f8fafc';
-              context.beginPath();
-              context.arc(width / 2, iconCenterY, iconRadius * 0.62, 0, Math.PI * 2);
-              context.fill();
-              context.strokeStyle = '#2563eb';
-              context.lineCap = 'round';
-              context.lineJoin = 'round';
-              context.lineWidth = Math.max(8, iconRadius * 0.13);
-              context.beginPath();
-              context.moveTo(width / 2, iconCenterY - iconRadius * 0.34);
-              context.lineTo(width / 2, iconCenterY);
-              context.lineTo(width / 2 + iconRadius * 0.27, iconCenterY + iconRadius * 0.27);
-              context.stroke();
-              context.fillStyle = '#f3f6fb';
-              context.font = `700 ${Math.round(iconRadius * 0.34)}px -apple-system, BlinkMacSystemFont, sans-serif`;
-              context.textAlign = 'center';
-              context.fillText('Облік часу', width / 2, iconCenterY + iconRadius * 1.65);
-
-              const startupImage = document.createElement('link');
-              startupImage.rel = 'apple-touch-startup-image';
-              startupImage.media = `(prefers-color-scheme: ${colorScheme})`;
-              startupImage.href = canvas.toDataURL('image/png');
-              document.head.append(startupImage);
-            });
-          }
-        }
       })();
     </script>
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%pwa.svg" />

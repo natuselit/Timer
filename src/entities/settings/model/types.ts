@@ -1,8 +1,6 @@
-import type { ShiftDetectionMode } from '../../shift';
+import type { Grade, GradePercentSet, ShiftDetectionMode } from '../../../shared/model';
 
-export type Grade = 1 | 2 | 3 | 4;
-
-export type GradePercentSet = [number, number, number, number];
+export type { Grade, GradePercentSet, ShiftDetectionMode } from '../../../shared/model';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 

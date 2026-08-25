@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import type { CoefficientMode, Shift } from '../../../entities/shift';
-import { localDb } from '../../../shared/lib/local-db';
+import { localDb, ShiftRepository } from '../../../shared/lib/local-db';
 import { AnalyticsPage } from './AnalyticsPage';
 
 const settings: Settings = {
@@ -102,10 +102,79 @@ beforeEach(async () => {
 afterEach(async () => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
   await localDb.shifts.clear();
 });
 
 describe('AnalyticsPage', () => {
+  it('refreshes active-shift analytics no more than once per minute', async () => {
+    await localDb.shifts.put(makeShift('active', '2026-07-29', 'auto', {
+      endTime: null,
+      updatedAt: '2026-07-29T06:30:00.000+03:00'
+    }));
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+
+    render(
+      <AnalyticsPage
+        settings={settings}
+        calendarMonth={{ year: 2026, month: 7 }}
+        selectedRange={{ start: '2026-07-01', end: '2026-07-31' }}
+        onCalendarMonthChange={vi.fn()}
+        onSelectedRangeChange={vi.fn()}
+        activeRangePreset="month"
+        isAllTimePresetEnabled
+        onRangePresetSelect={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Відпрацьовано' })).toBeTruthy();
+    await waitFor(() => {
+      expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 60_000);
+    });
+    expect(setIntervalSpy).not.toHaveBeenCalledWith(expect.any(Function), 15_000);
+  });
+
+  it('ignores an older analytics response after the visible month changes', async () => {
+    let resolveJuly!: (shifts: Shift[]) => void;
+    const julyRequest = new Promise<Shift[]>((resolve) => {
+      resolveJuly = resolve;
+    });
+    const augustShift = makeShift('august-latest', '2026-08-05', 'x1');
+    vi.spyOn(ShiftRepository.prototype, 'getShiftsBetween').mockImplementation(
+      (start) => {
+        if (start === '2026-07-01') {
+          return julyRequest;
+        }
+
+        return Promise.resolve(start === '2026-08-01' ? [augustShift] : []);
+      }
+    );
+    const commonProps = {
+      settings,
+      selectedRange: null,
+      onCalendarMonthChange: vi.fn(),
+      onSelectedRangeChange: vi.fn(),
+      activeRangePreset: 'month' as const,
+      isAllTimePresetEnabled: true,
+      onRangePresetSelect: vi.fn()
+    };
+    const { container, rerender } = render(
+      <AnalyticsPage {...commonProps} calendarMonth={{ year: 2026, month: 7 }} />
+    );
+
+    rerender(<AnalyticsPage {...commonProps} calendarMonth={{ year: 2026, month: 8 }} />);
+    expect(await screen.findByRole('heading', { name: 'Відпрацьовано' })).toBeTruthy();
+    expect(container.querySelector('[data-coefficient="1"]')).toBeTruthy();
+
+    await act(async () => {
+      resolveJuly([makeShift('july-stale', '2026-07-05', 'x2')]);
+      await julyRequest;
+    });
+
+    expect(container.querySelector('[data-coefficient="2"]')).toBeNull();
+    expect(container.querySelector('[data-coefficient="1"]')).toBeTruthy();
+  });
+
   it('shows coefficients, period comparison, discipline and explicit G1 targets', async () => {
     const { container } = render(
       <AnalyticsPage

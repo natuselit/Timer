@@ -10,6 +10,11 @@ export type CalendarDateRange = {
   end: LocalDateString | null;
 };
 
+export type ClosedCalendarDateRange = {
+  start: LocalDateString;
+  end: LocalDateString;
+};
+
 export type CalendarRangePreset = 'today' | 'month' | 'all';
 
 type CalendarPresetSelection = {
@@ -26,10 +31,31 @@ export const getLocalDateKey = (date: Date): LocalDateString =>
 export const getCalendarMonthRange = ({
   year,
   month
-}: CalendarMonth): CalendarDateRange => ({
+}: CalendarMonth): ClosedCalendarDateRange => ({
   start: toDateKey(year, month, 1),
   end: toDateKey(year, month, new Date(year, month, 0).getDate())
 });
+
+export const closeCalendarDateRange = (
+  range: CalendarDateRange
+): ClosedCalendarDateRange => ({
+  start: range.start,
+  end: range.end ?? range.start
+});
+
+export const isFullCalendarMonthRange = ({
+  start,
+  end
+}: ClosedCalendarDateRange): boolean => {
+  const [year, month, day] = start.split('-').map(Number);
+
+  return day === 1 && getCalendarMonthRange({ year, month }).end === end;
+};
+
+export const isCalendarRangeWithin = (
+  range: ClosedCalendarDateRange,
+  container: ClosedCalendarDateRange
+): boolean => range.start >= container.start && range.end <= container.end;
 
 export const getSingleDateRange = (date: LocalDateString): CalendarDateRange => ({
   start: date,

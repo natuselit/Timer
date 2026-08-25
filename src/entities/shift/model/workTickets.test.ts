@@ -163,6 +163,24 @@ describe('validateAndSortWorkTickets', () => {
       )
     ).toThrow('Ручний відсоток');
   });
+
+  it('accepts the maximum norm and rejects larger or non-finite values', () => {
+    expect(() =>
+      validateAndSortWorkTickets(
+        [makeTicket({ normPerEightHours: 999 })],
+        completedBounds
+      )
+    ).not.toThrow();
+
+    for (const normPerEightHours of [1_000, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        validateAndSortWorkTickets(
+          [makeTicket({ normPerEightHours })],
+          completedBounds
+        )
+      ).toThrow('не більшою за 999');
+    }
+  });
 });
 
 describe('calculateTicketProductionSummary', () => {

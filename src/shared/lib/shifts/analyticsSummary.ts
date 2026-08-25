@@ -5,8 +5,7 @@ import {
   COEFFICIENT_VALUES,
   type ISODateTimeString,
   type LocalDateString,
-  type Shift,
-  type ShiftType
+  type Shift
 } from '../../../entities/shift';
 import {
   calculateGradeMonthlyBonus,
@@ -83,6 +82,10 @@ export type CalculateAnalyticsSummaryInput = {
   periodEnd: LocalDateString;
   monthlyBonus: number;
   includeMonthlyBonus: boolean;
+  fallbackGradeBonusSnapshot?: {
+    monthlySalarySnapshot: number;
+    cumulativeSalaryBonusPercent: number;
+  };
 };
 
 const toLocalDateString = (date: Date): LocalDateString =>
@@ -124,7 +127,8 @@ export const calculateAnalyticsSummary = ({
   periodStart,
   periodEnd,
   monthlyBonus,
-  includeMonthlyBonus
+  includeMonthlyBonus,
+  fallbackGradeBonusSnapshot
 }: CalculateAnalyticsSummaryInput): AnalyticsSummary => {
   const nowDate = new Date(now);
   const today = toLocalDateString(nowDate);
@@ -249,14 +253,21 @@ export const calculateAnalyticsSummary = ({
   const latestGradeShift = [...completedShifts]
     .filter((shift) => shift.gradeSnapshot !== null)
     .sort((left, right) => right.date.localeCompare(left.date))[0];
-  const gradeBonus =
-    includeMonthlyBonus && latestGradeShift?.gradeSnapshot
-      ? calculateGradeMonthlyBonus(
-          calculateMonthlySalaryFromHourlyRate(
-            latestGradeShift.baseHourlyRateSnapshot,
-            latestGradeShift.date
-          ),
+  const gradeBonusSnapshot = latestGradeShift?.gradeSnapshot
+    ? {
+        monthlySalarySnapshot: calculateMonthlySalaryFromHourlyRate(
+          latestGradeShift.baseHourlyRateSnapshot,
+          latestGradeShift.date
+        ),
+        cumulativeSalaryBonusPercent:
           latestGradeShift.gradeSnapshot.cumulativeSalaryBonusPercent
+      }
+    : fallbackGradeBonusSnapshot;
+  const gradeBonus =
+    includeMonthlyBonus && gradeBonusSnapshot
+      ? calculateGradeMonthlyBonus(
+          gradeBonusSnapshot.monthlySalarySnapshot,
+          gradeBonusSnapshot.cumulativeSalaryBonusPercent
         )
       : 0;
   const plannedSalary = workSalary + effectiveMonthlyBonus + gradeBonus;

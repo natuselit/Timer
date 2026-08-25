@@ -9,11 +9,12 @@ import {
   createGradeSnapshot
 } from '../../../../entities/settings';
 import type { Settings } from '../../../../entities/settings';
-import type { ISODateTimeString, LocalDateString } from '../../../../entities/shift';
+import type { ISODateTimeString, LocalDateString, Shift } from '../../../../entities/shift';
 import { combineLocalDateAndTime, toLocalIsoString } from '../../date-time';
-import type { EnterpriseScheduleRepository } from '../repositories/enterpriseScheduleRepository';
-import type { ShiftRepository } from '../repositories/shiftRepository';
-import { createManualShift } from './shiftUseCases';
+import type { ShifterDatabase } from '../database';
+import { EnterpriseScheduleRepository } from '../repositories/enterpriseScheduleRepository';
+import { ShiftRepository } from '../repositories/shiftRepository';
+import { buildManualShift } from './shiftUseCases';
 
 export type EnterpriseScheduleImportResult = EnterpriseScheduleParseResult & {
   savedCount: number;
@@ -21,7 +22,6 @@ export type EnterpriseScheduleImportResult = EnterpriseScheduleParseResult & {
 };
 
 type EnterpriseScheduleImportOptions = {
-  shiftRepository?: ShiftRepository;
   settings?: Pick<
     Settings,
     | 'monthlySalary'
@@ -49,13 +49,13 @@ const toScheduleItem = (
   updatedAt: createdAt
 });
 
-const createMissingShiftsFromSchedule = async (
+const prepareMissingShiftsFromSchedule = async (
   shiftRepository: ShiftRepository,
   settings: NonNullable<EnterpriseScheduleImportOptions['settings']>,
   items: EnterpriseScheduleItem[],
   now: ISODateTimeString
-): Promise<number> => {
-  let createdCount = 0;
+): Promise<Shift[]> => {
+  const missingShifts: Shift[] = [];
 
   for (const item of items) {
     const existingShift = await shiftRepository.getShiftByDate(item.date);
@@ -68,7 +68,7 @@ const createMissingShiftsFromSchedule = async (
       settings.monthlySalary,
       item.date
     );
-    await createManualShift(shiftRepository, {
+    missingShifts.push(buildManualShift({
       id: `shift-${item.id}`,
       date: item.date,
       type: item.shiftType,
@@ -79,15 +79,14 @@ const createMissingShiftsFromSchedule = async (
       gradeSnapshot: createGradeSnapshot(settings),
       coefficientMode: 'auto',
       now
-    });
-    createdCount += 1;
+    }));
   }
 
-  return createdCount;
+  return missingShifts;
 };
 
 export const importParsedEnterpriseSchedule = async (
-  repository: EnterpriseScheduleRepository,
+  db: ShifterDatabase,
   parsedResult: EnterpriseScheduleParseResult,
   now = toLocalIsoString(new Date()),
   options: EnterpriseScheduleImportOptions = {}
@@ -96,16 +95,26 @@ export const importParsedEnterpriseSchedule = async (
   let createdShiftCount = 0;
 
   if (items.length > 0) {
-    await repository.importItems(items);
+    await db.transaction('rw', db.enterpriseSchedule, db.shifts, async () => {
+      const scheduleRepository = new EnterpriseScheduleRepository(db);
+      const shiftRepository = new ShiftRepository(db);
+      const missingShifts = options.settings
+        ? await prepareMissingShiftsFromSchedule(
+            shiftRepository,
+            options.settings,
+            items,
+            now
+          )
+        : [];
 
-    if (options.shiftRepository && options.settings) {
-      createdShiftCount = await createMissingShiftsFromSchedule(
-        options.shiftRepository,
-        options.settings,
-        items,
-        now
-      );
-    }
+      await scheduleRepository.importItems(items);
+
+      for (const shift of missingShifts) {
+        await shiftRepository.createShift(shift);
+      }
+
+      createdShiftCount = missingShifts.length;
+    });
   }
 
   return {
@@ -116,12 +125,12 @@ export const importParsedEnterpriseSchedule = async (
 };
 
 export const importEnterpriseScheduleText = async (
-  repository: EnterpriseScheduleRepository,
+  db: ShifterDatabase,
   source: string,
   now = toLocalIsoString(new Date()),
   options: EnterpriseScheduleImportOptions = {}
 ): Promise<EnterpriseScheduleImportResult> =>
-  importParsedEnterpriseSchedule(repository, parseEnterpriseScheduleText(source), now, options);
+  importParsedEnterpriseSchedule(db, parseEnterpriseScheduleText(source), now, options);
 
 export const getEnterpriseScheduleByMonth = (
   repository: EnterpriseScheduleRepository,

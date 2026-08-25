@@ -18,19 +18,18 @@ import {
   type Settings
 } from '../../../../entities/settings';
 import type { EnterpriseScheduleItem } from '../../../../entities/enterprise-schedule';
-import type {
-  CoefficientMode,
-  GradeSnapshot,
-  LocalDateString,
-  Shift,
-  ShiftDetectionMode,
-  ShiftType,
-  WorkTicket
-} from '../../../../entities/shift';
 import {
+  isValidWorkTicketNorm,
   PLANNED_SHIFTS,
   SHIFT_NOTE_MAX_LENGTH,
-  validateAndSortWorkTickets
+  validateAndSortWorkTickets,
+  type CoefficientMode,
+  type GradeSnapshot,
+  type LocalDateString,
+  type Shift,
+  type ShiftDetectionMode,
+  type ShiftType,
+  type WorkTicket
 } from '../../../../entities/shift';
 import { toLocalIsoString } from '../../date-time';
 import type { ShifterDatabase } from '../database';
@@ -48,7 +47,7 @@ import {
   normalizeOvertimeStrategy,
   normalizeSettingsRecord
 } from '../repositories/settingsRepository';
-import { normalizeShiftRecord } from '../repositories/shiftRepository';
+import { normalizeShiftRecord, toStoredShift } from '../repositories/shiftRepository';
 import type {
   ReviewedScheduleWarning,
   ConfirmedSaturdayDoubleRateMonth,
@@ -630,7 +629,7 @@ const parseWorkTicket = (
   };
 
   if (
-    ticket.normPerEightHours <= 0 ||
+    !isValidWorkTicketNorm(ticket.normPerEightHours) ||
     (ticket.actualQuantity !== null &&
       (!Number.isSafeInteger(ticket.actualQuantity) || ticket.actualQuantity < 0)) ||
     (ticket.manualCompletionPercent !== null &&
@@ -1201,37 +1200,44 @@ export const parseBackupImportJson = (source: string): ParsedBackupImport => {
 export const createBackup = async (
   db: ShifterDatabase,
   exportedAt = new Date().toISOString()
-): Promise<ShifterBackup> => {
-  const reviewRepository = new ScheduleWarningReviewRepository(db);
-  const overtimeRepository = new OvertimeCoefficientRepository(db);
-  const [
-    settingsRecord,
-    shifts,
-    enterpriseSchedule,
-    reviewedScheduleWarnings,
-    confirmedSaturdayDoubleRateMonths
-  ] = await Promise.all([
-    db.settings.get(SETTINGS_ID),
-    db.shifts.toArray(),
-    db.enterpriseSchedule.toArray(),
-    reviewRepository.getAll(),
-    overtimeRepository.getAllConfirmedMonths()
-  ]);
+): Promise<ShifterBackup> =>
+  db.transaction(
+    'r',
+    db.settings,
+    db.shifts,
+    db.enterpriseSchedule,
+    db.appMeta,
+    async () => {
+      const reviewRepository = new ScheduleWarningReviewRepository(db);
+      const overtimeRepository = new OvertimeCoefficientRepository(db);
+      const [
+        settingsRecord,
+        shifts,
+        enterpriseSchedule,
+        reviewedScheduleWarnings,
+        confirmedSaturdayDoubleRateMonths
+      ] = await Promise.all([
+        db.settings.get(SETTINGS_ID),
+        db.shifts.toArray(),
+        db.enterpriseSchedule.toArray(),
+        reviewRepository.getAll(),
+        overtimeRepository.getAllConfirmedMonths()
+      ]);
+      const settings = settingsRecord
+        ? normalizeSettingsRecord(settingsRecord, new Date(exportedAt))
+        : DEFAULT_SETTINGS;
 
-  const settings = settingsRecord
-    ? normalizeSettingsRecord(settingsRecord, new Date(exportedAt))
-    : DEFAULT_SETTINGS;
-
-  return {
-    schemaVersion: BACKUP_SCHEMA_VERSION,
-    exportedAt,
-    settings,
-    shifts: shifts.map(normalizeShiftRecord),
-    enterpriseSchedule,
-    reviewedScheduleWarnings,
-    confirmedSaturdayDoubleRateMonths
-  };
-};
+      return {
+        schemaVersion: BACKUP_SCHEMA_VERSION,
+        exportedAt,
+        settings,
+        shifts: shifts.map(normalizeShiftRecord),
+        enterpriseSchedule,
+        reviewedScheduleWarnings,
+        confirmedSaturdayDoubleRateMonths
+      };
+    }
+  );
 
 export const serializeBackup = (backup: ShifterBackup): string =>
   `${JSON.stringify(
@@ -1280,7 +1286,7 @@ export const restoreBackup = async (
       }
 
       if (normalizedShifts.length > 0) {
-        await db.shifts.bulkPut(normalizedShifts);
+        await db.shifts.bulkPut(normalizedShifts.map(toStoredShift));
       }
 
       if (backup.enterpriseSchedule.length > 0) {
@@ -1320,7 +1326,7 @@ export const replaceShiftsFromLegacyBackup = async (
       .delete();
 
     if (normalizedShifts.length > 0) {
-      await db.shifts.bulkPut(normalizedShifts);
+      await db.shifts.bulkPut(normalizedShifts.map(toStoredShift));
     }
   });
 

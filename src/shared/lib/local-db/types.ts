@@ -1,9 +1,12 @@
-import type { EnterpriseScheduleItem } from '../../../entities/enterprise-schedule';
 import type { Settings } from '../../../entities/settings';
 import type { Shift } from '../../../entities/shift';
 
 export type SettingsRecord = Settings & {
   id: 'default';
+};
+
+export type StoredShift = Shift & {
+  activeKey?: 1;
 };
 
 export type AppMetaRecord = {
@@ -21,11 +24,4 @@ export type ReviewedScheduleWarning = {
 export type ConfirmedSaturdayDoubleRateMonth = {
   month: string;
   confirmedAt: string;
-};
-
-export type LocalDatabaseSchema = {
-  settings: SettingsRecord;
-  shifts: Shift;
-  enterpriseSchedule: EnterpriseScheduleItem;
-  appMeta: AppMetaRecord;
 };

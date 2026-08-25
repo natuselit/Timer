@@ -7,12 +7,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import type { Shift } from '../../../entities/shift';
 import {
-  BACKUP_REMINDER_ANCHOR_KEY,
   CALENDAR_TUTORIAL_SEEN_KEY,
-  localDb
+  localDb,
+  ShiftRepository,
+  toStoredShift
 } from '../../../shared/lib/local-db';
 import { combineLocalDateAndTime, toLocalIsoString } from '../../../shared/lib/date-time';
+import { ACTIVE_NAVIGATION_SESSION_KEY } from '../../../shared/config/navigation';
 import { MainPage } from './MainPage';
+
+const LEGACY_BACKUP_REMINDER_ANCHOR_KEY = 'backup-reminder-anchor-at';
 
 const settings: Settings = {
   employeeFirstName: 'Артем',
@@ -74,11 +78,12 @@ const activeShift: Shift = {
 
 beforeEach(async () => {
   vi.stubGlobal('scrollTo', vi.fn());
+  window.sessionStorage.clear();
   await localDb.shifts.clear();
   await localDb.enterpriseSchedule.clear();
   await localDb.appMeta.clear();
   await localDb.settings.clear();
-  await localDb.shifts.put(activeShift);
+  await localDb.shifts.put(toStoredShift(activeShift));
 });
 
 afterEach(async () => {
@@ -91,6 +96,7 @@ afterEach(async () => {
 describe('MainPage active shift', () => {
   it('saves a local note for the active shift', async () => {
     const user = userEvent.setup();
+    const getActiveShiftSpy = vi.spyOn(ShiftRepository.prototype, 'getActiveShift');
 
     render(
       <MainPage
@@ -105,6 +111,7 @@ describe('MainPage active shift', () => {
     const saveButton = screen.getByRole('button', { name: 'Зберегти' });
     const ticketSection = screen.getByRole('region', { name: 'Тікет зміни' });
     const noteSection = noteInput.closest('section');
+    getActiveShiftSpy.mockClear();
 
     expect(noteInput.maxLength).toBe(500);
     expect(
@@ -126,6 +133,7 @@ describe('MainPage active shift', () => {
     expect(
       (screen.getByRole('button', { name: 'Збережено' }) as HTMLButtonElement).disabled
     ).toBe(true);
+    expect(getActiveShiftSpy).not.toHaveBeenCalled();
   });
 
   it('uses today as the default preset for calendar screens', async () => {
@@ -143,11 +151,63 @@ describe('MainPage active shift', () => {
     await user.click(await screen.findByRole('button', { name: 'Аналітика' }));
 
     expect(
-      screen.getByRole('button', { name: 'Сьогодні' }).getAttribute('aria-pressed')
+      (await screen.findByRole('button', { name: 'Сьогодні' })).getAttribute('aria-pressed')
     ).toBe('true');
     expect(
       screen.getByRole('button', { name: 'Місяць' }).getAttribute('aria-pressed')
     ).toBe('false');
+  });
+
+  it('restores the active page after a page reload', async () => {
+    const user = userEvent.setup();
+    const props = {
+      settings,
+      dataVersion: 0,
+      onSettingsChange: vi.fn().mockResolvedValue(undefined),
+      onLocalDataReplace: vi.fn()
+    };
+    const firstRender = render(<MainPage {...props} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Аналітика' }));
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem(ACTIVE_NAVIGATION_SESSION_KEY)).toBe(
+        'analytics'
+      );
+    });
+
+    firstRender.unmount();
+    render(<MainPage {...props} />);
+
+    expect(
+      (await screen.findByRole('button', { name: 'Аналітика' })).getAttribute(
+        'aria-current'
+      )
+    ).toBe('page');
+  });
+
+  it('defers timer database refreshes while another page is active', async () => {
+    const user = userEvent.setup();
+    const getActiveShiftSpy = vi.spyOn(ShiftRepository.prototype, 'getActiveShift');
+    const getShiftsBetweenSpy = vi.spyOn(ShiftRepository.prototype, 'getShiftsBetween');
+    const commonProps = {
+      settings,
+      onSettingsChange: vi.fn().mockResolvedValue(undefined),
+      onLocalDataReplace: vi.fn()
+    };
+    const { rerender } = render(<MainPage {...commonProps} dataVersion={0} />);
+
+    expect(await screen.findByLabelText('Нотатка до зміни')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Аналітика' }));
+    expect(await screen.findByText(/У цьому періоді ще немає відпрацьованих змін/)).toBeTruthy();
+    getActiveShiftSpy.mockClear();
+    getShiftsBetweenSpy.mockClear();
+
+    rerender(<MainPage {...commonProps} dataVersion={1} />);
+    await waitFor(() => expect(getShiftsBetweenSpy).toHaveBeenCalled());
+    expect(getActiveShiftSpy).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Таймер' }));
+    await waitFor(() => expect(getActiveShiftSpy).toHaveBeenCalledTimes(1));
   });
 
   it('shows the calendar tutorial only on the first calendar visit', async () => {
@@ -243,13 +303,13 @@ describe('MainPage active shift', () => {
   });
 
   it('hides an empty downtime summary and expands the completion action', async () => {
-    await localDb.shifts.put({
+    await localDb.shifts.put(toStoredShift({
       ...activeShift,
       workTickets: activeShift.workTickets.map((ticket) => ({
         ...ticket,
         downtimeMinutes: 0
       }))
-    });
+    }));
 
     render(
       <MainPage
@@ -272,7 +332,7 @@ describe('MainPage active shift', () => {
   it('shows a compact effective summary and an accessible actions menu for a completed ticket', async () => {
     const user = userEvent.setup();
 
-    await localDb.shifts.put({
+    await localDb.shifts.put(toStoredShift({
       ...activeShift,
       workTickets: activeShift.workTickets.map((ticket) => ({
         ...ticket,
@@ -281,7 +341,7 @@ describe('MainPage active shift', () => {
         manualCompletionPercent: 135,
         downtimeMinutes: 15
       }))
-    });
+    }));
 
     render(
       <MainPage
@@ -348,7 +408,7 @@ describe('MainPage active shift', () => {
   });
 
   it('keeps completed tickets newest-first and handles missing fact, zero plan and zero downtime', async () => {
-    await localDb.shifts.put({
+    await localDb.shifts.put(toStoredShift({
       ...activeShift,
       workTickets: [
         {
@@ -370,7 +430,7 @@ describe('MainPage active shift', () => {
           updatedAt: '2026-07-27T07:16:00.000+03:00'
         }
       ]
-    });
+    }));
 
     render(
       <MainPage
@@ -610,7 +670,7 @@ describe('MainPage active shift', () => {
   it('shows a separate over-limit state without blocking an inactive timer', async () => {
     const date = toLocalIsoString(new Date()).slice(0, 10);
     await localDb.shifts.clear();
-    await localDb.shifts.put({
+    await localDb.shifts.put(toStoredShift({
       ...activeShift,
       id: 'completed-over-limit-shift',
       date,
@@ -619,7 +679,7 @@ describe('MainPage active shift', () => {
       startTime: combineLocalDateAndTime(date, '05:30'),
       endTime: combineLocalDateAndTime(date, '15:30'),
       workTickets: []
-    });
+    }));
 
     render(
       <MainPage
@@ -638,7 +698,7 @@ describe('MainPage active shift', () => {
   it('caps the financial fill and shows the full amount above the calculated maximum', async () => {
     const date = toLocalIsoString(new Date()).slice(0, 10);
     await localDb.shifts.clear();
-    await localDb.shifts.put({
+    await localDb.shifts.put(toStoredShift({
       ...activeShift,
       id: 'income-over-maximum-shift',
       date,
@@ -646,7 +706,7 @@ describe('MainPage active shift', () => {
       endTime: combineLocalDateAndTime(date, '14:30'),
       coefficientMode: 'x2',
       workTickets: []
-    });
+    }));
 
     render(
       <MainPage
@@ -674,7 +734,7 @@ describe('MainPage active shift', () => {
 
   it('does not show the removed backup reminder for legacy metadata', async () => {
     await localDb.appMeta.put({
-      key: BACKUP_REMINDER_ANCHOR_KEY,
+      key: LEGACY_BACKUP_REMINDER_ANCHOR_KEY,
       value: '2000-01-01T00:00:00.000Z',
       updatedAt: '2000-01-01T00:00:00.000Z'
     });
@@ -749,14 +809,14 @@ describe('MainPage inactive state', () => {
   it('hides the previous shift and moves its recommendation forward', async () => {
     const date = toLocalIsoString(new Date()).slice(0, 10);
     await localDb.shifts.clear();
-    await localDb.shifts.put({
+    await localDb.shifts.put(toStoredShift({
       ...activeShift,
       id: 'completed-shift',
       date,
       startTime: combineLocalDateAndTime(date, '06:30'),
       endTime: combineLocalDateAndTime(date, '14:30'),
       workTickets: []
-    });
+    }));
 
     render(
       <MainPage

@@ -140,6 +140,49 @@ describe('calculateAnalyticsSummary', () => {
     });
   });
 
+  it('uses the current settings snapshot for a full month without shift snapshots', () => {
+    const summary = calculateAnalyticsSummary({
+      now: '2026-06-30T20:00:00.000+03:00',
+      periodStart: '2026-06-01',
+      periodEnd: '2026-06-30',
+      monthlyBonus: 2_000,
+      includeMonthlyBonus: true,
+      fallbackGradeBonusSnapshot: {
+        monthlySalarySnapshot: 50_800,
+        cumulativeSalaryBonusPercent: 10
+      },
+      shifts: []
+    });
+
+    expect(summary).toMatchObject({
+      workSalary: 0,
+      monthlyBonus: 2_000,
+      gradeBonus: 5_080,
+      plannedSalary: 7_080
+    });
+  });
+
+  it('does not use the current settings fallback for a partial empty range', () => {
+    const summary = calculateAnalyticsSummary({
+      now: '2026-06-15T20:00:00.000+03:00',
+      periodStart: '2026-06-10',
+      periodEnd: '2026-06-15',
+      monthlyBonus: 2_000,
+      includeMonthlyBonus: false,
+      fallbackGradeBonusSnapshot: {
+        monthlySalarySnapshot: 50_800,
+        cumulativeSalaryBonusPercent: 10
+      },
+      shifts: []
+    });
+
+    expect(summary).toMatchObject({
+      monthlyBonus: 0,
+      gradeBonus: 0,
+      plannedSalary: 0
+    });
+  });
+
   it('uses current time for active shifts in aggregates', () => {
     const summary = calculateAnalyticsSummary({
       now: '2026-06-23T07:30:00.000+03:00',
@@ -337,6 +380,10 @@ describe('calculateAnalyticsSummary', () => {
       periodEnd: '2026-06-30',
       monthlyBonus: 2_000,
       includeMonthlyBonus: true,
+      fallbackGradeBonusSnapshot: {
+        monthlySalarySnapshot: 100_000,
+        cumulativeSalaryBonusPercent: 50
+      },
       shifts: [
         makeShift({
           id: 'earlier-grade-shift',

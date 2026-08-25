@@ -1,6 +1,10 @@
-import type { LocalDateString } from '../../shift';
-import type { GradeSnapshot } from '../../shift';
-import type { Grade, GradePercentSet, Settings } from './types';
+import type {
+  Grade,
+  GradePercentSet,
+  GradeSnapshot,
+  LocalDateString
+} from '../../../shared/model';
+import type { Settings } from './types';
 
 export const WORK_HOURS_PER_DAY = 8;
 export const WORK_MINUTES_PER_DAY = WORK_HOURS_PER_DAY * 60;
@@ -50,8 +54,6 @@ export const calculateMonthlySalaryFromHourlyRate = (
   return hourlyRate * workdays * WORK_HOURS_PER_DAY;
 };
 
-export const getGradeIndex = (grade: Grade): number => grade - 1;
-
 export const getNextDesiredGrade = (currentGrade: Grade): Grade =>
   currentGrade === 4 ? 4 : ((currentGrade + 1) as Grade);
 
@@ -99,5 +101,3 @@ export const calculateGradeProductionTarget = ({
       (Math.max(0, gradeNormPercent) / 100) *
       (Math.max(0, elapsedMinutes) / WORK_MINUTES_PER_DAY)
   );
-
-export const formatProductionTarget = (value: number): number => Math.ceil(Math.max(0, value));

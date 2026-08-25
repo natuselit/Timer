@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { AppMetaRecord, SettingsRecord } from './types';
+import type { AppMetaRecord, SettingsRecord, StoredShift } from './types';
 import type { EnterpriseScheduleItem } from '../../../entities/enterprise-schedule';
 import type { Shift, WorkTicket } from '../../../entities/shift';
 import { DEFAULT_GRADE_SALARY_BONUS_PERCENTS } from '../../../entities/settings';
@@ -49,7 +49,7 @@ const getLegacyOpenDowntimeMinutes = (
 
 export class ShifterDatabase extends Dexie {
   settings!: Table<SettingsRecord, 'default'>;
-  shifts!: Table<Shift, string>;
+  shifts!: Table<StoredShift, string>;
   enterpriseSchedule!: Table<EnterpriseScheduleItem, string>;
   appMeta!: Table<AppMetaRecord, string>;
 
@@ -194,6 +194,26 @@ export class ShifterDatabase extends Dexie {
                       : null
                 }))
               : [];
+          });
+      });
+
+    this.version(7)
+      .stores({
+        settings: '&id',
+        shifts: '&id,&date,activeKey,updatedAt,createdAt',
+        enterpriseSchedule: '&id,&date,createdAt',
+        appMeta: '&key'
+      })
+      .upgrade(async (transaction) => {
+        await transaction
+          .table<StoredShift, string>('shifts')
+          .toCollection()
+          .modify((shift) => {
+            if (shift.endTime === null) {
+              shift.activeKey = 1;
+            } else {
+              delete shift.activeKey;
+            }
           });
       });
   }

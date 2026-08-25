@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -23,13 +23,14 @@ import {
   COEFFICIENT_MODES,
   calculateTicketProductionSummary,
   getPlannedShiftWindow,
+  normalizeWorkTicketNormDraft,
+  assertWorkTicketNorm,
   validateAndSortWorkTickets
 } from '../../../entities/shift';
 import {
   calculateHourlyRateFromMonthlySalary,
   calculateMonthlySalaryFromHourlyRate,
   createGradeSnapshot,
-  type GradePercentSet,
   type Settings
 } from '../../../entities/settings';
 import {
@@ -55,6 +56,9 @@ import {
   formatTimeInputDraft,
   formatTime,
   getDurationMinutes,
+  closeCalendarDateRange,
+  getCalendarMonthRange,
+  isCalendarRangeWithin,
   getNextHeldCalendarRange,
   getSingleDateRange,
   getTimeInputValue,
@@ -81,6 +85,7 @@ type HistoryPageProps = {
   activeRangePreset: CalendarRangePreset | null;
   isAllTimePresetEnabled: boolean;
   onRangePresetSelect: (preset: CalendarRangePreset) => void;
+  dataRevision?: number;
   onDataChange?: () => void;
 };
 
@@ -164,12 +169,6 @@ const getMonthlySalaryInputValue = (value: number): string => String(Math.floor(
 
 const formatCoefficientLabel = (coefficient: number): string => `x${coefficient}`;
 
-const normalizeTicketNormDraft = (value: string): string => {
-  const digits = value.replace(/\D/g, '');
-
-  return digits === '' ? '' : String(Math.min(Number(digits), 999));
-};
-
 const createDraftId = (): string => {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID();
@@ -223,13 +222,7 @@ const toTicketFormValues = (workTickets: WorkTicket[]): TicketFormValue[] =>
 const parseTicketNormValue = (value: string): number => {
   const normPerEightHours = Number(value);
 
-  if (!Number.isFinite(normPerEightHours) || normPerEightHours <= 0) {
-    throw new Error('Норма має бути більшою за 0.');
-  }
-
-  if (normPerEightHours > 999) {
-    throw new Error('Норма має бути не більшою за 999.');
-  }
+  assertWorkTicketNorm(normPerEightHours);
 
   return normPerEightHours;
 };
@@ -456,21 +449,6 @@ const isDateInRange = (date: LocalDateString, range: CalendarDateRange | null): 
   return date >= range.start && date <= end;
 };
 
-const getMonthRange = (
-  year: number,
-  month: number
-): {
-  start: LocalDateString;
-  end: LocalDateString;
-} => {
-  const lastDay = new Date(year, month, 0).getDate();
-
-  return {
-    start: `${year}-${String(month).padStart(2, '0')}-01`,
-    end: `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
-  };
-};
-
 const getMonthFromDate = (date: LocalDateString): CalendarMonth => {
   const [year, month] = date.split('-').map(Number);
 
@@ -479,16 +457,6 @@ const getMonthFromDate = (date: LocalDateString): CalendarMonth => {
 
 const getShiftTypeLabel = (type: ShiftType): string =>
   type === 'first' ? '1 зміна' : '2 зміна';
-
-const getSelectedRangeBounds = (
-  range: CalendarDateRange
-): {
-  start: LocalDateString;
-  end: LocalDateString;
-} => ({
-  start: range.start,
-  end: range.end ?? range.start
-});
 
 export function HistoryPage({
   settings,
@@ -499,6 +467,7 @@ export function HistoryPage({
   activeRangePreset,
   isAllTimePresetEnabled,
   onRangePresetSelect,
+  dataRevision = 0,
   onDataChange
 }: HistoryPageProps) {
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -510,45 +479,65 @@ export function HistoryPage({
   const [isSaving, setIsSaving] = useState(false);
   const [sortCriterion, setSortCriterion] = useState<ShiftSortCriterion>('date');
   const [sortDirection, setSortDirection] = useState<ShiftSortDirection>('descending');
+  const loadRequestSequenceRef = useRef(0);
 
   const now = useMemo(() => toLocalIsoString(new Date()), []);
   const loadedDateRange = useMemo(
     () =>
       selectedRange
-        ? getSelectedRangeBounds(selectedRange)
-        : getMonthRange(calendarMonth.year, calendarMonth.month),
+        ? closeCalendarDateRange(selectedRange)
+        : getCalendarMonthRange(calendarMonth),
     [selectedRange, calendarMonth]
   );
   const calendarMonthRange = useMemo(
-    () => getMonthRange(calendarMonth.year, calendarMonth.month),
+    () => getCalendarMonthRange(calendarMonth),
     [calendarMonth]
   );
 
   const loadShifts = useCallback(async () => {
+    const requestSequence = ++loadRequestSequenceRef.current;
     setIsLoading(true);
     setError(null);
 
     try {
-      const [nextShifts, nextCalendarShifts] = await Promise.all([
-        getShiftsBetween(shiftRepository, loadedDateRange.start, loadedDateRange.end),
-        getShiftsBetween(
+      const nextCalendarShifts = await getShiftsBetween(
+        shiftRepository,
+        calendarMonthRange.start,
+        calendarMonthRange.end
+      );
+      const nextShifts = isCalendarRangeWithin(loadedDateRange, calendarMonthRange)
+        ? nextCalendarShifts.filter(
+            (shift) => shift.date >= loadedDateRange.start && shift.date <= loadedDateRange.end
+          )
+        : await getShiftsBetween(
           shiftRepository,
-          calendarMonthRange.start,
-          calendarMonthRange.end
-        )
-      ]);
+          loadedDateRange.start,
+          loadedDateRange.end
+        );
+
+      if (requestSequence !== loadRequestSequenceRef.current) {
+        return;
+      }
 
       setShifts(nextShifts);
       setCalendarShifts(nextCalendarShifts);
     } catch {
-      setError('Не вдалося завантажити історію.');
+      if (requestSequence === loadRequestSequenceRef.current) {
+        setError('Не вдалося завантажити історію.');
+      }
     } finally {
-      setIsLoading(false);
+      if (requestSequence === loadRequestSequenceRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [calendarMonthRange, loadedDateRange]);
+  }, [calendarMonthRange, dataRevision, loadedDateRange]);
 
   useEffect(() => {
     void loadShifts();
+
+    return () => {
+      loadRequestSequenceRef.current += 1;
+    };
   }, [loadShifts]);
 
   useEffect(() => {
@@ -585,25 +574,65 @@ export function HistoryPage({
     () => calculateMonthShiftSummary(visibleShifts, now),
     [visibleShifts, now]
   );
+  const shiftViewModels = useMemo(
+    () => sortedVisibleShifts.map((shift) => {
+      const effectiveEndTime = shift.endTime ?? now;
+      const salary = calculateSalaryBreakdown({
+        ...shift,
+        endTime: effectiveEndTime
+      });
+      const currentGrade = shift.gradeSnapshot?.currentGrade ?? settings.currentGrade;
+      const gradeNormPercents =
+        shift.gradeSnapshot?.gradeNormPercents ?? settings.gradeNormPercents;
 
-  const syncCalendarMonthToDate = (date: LocalDateString) => {
-    const [year, month] = date.split('-').map(Number);
-    const isOutsideVisibleMonth = year !== calendarMonth.year || month !== calendarMonth.month;
+      return {
+        shift,
+        effectiveEndTime,
+        salary,
+        coefficientEarnings: getCoefficientEarnings(salary.lines),
+        shiftDateLabel: formatDate(shift.date),
+        tickets: shift.workTickets.map((ticket, ticketIndex) => ({
+          ticket,
+          ticketIndex,
+          production: calculateTicketProductionSummary({
+            ticket,
+            effectiveEndTime: ticket.endedAt ?? effectiveEndTime,
+            currentGrade,
+            gradeNormPercents
+          })
+        }))
+      };
+    }),
+    [now, settings.currentGrade, settings.gradeNormPercents, sortedVisibleShifts]
+  );
 
-    if (isOutsideVisibleMonth) {
-      onCalendarMonthChange({ year, month });
-    }
-  };
+  const syncCalendarMonthToDate = useCallback(
+    (date: LocalDateString) => {
+      const [year, month] = date.split('-').map(Number);
+      const isOutsideVisibleMonth = year !== calendarMonth.year || month !== calendarMonth.month;
 
-  const selectDate = (date: LocalDateString) => {
-    syncCalendarMonthToDate(date);
-    onSelectedRangeChange(getSingleDateRange(date));
-  };
+      if (isOutsideVisibleMonth) {
+        onCalendarMonthChange({ year, month });
+      }
+    },
+    [calendarMonth.month, calendarMonth.year, onCalendarMonthChange]
+  );
 
-  const holdDate = (date: LocalDateString) => {
-    syncCalendarMonthToDate(date);
-    onSelectedRangeChange(getNextHeldCalendarRange(selectedRange, date));
-  };
+  const selectDate = useCallback(
+    (date: LocalDateString) => {
+      syncCalendarMonthToDate(date);
+      onSelectedRangeChange(getSingleDateRange(date));
+    },
+    [onSelectedRangeChange, syncCalendarMonthToDate]
+  );
+
+  const holdDate = useCallback(
+    (date: LocalDateString) => {
+      syncCalendarMonthToDate(date);
+      onSelectedRangeChange(getNextHeldCalendarRange(selectedRange, date));
+    },
+    [onSelectedRangeChange, selectedRange, syncCalendarMonthToDate]
+  );
 
   const openCreateEditor = () => {
     const values = createDefaultFormValues(settings, selectedRange?.start);
@@ -617,7 +646,7 @@ export function HistoryPage({
     });
   };
 
-  const openEditEditor = (shift: Shift) => {
+  const openEditEditor = useCallback((shift: Shift) => {
     const values = createEditFormValues(shift);
 
     setError(null);
@@ -627,7 +656,7 @@ export function HistoryPage({
       shift,
       values
     });
-  };
+  }, []);
 
   const changeEditorValue = <Key extends keyof ShiftFormValues>(
     key: Key,
@@ -646,20 +675,32 @@ export function HistoryPage({
     );
   };
 
-  const moveMonth = (direction: -1 | 1) => {
-    const next = new Date(calendarMonth.year, calendarMonth.month - 1 + direction, 1);
+  const moveMonth = useCallback(
+    (direction: -1 | 1) => {
+      const next = new Date(calendarMonth.year, calendarMonth.month - 1 + direction, 1);
 
-    onCalendarMonthChange({
-      year: next.getFullYear(),
-      month: next.getMonth() + 1
-    });
+      onCalendarMonthChange({
+        year: next.getFullYear(),
+        month: next.getMonth() + 1
+      });
 
-    if (
-      shouldResetCalendarRangeOnMonthNavigation(activeRangePreset, selectedRange)
-    ) {
-      onSelectedRangeChange(null);
-    }
-  };
+      if (
+        shouldResetCalendarRangeOnMonthNavigation(activeRangePreset, selectedRange)
+      ) {
+        onSelectedRangeChange(null);
+      }
+    },
+    [
+      activeRangePreset,
+      calendarMonth.month,
+      calendarMonth.year,
+      onCalendarMonthChange,
+      onSelectedRangeChange,
+      selectedRange
+    ]
+  );
+  const moveToPreviousMonth = useCallback(() => moveMonth(-1), [moveMonth]);
+  const moveToNextMonth = useCallback(() => moveMonth(1), [moveMonth]);
 
   const moveEditorMonth = (direction: -1 | 1) => {
     const currentMonth = editorCalendarMonth ?? (editor ? getMonthFromDate(editor.values.date) : null);
@@ -737,7 +778,7 @@ export function HistoryPage({
                 ticket.id === ticketId
                   ? {
                       ...ticket,
-                      normPerEightHours: normalizeTicketNormDraft(value)
+                      normPerEightHours: normalizeWorkTicketNormDraft(value)
                     }
                   : ticket
               )
@@ -863,7 +904,7 @@ export function HistoryPage({
         endTime: isEditingActiveShift ? editor.values.endTime : normalizeTimeInput(editor.values.endTime),
         workTickets: editor.values.workTickets.map((ticket) => ({
           ...ticket,
-          normPerEightHours: normalizeTicketNormDraft(ticket.normPerEightHours),
+          normPerEightHours: normalizeWorkTicketNormDraft(ticket.normPerEightHours),
           startedAt: ticket.startedAt.trim() ? normalizeTimeInput(ticket.startedAt) : '',
           endedAt: ticket.endedAt.trim() ? normalizeTimeInput(ticket.endedAt) : ''
         }))
@@ -969,8 +1010,11 @@ export function HistoryPage({
       }
 
       setEditor(null);
-      await loadShifts();
-      onDataChange?.();
+      if (onDataChange) {
+        onDataChange();
+      } else {
+        await loadShifts();
+      }
     } catch (saveError) {
       setError(getEditorErrorMessage(saveError));
     } finally {
@@ -978,7 +1022,7 @@ export function HistoryPage({
     }
   };
 
-  const removeShift = async (shift: Shift) => {
+  const removeShift = useCallback(async (shift: Shift) => {
     if (!window.confirm(`Видалити зміну за ${formatDate(shift.date)}?`)) {
       return;
     }
@@ -990,12 +1034,15 @@ export function HistoryPage({
         await deleteShift(shiftRepository, shift.id);
         await scheduleWarningReviewRepository.deleteByShiftId(shift.id);
       });
-      await loadShifts();
-      onDataChange?.();
+      if (onDataChange) {
+        onDataChange();
+      } else {
+        await loadShifts();
+      }
     } catch {
       setError('Не вдалося видалити зміну.');
     }
-  };
+  }, [loadShifts, onDataChange]);
 
   return (
     <div className="history-page">
@@ -1007,8 +1054,8 @@ export function HistoryPage({
         hoursLabel={formatDurationClock(monthSummary.totalMinutes)}
         shifts={calendarShifts}
         selectedRange={selectedRange}
-        onPreviousMonth={() => moveMonth(-1)}
-        onNextMonth={() => moveMonth(1)}
+        onPreviousMonth={moveToPreviousMonth}
+        onNextMonth={moveToNextMonth}
         onDateSelect={selectDate}
         onDateHold={holdDate}
         activeRangePreset={activeRangePreset}
@@ -1084,15 +1131,14 @@ export function HistoryPage({
           </p>
         ) : (
           <div className="history-page__list">
-            {sortedVisibleShifts.map((shift) => {
-              const effectiveEndTime = shift.endTime ?? now;
-              const salary = calculateSalaryBreakdown({
-                ...shift,
-                endTime: effectiveEndTime
-              });
-              const coefficientEarnings = getCoefficientEarnings(salary.lines);
-              const shiftDateLabel = formatDate(shift.date);
-
+            {shiftViewModels.map(({
+              shift,
+              effectiveEndTime,
+              salary,
+              coefficientEarnings,
+              shiftDateLabel,
+              tickets
+            }) => {
               return (
                 <article className="history-page__shift" key={shift.id}>
                   <div className="history-page__shift-header">
@@ -1207,19 +1253,7 @@ export function HistoryPage({
                       </summary>
 
                       <div className="history-page__ticket-details-list">
-                        {shift.workTickets.map((ticket, ticketIndex) => {
-                          const ticketEndTime = ticket.endedAt ?? effectiveEndTime;
-                          const currentGrade =
-                            shift.gradeSnapshot?.currentGrade ?? settings.currentGrade;
-                          const gradeNormPercents =
-                            shift.gradeSnapshot?.gradeNormPercents ?? settings.gradeNormPercents;
-                          const production = calculateTicketProductionSummary({
-                            ticket,
-                            effectiveEndTime: ticketEndTime,
-                            currentGrade,
-                            gradeNormPercents
-                          });
-
+                        {tickets.map(({ ticket, ticketIndex, production }) => {
                           return (
                             <details className="history-page__ticket-detail" key={ticket.id}>
                               <summary className="history-page__ticket-detail-header">

@@ -73,7 +73,6 @@ export default defineConfig(async ({ mode }) => {
       VitePWA({
         registerType: 'autoUpdate',
         injectRegister: 'auto',
-        includeAssets: ['pwa.svg', 'pwa-192.png', 'pwa-512.png'],
         manifest,
         integration: {
           beforeBuildServiceWorker(options) {
@@ -88,7 +87,7 @@ export default defineConfig(async ({ mode }) => {
         workbox: {
           cleanupOutdatedCaches: true,
           navigateFallback: `${basePath}index.html`,
-          globPatterns: ['**/*.{js,mjs,css,html,svg,png,ico}']
+          globPatterns: ['**/*.{js,mjs,css,html,ico}']
         }
       }),
       ...hostingPlugins

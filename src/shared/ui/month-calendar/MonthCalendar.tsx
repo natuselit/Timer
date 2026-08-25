@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { LocalDateString } from '../../../entities/shift';
 import type {
@@ -103,7 +103,7 @@ const getCalendarRange = (
   };
 };
 
-export function MonthCalendar({
+export const MonthCalendar = memo(function MonthCalendar({
   year,
   month,
   salaryLabel,
@@ -130,45 +130,54 @@ export function MonthCalendar({
   const holdTimerRef = useRef<number | null>(null);
   const didHoldRef = useRef(false);
   const [holdingDate, setHoldingDate] = useState<LocalDateString | null>(null);
-  const firstDay = new Date(year, month - 1, 1);
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const daysInPreviousMonth = new Date(year, month - 1, 0).getDate();
-  const leadingEmptyDays = (firstDay.getDay() + 6) % 7;
-  const totalCells = Math.ceil((leadingEmptyDays + daysInMonth) / 7) * 7;
-  const trailingDays = totalCells - leadingEmptyDays - daysInMonth;
-  const markedDates = new Set(shifts.map((shift) => shift.date));
+  const markedDates = useMemo(
+    () => new Set(shifts.map((shift) => shift.date)),
+    [shifts]
+  );
   const todayKey = toTodayKey();
   const rangeStart = selectedRange?.start ?? null;
   const rangeEnd = selectedRange?.end ?? selectedRange?.start ?? null;
-  const previousMonth = new Date(year, month - 2, 1);
-  const nextMonth = new Date(year, month, 1);
   const calendarRange = getCalendarRange(year, month, selectedRange);
   const hasPendingRange = selectionMode === 'range' && selectedRange?.end === null;
   const rangeHintId = `${titleId}-range-hint`;
-  const cells: CalendarCell[] = [
-    ...Array.from({ length: leadingEmptyDays }, (_, index) => {
-      const day = daysInPreviousMonth - leadingEmptyDays + index + 1;
+  const cells = useMemo<CalendarCell[]>(
+    () => {
+      const firstDay = new Date(year, month - 1, 1);
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const daysInPreviousMonth = new Date(year, month - 1, 0).getDate();
+      const leadingEmptyDays = (firstDay.getDay() + 6) % 7;
+      const totalCells = Math.ceil((leadingEmptyDays + daysInMonth) / 7) * 7;
+      const trailingDays = totalCells - leadingEmptyDays - daysInMonth;
+      const previousMonth = new Date(year, month - 2, 1);
+      const nextMonth = new Date(year, month, 1);
 
-      return {
-        key: `previous-${day}`,
-        day,
-        dateKey: toDateKey(previousMonth.getFullYear(), previousMonth.getMonth() + 1, day),
-        isCurrentMonth: false
-      };
-    }),
-    ...Array.from({ length: daysInMonth }, (_, index) => ({
-      key: `current-${index + 1}`,
-      day: index + 1,
-      dateKey: toDateKey(year, month, index + 1),
-      isCurrentMonth: true
-    })),
-    ...Array.from({ length: trailingDays }, (_, index) => ({
-      key: `next-${index + 1}`,
-      day: index + 1,
-      dateKey: toDateKey(nextMonth.getFullYear(), nextMonth.getMonth() + 1, index + 1),
-      isCurrentMonth: false
-    }))
-  ];
+      return [
+        ...Array.from({ length: leadingEmptyDays }, (_, index) => {
+          const day = daysInPreviousMonth - leadingEmptyDays + index + 1;
+
+          return {
+            key: `previous-${day}`,
+            day,
+            dateKey: toDateKey(previousMonth.getFullYear(), previousMonth.getMonth() + 1, day),
+            isCurrentMonth: false
+          };
+        }),
+        ...Array.from({ length: daysInMonth }, (_, index) => ({
+          key: `current-${index + 1}`,
+          day: index + 1,
+          dateKey: toDateKey(year, month, index + 1),
+          isCurrentMonth: true
+        })),
+        ...Array.from({ length: trailingDays }, (_, index) => ({
+          key: `next-${index + 1}`,
+          day: index + 1,
+          dateKey: toDateKey(nextMonth.getFullYear(), nextMonth.getMonth() + 1, index + 1),
+          isCurrentMonth: false
+        }))
+      ];
+    },
+    [month, year]
+  );
 
   const clearHoldTimer = () => {
     if (holdTimerRef.current !== null) {
@@ -361,4 +370,4 @@ export function MonthCalendar({
       </div>
     </section>
   );
-}
+});

@@ -13,7 +13,8 @@ import type { Shift } from '../../../entities/shift';
 import {
   EnterpriseScheduleRepository,
   localDb,
-  ScheduleWarningReviewRepository
+  ScheduleWarningReviewRepository,
+  ShiftRepository
 } from '../../../shared/lib/local-db';
 import { SchedulePage } from './SchedulePage';
 
@@ -134,6 +135,47 @@ afterEach(async () => {
 });
 
 describe('SchedulePage', () => {
+  it('ignores an older schedule response after the visible month changes', async () => {
+    let resolveJuly!: (items: EnterpriseScheduleItem[]) => void;
+    const julyRequest = new Promise<EnterpriseScheduleItem[]>((resolve) => {
+      resolveJuly = resolve;
+    });
+    const augustItem: EnterpriseScheduleItem = {
+      ...scheduleItem,
+      id: 'enterprise-schedule-2026-08-05',
+      date: '2026-08-05',
+      enterpriseStartTime: '07:07',
+      enterpriseEndTime: '15:07'
+    };
+    vi.spyOn(EnterpriseScheduleRepository.prototype, 'getItemsBetween').mockImplementation(
+      (start) => start === '2026-07-01' ? julyRequest : Promise.resolve([augustItem])
+    );
+    vi.spyOn(ShiftRepository.prototype, 'getShiftsBetween').mockResolvedValue([]);
+    const commonProps = {
+      settings,
+      selectedRange: null,
+      onCalendarMonthChange: vi.fn(),
+      onSelectedRangeChange: vi.fn(),
+      activeRangePreset: 'month' as const,
+      isAllTimePresetEnabled: true,
+      onRangePresetSelect: vi.fn()
+    };
+    const { rerender } = render(
+      <SchedulePage {...commonProps} calendarMonth={{ year: 2026, month: 7 }} />
+    );
+
+    rerender(<SchedulePage {...commonProps} calendarMonth={{ year: 2026, month: 8 }} />);
+    expect(await screen.findByText('07:07-15:07')).toBeTruthy();
+
+    await act(async () => {
+      resolveJuly([{ ...scheduleItem, enterpriseStartTime: '06:06' }]);
+      await julyRequest;
+    });
+
+    expect(screen.queryByText('06:06-14:30')).toBeNull();
+    expect(screen.getByText('07:07-15:07')).toBeTruthy();
+  });
+
   it('shows schedule control, collapses records and persists reviewed warnings', async () => {
     const user = userEvent.setup();
 

@@ -380,6 +380,44 @@ describe('database migrations', () => {
       await migratedDatabase.delete();
     }
   });
+
+  it('indexes only the active shift when migrating IndexedDB schema v6 to v7', async () => {
+    const databaseName = makeDbName();
+    const legacyDatabase = new Dexie(databaseName);
+    legacyDatabase.version(6).stores({
+      settings: '&id',
+      shifts: '&id,&date,updatedAt,createdAt',
+      enterpriseSchedule: '&id,&date,createdAt',
+      appMeta: '&key'
+    });
+    const activeShift = makeShift({ id: 'legacy-active-shift' });
+    const completedShift = makeShift({
+      id: 'legacy-completed-shift',
+      date: '2026-06-09',
+      startTime: '2026-06-09T06:30:00.000Z',
+      endTime: '2026-06-09T14:30:00.000Z'
+    });
+
+    await legacyDatabase.table('shifts').bulkPut([activeShift, completedShift]);
+    legacyDatabase.close();
+
+    const migratedDatabase = new ShifterDatabase(databaseName);
+
+    try {
+      await expect(
+        migratedDatabase.shifts.where('activeKey').equals(1).primaryKeys()
+      ).resolves.toEqual([activeShift.id]);
+      await expect(migratedDatabase.shifts.get(completedShift.id)).resolves.not.toHaveProperty(
+        'activeKey'
+      );
+      await expect(new ShiftRepository(migratedDatabase).getActiveShift()).resolves.toEqual(
+        activeShift
+      );
+    } finally {
+      migratedDatabase.close();
+      await migratedDatabase.delete();
+    }
+  });
 });
 
 describe('settings repository use-cases', () => {
@@ -1492,11 +1530,10 @@ Total: 08:00`);
     await shiftRepository.createShift(existingShift);
 
     const result = await importParsedEnterpriseSchedule(
-      enterpriseScheduleRepository,
+      db,
       parsedResult,
       '2026-06-23T10:00:00.000+03:00',
       {
-        shiftRepository,
         settings: makeSettings({ monthlySalary: 36_960 })
       }
     );
@@ -1514,9 +1551,45 @@ Total: 08:00`);
     await expect(shiftRepository.getShiftById(existingShift.id)).resolves.toEqual(existingShift);
   });
 
+  it('rolls back schedule items and created shifts when any generated shift fails', async () => {
+    const parsedResult = parseEnterpriseScheduleText(`--01.06.2026--
+In time: 06:30
+Out time: 14:30
+Total: 08:00
+--02.06.2026--
+In time: 06:30
+Out time: 14:30
+Total: 08:00`);
+    const originalAdd = db.shifts.add.bind(db.shifts);
+    let addCount = 0;
+
+    vi.spyOn(db.shifts, 'add').mockImplementation((shift) => {
+      addCount += 1;
+
+      if (addCount === 2) {
+        return originalAdd(shift).then(() => {
+          throw new Error('write failed');
+        });
+      }
+
+      return originalAdd(shift);
+    });
+
+    await expect(
+      importParsedEnterpriseSchedule(
+        db,
+        parsedResult,
+        '2026-06-23T10:00:00.000+03:00',
+        { settings: makeSettings({ monthlySalary: 36_960 }) }
+      )
+    ).rejects.toThrow('write failed');
+    await expect(db.enterpriseSchedule.count()).resolves.toBe(0);
+    await expect(db.shifts.count()).resolves.toBe(0);
+  });
+
   it('imports valid schedule items and keeps invalid blocks out of storage', async () => {
     const result = await importEnterpriseScheduleText(
-      enterpriseScheduleRepository,
+      db,
       `--01.06.2026--
 In time: 05:57
 Out time: 16:52
@@ -1559,7 +1632,7 @@ Total: 09:10`,
     await shiftRepository.createShift(existingShift);
 
     const result = await importEnterpriseScheduleText(
-      enterpriseScheduleRepository,
+      db,
       `--01.06.2026--
 In time: 05:57
 Out time: 16:52
@@ -1570,7 +1643,6 @@ Out time: 14:30
 Total: 08:00`,
       '2026-06-23T10:00:00.000+03:00',
       {
-        shiftRepository,
         settings: makeSettings({ monthlySalary: 36_960 })
       }
     );
@@ -1600,7 +1672,7 @@ Total: 08:00`,
 
   it('loads enterprise schedule items by date range', async () => {
     await importEnterpriseScheduleText(
-      enterpriseScheduleRepository,
+      db,
       `--30.06.2026--
 In time: 06:30
 Out time: 14:30
@@ -1636,7 +1708,7 @@ Total: 08:00`,
 
   it('marks an enterprise schedule discrepancy as skipped', async () => {
     await importEnterpriseScheduleText(
-      enterpriseScheduleRepository,
+      db,
       `--01.06.2026--
 In time: 05:57
 Out time: 16:52
@@ -1670,7 +1742,7 @@ Total: 10:55`,
       })
     );
     await importEnterpriseScheduleText(
-      enterpriseScheduleRepository,
+      db,
       `--01.06.2026--
 In time: 05:57
 Out time: 16:52
@@ -1904,6 +1976,58 @@ describe('backup use-cases', () => {
           confirmedAt: '2026-06-24T11:30:00.000Z'
         }
       ]
+    });
+  });
+
+  it('keeps activeKey internal when exporting and restores its index', async () => {
+    const activeShift = makeShift({ id: 'active-backup-shift' });
+
+    await shiftRepository.createShift(activeShift);
+
+    const backup = await createBackup(db, '2026-06-24T12:00:00.000Z');
+
+    expect(serializeBackup(backup)).not.toContain('activeKey');
+    await db.shifts.clear();
+    await restoreBackup(db, backup);
+
+    await expect(db.shifts.get(activeShift.id)).resolves.toMatchObject({ activeKey: 1 });
+    await expect(getActiveShift(shiftRepository)).resolves.toEqual(activeShift);
+  });
+
+  it('exports one consistent snapshot while a concurrent settings write is queued', async () => {
+    const originalSettings = makeSettings({ monthlySalary: 36_960 });
+    const nextSettings = makeSettings({ monthlySalary: 50_800 });
+    let releaseShiftRead!: () => void;
+    let markShiftReadStarted!: () => void;
+    const shiftReadGate = new Promise<void>((resolve) => {
+      releaseShiftRead = resolve;
+    });
+    const shiftReadStarted = new Promise<void>((resolve) => {
+      markShiftReadStarted = resolve;
+    });
+    const originalToArray = db.shifts.toArray.bind(db.shifts);
+
+    await settingsRepository.saveSettings(originalSettings);
+    vi.spyOn(db.shifts, 'toArray').mockImplementationOnce(
+      (() => {
+        markShiftReadStarted();
+        return Dexie.waitFor(shiftReadGate).then(() => originalToArray());
+      }) as () => ReturnType<typeof db.shifts.toArray>
+    );
+
+    const backupPromise = createBackup(db, '2026-06-24T12:00:00.000Z');
+    await shiftReadStarted;
+    const writePromise = Dexie.ignoreTransaction(() =>
+      settingsRepository.saveSettings(nextSettings)
+    );
+
+    releaseShiftRead();
+    const backup = await backupPromise;
+    await writePromise;
+
+    expect(backup.settings.monthlySalary).toBe(originalSettings.monthlySalary);
+    await expect(settingsRepository.getSettings()).resolves.toMatchObject({
+      monthlySalary: nextSettings.monthlySalary
     });
   });
 
@@ -2625,6 +2749,50 @@ describe('backup use-cases', () => {
     expect(() => parseBackupJson(source)).toThrow(BackupValidationError);
     expect(() => parseBackupJson(source)).toThrow('Тікет не може завершуватись раніше старту.');
   });
+
+  it.each([BACKUP_SCHEMA_VERSION, 15])(
+    'rejects a ticket norm above 999 in schema v%s',
+    (schemaVersion) => {
+      const parsed = JSON.parse(
+        serializeBackup({
+          schemaVersion: BACKUP_SCHEMA_VERSION,
+          exportedAt: '2026-06-24T12:00:00.000Z',
+          settings: makeSettings(),
+          shifts: [
+            makeShift({
+              id: 'invalid-norm-shift',
+              endTime: '2026-06-10T14:30:00.000Z',
+              workTickets: [
+                {
+                  id: 'invalid-norm-ticket',
+                  normPerEightHours: 999,
+                  startedAt: '2026-06-10T07:00:00.000Z',
+                  endedAt: '2026-06-10T08:00:00.000Z',
+                  actualQuantity: 9,
+                  manualCompletionPercent: null,
+                  downtimeMinutes: 0,
+                  createdAt: '2026-06-10T07:00:00.000Z',
+                  updatedAt: '2026-06-10T08:00:00.000Z'
+                }
+              ]
+            })
+          ],
+          enterpriseSchedule: [],
+          reviewedScheduleWarnings: [],
+          confirmedSaturdayDoubleRateMonths: []
+        })
+      );
+      parsed.schemaVersion = schemaVersion;
+      parsed.shifts[0].workTickets[0].normPerEightHours = 1_000;
+
+      if (schemaVersion < BACKUP_SCHEMA_VERSION) {
+        delete parsed.shifts[0].workTickets[0].manualCompletionPercent;
+      }
+
+      expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow(BackupValidationError);
+      expect(() => parseBackupJson(JSON.stringify(parsed))).toThrow('невалідну норму');
+    }
+  );
 
   it.each([
     ['відʼємний', -1],

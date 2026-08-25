@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
 import 'fake-indexeddb/auto';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
 import type { Shift } from '../../../entities/shift';
-import { localDb } from '../../../shared/lib/local-db';
+import { localDb, ShiftRepository } from '../../../shared/lib/local-db';
 import { HistoryPage } from './HistoryPage';
 
 const settings: Settings = {
@@ -102,12 +102,53 @@ beforeEach(async () => {
 
 afterEach(async () => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   await localDb.shifts.clear();
   await localDb.appMeta.clear();
 });
 
 describe('HistoryPage', () => {
+  it('ignores an older load response after the visible month changes', async () => {
+    let resolveJuly!: (shifts: Shift[]) => void;
+    const julyRequest = new Promise<Shift[]>((resolve) => {
+      resolveJuly = resolve;
+    });
+    const augustShift = makeShift({
+      id: 'august-latest',
+      date: '2026-08-05',
+      startTime: '2026-08-05T06:30:00.000+03:00',
+      endTime: '2026-08-05T14:30:00.000+03:00',
+      note: 'Найновіша відповідь'
+    });
+    vi.spyOn(ShiftRepository.prototype, 'getShiftsBetween').mockImplementation(
+      (start) => start === '2026-07-01' ? julyRequest : Promise.resolve([augustShift])
+    );
+    const commonProps = {
+      settings,
+      selectedRange: null,
+      onCalendarMonthChange: vi.fn(),
+      onSelectedRangeChange: vi.fn(),
+      activeRangePreset: 'month' as const,
+      isAllTimePresetEnabled: true,
+      onRangePresetSelect: vi.fn()
+    };
+    const { rerender } = render(
+      <HistoryPage {...commonProps} calendarMonth={{ year: 2026, month: 7 }} />
+    );
+
+    rerender(<HistoryPage {...commonProps} calendarMonth={{ year: 2026, month: 8 }} />);
+    expect(await screen.findByText('Найновіша відповідь')).toBeTruthy();
+
+    await act(async () => {
+      resolveJuly([makeShift({ id: 'july-stale', note: 'Застаріла відповідь' })]);
+      await julyRequest;
+    });
+
+    expect(screen.queryByText('Застаріла відповідь')).toBeNull();
+    expect(screen.getByText('Найновіша відповідь')).toBeTruthy();
+  });
+
   it('shows a saved shift note', async () => {
     render(
       <HistoryPage

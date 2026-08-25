@@ -11,9 +11,13 @@ import type {
 } from '../../../../entities/shift';
 import {
   SHIFT_NOTE_MAX_LENGTH,
+  assertWorkTicketNorm,
+  isValidWorkTicketNorm,
   validateAndSortWorkTickets
 } from '../../../../entities/shift';
 import type { ShifterDatabase } from '../database';
+import type { StoredShift } from '../types';
+import { getCalendarMonthRange } from '../../date-time';
 
 export class ShiftConstraintError extends Error {
   constructor(message: string) {
@@ -30,7 +34,7 @@ const assertNoOpenTicketInCompletedShift = (shift: Shift): void => {
   }
 };
 
-type LegacyShiftRecord = Partial<Shift> & Pick<
+type LegacyShiftRecord = Partial<StoredShift> & Pick<
   Shift,
   | 'id'
   | 'date'
@@ -70,8 +74,7 @@ const normalizeWorkTickets = (value: unknown): WorkTicket[] => {
 
       return (
         typeof candidate.id === 'string' &&
-        isFiniteNumber(candidate.normPerEightHours) &&
-        candidate.normPerEightHours >= 0 &&
+        isValidWorkTicketNorm(candidate.normPerEightHours) &&
         typeof candidate.startedAt === 'string' &&
         (candidate.endedAt === null || typeof candidate.endedAt === 'string') &&
         typeof candidate.createdAt === 'string' &&
@@ -125,15 +128,25 @@ const normalizeGradeSnapshot = (value: unknown): GradeSnapshot | null => {
   };
 };
 
-export const normalizeShiftRecord = (record: LegacyShiftRecord): Shift => ({
-  ...record,
-  baseHourlyRateSnapshot: isFiniteNumber(record.baseHourlyRateSnapshot)
-    ? record.baseHourlyRateSnapshot
-    : record.hourlyRateSnapshot,
-  gradeSnapshot: normalizeGradeSnapshot(record.gradeSnapshot),
-  workTickets: normalizeWorkTickets(record.workTickets),
-  note: typeof record.note === 'string' ? record.note : ''
-});
+export const normalizeShiftRecord = (record: LegacyShiftRecord): Shift => {
+  const { activeKey: _activeKey, ...domainRecord } = record;
+
+  return {
+    ...domainRecord,
+    baseHourlyRateSnapshot: isFiniteNumber(record.baseHourlyRateSnapshot)
+      ? record.baseHourlyRateSnapshot
+      : record.hourlyRateSnapshot,
+    gradeSnapshot: normalizeGradeSnapshot(record.gradeSnapshot),
+    workTickets: normalizeWorkTickets(record.workTickets),
+    note: typeof record.note === 'string' ? record.note : ''
+  };
+};
+
+export const toStoredShift = (shift: Shift): StoredShift => {
+  const { activeKey: _activeKey, ...domainShift } = shift as Shift & { activeKey?: 1 };
+
+  return shift.endTime === null ? { ...domainShift, activeKey: 1 } : domainShift;
+};
 
 const prepareShiftForWrite = (record: Shift): Shift => {
   if (typeof record.note !== 'string' || record.note.length > SHIFT_NOTE_MAX_LENGTH) {
@@ -141,9 +154,7 @@ const prepareShiftForWrite = (record: Shift): Shift => {
   }
 
   record.workTickets.forEach((ticket) => {
-    if (!Number.isFinite(ticket.normPerEightHours) || ticket.normPerEightHours <= 0) {
-      throw new Error('Норма має бути більшою за 0.');
-    }
+    assertWorkTicketNorm(ticket.normPerEightHours);
 
     if (
       ticket.actualQuantity !== null &&
@@ -179,20 +190,6 @@ const prepareShiftForWrite = (record: Shift): Shift => {
   return shift;
 };
 
-const getMonthRange = (
-  year: number,
-  month: number
-): {
-  start: LocalDateString;
-  end: LocalDateString;
-} => {
-  const start = `${year}-${String(month).padStart(2, '0')}-01`;
-  const lastDay = new Date(year, month, 0).getDate();
-  const end = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-
-  return { start, end };
-};
-
 export class ShiftRepository {
   constructor(private readonly db: ShifterDatabase) {}
 
@@ -206,7 +203,7 @@ export class ShiftRepository {
         await this.assertNoOtherActiveShift();
       }
 
-      await this.db.shifts.add(normalizedShift);
+      await this.db.shifts.add(toStoredShift(normalizedShift));
     });
 
     return normalizedShift;
@@ -230,7 +227,7 @@ export class ShiftRepository {
         await this.assertNoOtherActiveShift(normalizedShift.id);
       }
 
-      await this.db.shifts.put(normalizedShift);
+      await this.db.shifts.put(toStoredShift(normalizedShift));
     });
 
     return normalizedShift;
@@ -266,7 +263,7 @@ export class ShiftRepository {
   }
 
   async getShiftsByMonth(year: number, month: number): Promise<Shift[]> {
-    const { start, end } = getMonthRange(year, month);
+    const { start, end } = getCalendarMonthRange({ year, month });
 
     const shifts = await this.db.shifts.where('date').between(start, end, true, true).sortBy('date');
 
@@ -294,8 +291,9 @@ export class ShiftRepository {
   }
 
   async getActiveShift(): Promise<Shift | null> {
-    const shifts = (await this.db.shifts.toArray()).map(normalizeShiftRecord);
-    return shifts.find(isActiveShift) ?? null;
+    const shift = await this.db.shifts.where('activeKey').equals(1).first();
+
+    return shift ? normalizeShiftRecord(shift) : null;
   }
 
   async getLatestCompletedShift(): Promise<Shift | null> {
@@ -337,8 +335,8 @@ export class ShiftRepository {
   }
 
   private async assertNoOtherActiveShift(ignoredShiftId?: string): Promise<void> {
-    const shifts = await this.db.shifts.toArray();
-    const existing = shifts.find((shift) => shift.id !== ignoredShiftId && isActiveShift(shift));
+    const shifts = await this.db.shifts.where('activeKey').equals(1).toArray();
+    const existing = shifts.find((shift) => shift.id !== ignoredShiftId);
 
     if (existing) {
       throw new ShiftConstraintError('Active shift already exists');

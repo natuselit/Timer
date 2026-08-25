@@ -292,12 +292,6 @@
   );
 }
 
-.main-page__metric--boosted {
-  grid-column: 1 / -1;
-  border-color: var(--color-border);
-  background: var(--color-background);
-}
-
 .main-page__metric:last-child:nth-child(even) {
   grid-column: 1 / -1;
 }
@@ -343,10 +337,6 @@
   font-size: 1.34rem;
   text-align: right;
   white-space: nowrap;
-}
-
-.main-page__metric--boosted strong {
-  color: var(--color-text-primary);
 }
 
 .main-page__shift-note {
@@ -1313,14 +1303,6 @@
   opacity: 0.65;
 }
 
-.main-page__ticket-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 4px;
-  align-items: center;
-}
-
-.main-page__ticket-actions > button,
 .main-page__ticket-more > button {
   display: inline-grid;
   width: 38px;
@@ -1331,11 +1313,6 @@
   background: color-mix(in srgb, var(--color-background) 76%, var(--color-surface));
   color: var(--color-primary);
   cursor: pointer;
-}
-
-.main-page__ticket-actions > .main-page__ticket-action--danger {
-  background: color-mix(in srgb, var(--color-error-surface) 62%, var(--color-surface));
-  color: var(--color-error);
 }
 
 .main-page__ticket-more {
@@ -1392,7 +1369,6 @@
   color: var(--color-error);
 }
 
-.main-page__ticket-actions button:disabled,
 .main-page__ticket-edit-form button:disabled {
   cursor: wait;
   opacity: 0.6;

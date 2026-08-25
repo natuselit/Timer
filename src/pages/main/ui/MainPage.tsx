@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react';
 import {
   ArrowRight,
   CalendarClock,
@@ -22,15 +31,13 @@ import {
   type OvertimeStrategy,
   type Settings
 } from '../../../entities/settings';
-import { AnalyticsPage } from '../../analytics';
-import { HistoryPage } from '../../history';
-import { SchedulePage } from '../../schedule';
-import { SettingsPage } from '../../settings';
 import {
   calculateSalaryBreakdown,
   calculateTicketProductionSummary,
   detectShiftType,
   getEffectiveCoefficient,
+  isValidWorkTicketNorm,
+  normalizeWorkTicketNormDraft,
   SHIFT_NOTE_MAX_LENGTH,
   type ISODateTimeString,
   type Shift,
@@ -81,7 +88,11 @@ import {
   copyTextToClipboard,
   formatShiftClipboardText
 } from '../../../shared/lib/clipboard/shiftClipboard';
-import type { NavigationItem } from '../../../shared/config/navigation';
+import {
+  ACTIVE_NAVIGATION_SESSION_KEY,
+  getStoredNavigationItem,
+  type NavigationItem
+} from '../../../shared/config/navigation';
 import {
   calculateMonthlyOvertimePlan,
   OVERTIME_STRATEGY_LABELS,
@@ -89,6 +100,19 @@ import {
   type OvertimeScenario
 } from '../../../shared/lib/shifts/overtimePlanner';
 import './MainPage.css';
+
+const HistoryPage = lazy(() =>
+  import('../../history').then((module) => ({ default: module.HistoryPage }))
+);
+const AnalyticsPage = lazy(() =>
+  import('../../analytics').then((module) => ({ default: module.AnalyticsPage }))
+);
+const SchedulePage = lazy(() =>
+  import('../../schedule').then((module) => ({ default: module.SchedulePage }))
+);
+const SettingsPage = lazy(() =>
+  import('../../settings').then((module) => ({ default: module.SettingsPage }))
+);
 
 type MainPageProps = {
   settings: Settings;
@@ -119,12 +143,12 @@ type TicketEditDraft = {
 
 type DowntimeAdjustmentMode = 'add' | 'subtract';
 
-const createEmptyTicketEditDraft = (): TicketEditDraft => ({
-  normPerEightHours: '',
-  startedAt: '',
-  endedAt: '',
-  actualQuantity: '',
-  downtimeMinutes: '0'
+const createTicketEditDraft = (ticket: WorkTicket): TicketEditDraft => ({
+  normPerEightHours: String(ticket.normPerEightHours),
+  startedAt: getTimeInputValue(ticket.startedAt),
+  endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : '',
+  actualQuantity: ticket.actualQuantity === null ? '' : String(ticket.actualQuantity),
+  downtimeMinutes: String(ticket.downtimeMinutes)
 });
 
 const shiftRepository = new ShiftRepository(localDb);
@@ -162,12 +186,6 @@ const getGreetingName = (settings: Settings): string =>
 const getActiveWorkTicket = (shift: Shift) =>
   shift.workTickets.find((ticket) => ticket.endedAt === null) ?? null;
 
-const normalizeTicketNormDraft = (value: string): string => {
-  const digits = value.replace(/\D/g, '');
-
-  return digits === '' ? '' : String(Math.min(Number(digits), 999));
-};
-
 const getTicketErrorMessage = (error: unknown): string =>
   error instanceof Error && error.message ? error.message : 'Не вдалося оновити тікет.';
 
@@ -188,6 +206,59 @@ const getTicketTargets = (
     gradeNormPercents
   });
 };
+
+function TimerLiveMetrics({
+  shift,
+  incognitoEnabled
+}: {
+  shift: Shift;
+  incognitoEnabled: boolean;
+}) {
+  const [liveNow, setLiveNow] = useState(() => toLocalIsoString(new Date()));
+
+  useEffect(() => {
+    setLiveNow(toLocalIsoString(new Date()));
+    const intervalId = window.setInterval(() => {
+      setLiveNow(toLocalIsoString(new Date()));
+    }, 1_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [shift.id]);
+
+  const currentEarning = useMemo(
+    () => calculateSalaryBreakdown({ ...shift, endTime: liveNow }).totalAmount,
+    [liveNow, shift]
+  );
+
+  return (
+    <div className="main-page__metrics main-page__metrics--active" aria-label="Поточний стан зміни">
+      <article className="main-page__metric main-page__metric--money">
+        <span>Зароблено зараз</span>
+        <strong>{formatMoney(currentEarning, incognitoEnabled)}</strong>
+      </article>
+      <article className="main-page__metric">
+        <span>Прихід-вихід</span>
+        <strong>{formatTime(shift.startTime)} - зараз</strong>
+      </article>
+      <article className="main-page__metric">
+        <span>Відробив</span>
+        <strong>{formatDurationMinutes(getDurationMinutes(shift.startTime, liveNow))}</strong>
+      </article>
+      <article className="main-page__metric">
+        <span>Ставка</span>
+        <strong>{formatHourlyRate(shift.baseHourlyRateSnapshot, incognitoEnabled)}</strong>
+      </article>
+      <article className="main-page__metric">
+        <span>Рівень</span>
+        <strong>
+          {shift.gradeSnapshot
+            ? `G${shift.gradeSnapshot.currentGrade} → G${shift.gradeSnapshot.desiredGrade}`
+            : 'Без snapshot'}
+        </strong>
+      </article>
+    </div>
+  );
+}
 
 function HoldButton({ label, disabled = false, tone = 'default', onConfirm }: HoldButtonProps) {
   const [isHolding, setIsHolding] = useState(false);
@@ -249,6 +320,245 @@ function HoldButton({ label, disabled = false, tone = 'default', onConfirm }: Ho
   );
 }
 
+type ShiftNoteEditorProps = {
+  initialNote: string;
+  shiftId: string;
+  onSave: (note: string) => Promise<void>;
+};
+
+const ShiftNoteEditor = memo(function ShiftNoteEditor({
+  initialNote,
+  shiftId,
+  onSave
+}: ShiftNoteEditorProps) {
+  const [draft, setDraft] = useState(initialNote);
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [error, setError] = useState<string | null>(null);
+  const previousInitialNoteRef = useRef(initialNote);
+  const previousShiftIdRef = useRef(shiftId);
+
+  useEffect(() => {
+    const previousInitialNote = previousInitialNoteRef.current;
+    const didShiftChange = previousShiftIdRef.current !== shiftId;
+
+    previousInitialNoteRef.current = initialNote;
+    previousShiftIdRef.current = shiftId;
+
+    if (didShiftChange) {
+      setDraft(initialNote);
+      setStatus('idle');
+      setError(null);
+      return;
+    }
+
+    setDraft((current) => current === previousInitialNote ? initialNote : current);
+  }, [initialNote, shiftId]);
+
+  const save = async () => {
+    setStatus('saving');
+    setError(null);
+
+    try {
+      await onSave(draft);
+      setStatus('saved');
+    } catch (saveError) {
+      setStatus('idle');
+      setError(
+        saveError instanceof Error && saveError.message
+          ? saveError.message
+          : 'Не вдалося зберегти нотатку.'
+      );
+    }
+  };
+
+  return (
+    <section className="main-page__shift-note" aria-labelledby="shift-note-title">
+      <div className="main-page__shift-note-heading">
+        <div>
+          <p className="main-page__label">Для цієї зміни</p>
+          <h3 id="shift-note-title">
+            <StickyNote size={18} aria-hidden="true" />
+            Нотатка
+          </h3>
+        </div>
+        <span aria-label={`${draft.length} із ${SHIFT_NOTE_MAX_LENGTH} символів`}>
+          {draft.length}/{SHIFT_NOTE_MAX_LENGTH}
+        </span>
+      </div>
+      <textarea
+        aria-label="Нотатка до зміни"
+        maxLength={SHIFT_NOTE_MAX_LENGTH}
+        placeholder="Наприклад: номер партії, особливості зміни..."
+        rows={3}
+        value={draft}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          setStatus('idle');
+          setError(null);
+        }}
+      />
+      <div className="main-page__shift-note-footer">
+        <p>Зберігається локально разом зі зміною.</p>
+        <button
+          type="button"
+          disabled={status === 'saving' || draft === initialNote}
+          onClick={() => void save()}
+        >
+          {status === 'saving'
+            ? 'Збереження...'
+            : status === 'saved'
+              ? 'Збережено'
+              : 'Зберегти'}
+        </button>
+      </div>
+      {error ? (
+        <p className="main-page__error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </section>
+  );
+});
+
+type TicketEditFormProps = {
+  isActive: boolean;
+  isPending: boolean;
+  ticket: WorkTicket;
+  onCancel: () => void;
+  onChange: () => void;
+  onSave: (ticketId: string, draft: TicketEditDraft) => Promise<void>;
+};
+
+function TicketEditForm({
+  isActive,
+  isPending,
+  ticket,
+  onCancel,
+  onChange,
+  onSave
+}: TicketEditFormProps) {
+  const [draft, setDraft] = useState(() => createTicketEditDraft(ticket));
+
+  const changeDraft = (key: keyof TicketEditDraft, value: string) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    onChange();
+  };
+
+  const completeTimeDraft = (key: 'startedAt' | 'endedAt') => {
+    setDraft((current) => ({
+      ...current,
+      [key]: current[key].trim() ? normalizeTimeInput(current[key]) : ''
+    }));
+  };
+
+  return (
+    <div className="main-page__ticket-edit-form">
+      <div className="main-page__ticket-edit-header">
+        <strong>Редагування тікета</strong>
+        <small>Час у форматі HH:mm</small>
+      </div>
+      <div className="main-page__ticket-edit-fields">
+        <label>
+          <span>Норма, шт</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={3}
+            pattern="[0-9]*"
+            value={draft.normPerEightHours}
+            onChange={(event) =>
+              changeDraft(
+                'normPerEightHours',
+                normalizeWorkTicketNormDraft(event.target.value)
+              )
+            }
+          />
+        </label>
+        <label>
+          <span>Взято</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={5}
+            pattern="[0-9]{1,2}:?[0-9]{0,2}"
+            placeholder={isActive ? '06:30' : undefined}
+            value={draft.startedAt}
+            onBlur={() => completeTimeDraft('startedAt')}
+            onChange={(event) =>
+              changeDraft('startedAt', formatTimeInputDraft(event.target.value))
+            }
+          />
+        </label>
+        <label>
+          <span>Завершено</span>
+          <input
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={5}
+            pattern="[0-9]{1,2}:?[0-9]{0,2}"
+            placeholder={isActive ? 'Триває' : undefined}
+            disabled={isActive}
+            value={draft.endedAt}
+            onBlur={() => completeTimeDraft('endedAt')}
+            onChange={(event) =>
+              changeDraft('endedAt', formatTimeInputDraft(event.target.value))
+            }
+          />
+        </label>
+        {!isActive ? (
+          <>
+            <label>
+              <span>Факт, шт</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                pattern="[0-9]*"
+                value={draft.actualQuantity}
+                placeholder="Не внесено"
+                onChange={(event) =>
+                  changeDraft('actualQuantity', event.target.value.replace(/\D/g, ''))
+                }
+              />
+            </label>
+            <label>
+              <span>Простій, хв</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                pattern="[0-9]*"
+                value={draft.downtimeMinutes}
+                onChange={(event) =>
+                  changeDraft('downtimeMinutes', event.target.value.replace(/\D/g, ''))
+                }
+              />
+            </label>
+          </>
+        ) : null}
+      </div>
+      <div className="main-page__ticket-edit-actions">
+        <button
+          className="main-page__ticket-edit-save"
+          type="button"
+          disabled={isPending}
+          onClick={() => void onSave(ticket.id, draft)}
+        >
+          <Check size={15} aria-hidden="true" />
+          <span>Зберегти</span>
+        </button>
+        <button type="button" disabled={isPending} onClick={onCancel}>
+          <X size={15} aria-hidden="true" />
+          <span>Скасувати</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 type OvertimePlannerCardProps = {
   plan: MonthlyOvertimePlan;
   settings: Settings;
@@ -276,7 +586,7 @@ const formatScenarioIncome = (
     : `${minimum} – ${maximum}`;
 };
 
-function OvertimePlannerCard({
+const OvertimePlannerCard = memo(function OvertimePlannerCard({
   plan,
   settings,
   selectedShiftType,
@@ -291,7 +601,6 @@ function OvertimePlannerCard({
   const [strategyError, setStrategyError] = useState<string | null>(null);
   const [isSkippingDate, setIsSkippingDate] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
-  const selectedScenario = plan.selectedScenario;
   const isIncomeHidden = settings.incognitoEnabled;
   const earnedPercent =
     isIncomeHidden
@@ -620,7 +929,7 @@ function OvertimePlannerCard({
       ) : null}
     </section>
   );
-}
+});
 
 export function MainPage({
   settings,
@@ -628,23 +937,19 @@ export function MainPage({
   onSettingsChange,
   onLocalDataReplace
 }: MainPageProps) {
-  const [activePage, setActivePage] = useState<NavigationItem['id']>('timer');
+  const [activePage, setActivePage] = useState<NavigationItem['id']>(() =>
+    getStoredNavigationItem(
+      typeof window === 'undefined' ? null : window.sessionStorage
+    )
+  );
   const [activeShift, setActiveShift] = useState<Shift | null>(null);
   const [overtimeMonthShifts, setOvertimeMonthShifts] = useState<Shift[]>([]);
   const [preferredShiftType, setPreferredShiftType] = useState<ShiftType | null>(null);
   const [now, setNow] = useState(() => toLocalIsoString(new Date()));
   const [isLoadingShift, setIsLoadingShift] = useState(true);
   const [timerError, setTimerError] = useState<string | null>(null);
-  const [shiftNoteDraft, setShiftNoteDraft] = useState('');
-  const [shiftNoteStatus, setShiftNoteStatus] = useState<
-    'idle' | 'saving' | 'saved'
-  >('idle');
-  const [shiftNoteError, setShiftNoteError] = useState<string | null>(null);
   const [ticketNormDraft, setTicketNormDraft] = useState('');
   const [editingTicketId, setEditingTicketId] = useState<string | null>(null);
-  const [ticketEditDraft, setTicketEditDraft] = useState<TicketEditDraft>(
-    createEmptyTicketEditDraft
-  );
   const [ticketError, setTicketError] = useState<string | null>(null);
   const [isAddingTicket, setIsAddingTicket] = useState(false);
   const [pendingTicketId, setPendingTicketId] = useState<string | null>(null);
@@ -664,7 +969,7 @@ export function MainPage({
     message: string;
   } | null>(null);
   const [isTogglingIncognito, setIsTogglingIncognito] = useState(false);
-  const [localDataRefreshKey, setLocalDataRefreshKey] = useState(0);
+  const [dataRevision, setDataRevision] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
   const [sharedCalendarRange, setSharedCalendarRange] = useState<CalendarDateRange | null>(
     () => getSingleDateRange(getLocalDateKey(new Date()))
@@ -682,11 +987,21 @@ export function MainPage({
   const downtimeInputRef = useRef<HTMLInputElement | null>(null);
   const completeTicketButtonRef = useRef<HTMLButtonElement | null>(null);
   const actualQuantityInputRef = useRef<HTMLInputElement | null>(null);
+  const externalDataVersionRef = useRef(dataVersion);
   const currentMonthKey = now.slice(0, 7);
 
   const notifyLocalDataChange = useCallback(() => {
-    setLocalDataRefreshKey((current) => current + 1);
+    setDataRevision((current) => current + 1);
   }, []);
+
+  useEffect(() => {
+    if (externalDataVersionRef.current === dataVersion) {
+      return;
+    }
+
+    externalDataVersionRef.current = dataVersion;
+    setDataRevision((current) => current + 1);
+  }, [dataVersion]);
 
   const dismissCalendarTutorial = useCallback(() => {
     calendarTutorialDismissedRef.current = true;
@@ -696,6 +1011,14 @@ export function MainPage({
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [activePage]);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(ACTIVE_NAVIGATION_SESSION_KEY, activePage);
+    } catch {
+      // Навігація продовжує працювати, навіть якщо сховище браузера недоступне.
+    }
   }, [activePage]);
 
   useEffect(() => {
@@ -729,6 +1052,10 @@ export function MainPage({
   }, [activePage]);
 
   useEffect(() => {
+    if (activePage !== 'timer') {
+      return;
+    }
+
     let isMounted = true;
 
     const loadTimerData = async () => {
@@ -759,7 +1086,7 @@ export function MainPage({
     return () => {
       isMounted = false;
     };
-  }, [currentMonthKey, dataVersion, localDataRefreshKey]);
+  }, [activePage, currentMonthKey, dataRevision]);
 
   useEffect(() => {
     if (activeCalendarRangePreset !== 'all') {
@@ -774,49 +1101,47 @@ export function MainPage({
   }, [activeCalendarRangePreset, allTimeRange]);
 
   useEffect(() => {
+    if (!calendarPageIds.has(activePage)) {
+      return;
+    }
+
     let isMounted = true;
 
     getLocalDataDateBounds(shiftRepository, enterpriseScheduleRepository)
       .then((bounds) => {
         if (isMounted) {
-          setAllTimeRange(bounds ? { start: bounds.start, end: bounds.end } : null);
+          const nextRange = bounds ? { start: bounds.start, end: bounds.end } : null;
+
+          setAllTimeRange((currentRange) =>
+            currentRange?.start === nextRange?.start && currentRange?.end === nextRange?.end
+              ? currentRange
+              : nextRange
+          );
         }
       })
       .catch(() => {
         if (isMounted) {
-          setAllTimeRange(null);
+          setAllTimeRange((currentRange) => currentRange === null ? currentRange : null);
         }
       });
 
     return () => {
       isMounted = false;
     };
-  }, [dataVersion, localDataRefreshKey]);
+  }, [activePage, dataRevision]);
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setNow(toLocalIsoString(new Date()));
-    }, activeShift ? 1_000 : 15_000);
-
-    return () => window.clearInterval(intervalId);
-  }, [activeShift]);
-
-  useEffect(() => {
-    setShiftNoteDraft(activeShift?.note ?? '');
-    setShiftNoteStatus('idle');
-    setShiftNoteError(null);
-  }, [activeShift?.id]);
-
-  const activeSalaryBreakdown = useMemo(() => {
-    if (!activeShift) {
-      return null;
+    if (activePage !== 'timer') {
+      return;
     }
 
-    return calculateSalaryBreakdown({
-      ...activeShift,
-      endTime: now
-    });
-  }, [activeShift, now]);
+    const intervalId = window.setInterval(() => {
+      setNow(toLocalIsoString(new Date()));
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [activePage]);
+
   const selectedShiftType = preferredShiftType ?? detectShiftType(now);
   const overtimePlan = useMemo(
     () =>
@@ -851,7 +1176,6 @@ export function MainPage({
       selectedShiftType
     ]
   );
-  const currentEarning = activeSalaryBreakdown?.totalAmount ?? 0;
   const currentCoefficient = activeShift
     ? getEffectiveCoefficient(activeShift, now)
     : null;
@@ -882,14 +1206,23 @@ export function MainPage({
       return [];
     }
 
-    return activeShift.workTickets
-      .filter((ticket): ticket is WorkTicket & { endedAt: ISODateTimeString } => ticket.endedAt !== null)
-      .map((ticket) => ({
-        ticket,
-        ticketNumber: activeShift.workTickets.findIndex(({ id }) => id === ticket.id) + 1,
-        targets: getTicketTargets(activeShift, ticket, ticket.endedAt, settings)
-      }))
-      .reverse();
+    const completed: Array<{
+      ticket: WorkTicket & { endedAt: ISODateTimeString };
+      ticketNumber: number;
+      targets: ReturnType<typeof getTicketTargets>;
+    }> = [];
+
+    activeShift.workTickets.forEach((ticket, index) => {
+      if (ticket.endedAt !== null) {
+        completed.push({
+          ticket: ticket as WorkTicket & { endedAt: ISODateTimeString },
+          ticketNumber: index + 1,
+          targets: getTicketTargets(activeShift, ticket, ticket.endedAt, settings)
+        });
+      }
+    });
+
+    return completed.reverse();
   }, [activeShift, settings.currentGrade, settings.desiredGrade, settings.gradeNormPercents]);
 
   useEffect(() => {
@@ -1041,10 +1374,13 @@ export function MainPage({
 
       setNow(startedAt);
       setActiveShift(createdShift);
+      setOvertimeMonthShifts((current) => [
+        ...current.filter((shift) => shift.id !== createdShift.id),
+        createdShift
+      ]);
       setPreferredShiftType(null);
       setTicketNormDraft('');
       setTicketError(null);
-      notifyLocalDataChange();
     } catch (error) {
       setTimerError(getTimerErrorMessage(error));
     }
@@ -1077,7 +1413,6 @@ export function MainPage({
       );
       setTicketNormDraft('');
       setTicketError(null);
-      notifyLocalDataChange();
 
       if (completedShift.endTime !== null) {
         const clipboardText = formatShiftClipboardText(settings, {
@@ -1098,45 +1433,25 @@ export function MainPage({
     }
   };
 
-  const saveShiftNote = async () => {
+  const saveShiftNote = useCallback(async (note: string) => {
     if (!activeShift) {
-      return;
+      throw new Error('Активну зміну не знайдено.');
     }
 
-    setShiftNoteStatus('saving');
-    setShiftNoteError(null);
+    const updatedShift = await updateActiveShiftNote(shiftRepository, {
+      shiftId: activeShift.id,
+      note,
+      updatedAt: toLocalIsoString(new Date())
+    });
 
-    try {
-      const updatedShift = await updateActiveShiftNote(shiftRepository, {
-        shiftId: activeShift.id,
-        note: shiftNoteDraft,
-        updatedAt: toLocalIsoString(new Date())
-      });
-
-      setActiveShift(updatedShift);
-      setShiftNoteDraft(updatedShift.note);
-      setShiftNoteStatus('saved');
-      notifyLocalDataChange();
-    } catch (error) {
-      setShiftNoteStatus('idle');
-      setShiftNoteError(
-        error instanceof Error && error.message
-          ? error.message
-          : 'Не вдалося зберегти нотатку.'
-      );
-    }
-  };
+    setActiveShift(updatedShift);
+  }, [activeShift]);
 
   const parseTicketNormDraft = (value: string): number | null => {
     const normPerEightHours = Number(value);
 
-    if (!Number.isFinite(normPerEightHours) || normPerEightHours <= 0) {
-      setTicketError('Норма має бути більшою за 0.');
-      return null;
-    }
-
-    if (normPerEightHours > 999) {
-      setTicketError('Норма має бути не більшою за 999.');
+    if (!isValidWorkTicketNorm(normPerEightHours)) {
+      setTicketError('Норма має бути більшою за 0 і не більшою за 999.');
       return null;
     }
 
@@ -1169,7 +1484,6 @@ export function MainPage({
       setNow(startedAt);
       setActiveShift(updatedShift);
       setTicketNormDraft('');
-      notifyLocalDataChange();
     } catch (error) {
       setTicketError(getTicketErrorMessage(error));
     } finally {
@@ -1252,7 +1566,6 @@ export function MainPage({
       setActiveShift(updatedShift);
       setDowntimeAdjustmentDraft('');
       setIsDowntimeModalOpen(false);
-      notifyLocalDataChange();
       window.setTimeout(() => ticketMenuButtonRef.current?.focus(), 0);
     } catch (error) {
       setDowntimeModalError(getTicketErrorMessage(error));
@@ -1293,7 +1606,6 @@ export function MainPage({
       setActiveShift(updatedShift);
       setTicketActualDraft('');
       setIsCompletionModalOpen(false);
-      notifyLocalDataChange();
     } catch (error) {
       setCompletionModalError(getTicketErrorMessage(error));
     } finally {
@@ -1303,46 +1615,26 @@ export function MainPage({
 
   const startTicketEdit = (ticket: WorkTicket) => {
     setEditingTicketId(ticket.id);
-    setTicketEditDraft({
-      normPerEightHours: String(ticket.normPerEightHours),
-      startedAt: getTimeInputValue(ticket.startedAt),
-      endedAt: ticket.endedAt ? getTimeInputValue(ticket.endedAt) : '',
-      actualQuantity: ticket.actualQuantity === null ? '' : String(ticket.actualQuantity),
-      downtimeMinutes: String(ticket.downtimeMinutes)
-    });
     setTicketError(null);
   };
 
   const cancelTicketEdit = () => {
     setEditingTicketId(null);
-    setTicketEditDraft(createEmptyTicketEditDraft());
     setTicketError(null);
   };
 
-  const changeTicketEditDraft = (key: keyof TicketEditDraft, value: string) => {
-    setTicketEditDraft((current) => ({ ...current, [key]: value }));
-    setTicketError(null);
-  };
-
-  const completeTicketTimeDraft = (key: 'startedAt' | 'endedAt') => {
-    setTicketEditDraft((current) => ({
-      ...current,
-      [key]: current[key].trim() ? normalizeTimeInput(current[key]) : ''
-    }));
-  };
-
-  const saveTicketEdit = async (ticketId: string) => {
+  const saveTicketEdit = async (ticketId: string, draft: TicketEditDraft) => {
     if (!activeShift) {
       return;
     }
 
-    const normPerEightHours = parseTicketNormDraft(ticketEditDraft.normPerEightHours);
+    const normPerEightHours = parseTicketNormDraft(draft.normPerEightHours);
 
     if (normPerEightHours === null) {
       return;
     }
 
-    if (!ticketEditDraft.startedAt.trim()) {
+    if (!draft.startedAt.trim()) {
       setTicketError('Вкажіть час взяття тікета.');
       return;
     }
@@ -1350,16 +1642,16 @@ export function MainPage({
     const updatedAt = toLocalIsoString(new Date());
     const startedAt = combineLocalDateAndTime(
       activeShift.date,
-      normalizeTimeInput(ticketEditDraft.startedAt)
+      normalizeTimeInput(draft.startedAt)
     );
-    const endedAt = ticketEditDraft.endedAt.trim()
-      ? combineLocalDateAndTime(activeShift.date, normalizeTimeInput(ticketEditDraft.endedAt))
+    const endedAt = draft.endedAt.trim()
+      ? combineLocalDateAndTime(activeShift.date, normalizeTimeInput(draft.endedAt))
       : null;
     const editedTicket = activeShift.workTickets.find((ticket) => ticket.id === ticketId);
-    const actualQuantity = ticketEditDraft.actualQuantity.trim() === ''
+    const actualQuantity = draft.actualQuantity.trim() === ''
       ? null
-      : Number(ticketEditDraft.actualQuantity);
-    const downtimeMinutes = Number(ticketEditDraft.downtimeMinutes);
+      : Number(draft.actualQuantity);
+    const downtimeMinutes = Number(draft.downtimeMinutes);
 
     if (
       !editedTicket ||
@@ -1388,8 +1680,6 @@ export function MainPage({
       setNow(updatedAt);
       setActiveShift(updatedShift);
       setEditingTicketId(null);
-      setTicketEditDraft(createEmptyTicketEditDraft());
-      notifyLocalDataChange();
     } catch (error) {
       setTicketError(getTicketErrorMessage(error));
     } finally {
@@ -1422,10 +1712,8 @@ export function MainPage({
 
       if (editingTicketId === ticket.id) {
         setEditingTicketId(null);
-        setTicketEditDraft(createEmptyTicketEditDraft());
       }
 
-      notifyLocalDataChange();
     } catch {
       setTicketError('Не вдалося видалити тікет.');
     } finally {
@@ -1461,30 +1749,37 @@ export function MainPage({
     },
     [allTimeRange, sharedCalendarMonth]
   );
-  const changeOvertimeStrategy = async (overtimeStrategy: OvertimeStrategy) => {
-    await onSettingsChange({
-      ...settings,
-      overtimeStrategy,
-      updatedAt: toLocalIsoString(new Date())
-    });
-  };
+  const changeOvertimeStrategy = useCallback(
+    async (overtimeStrategy: OvertimeStrategy) => {
+      await onSettingsChange({
+        ...settings,
+        overtimeStrategy,
+        updatedAt: toLocalIsoString(new Date())
+      });
+    },
+    [onSettingsChange, settings]
+  );
 
-  const markOvertimeDateUnavailable = async (date: string) => {
-    const today = now.slice(0, 10);
+  const markOvertimeDateUnavailable = useCallback(
+    async (date: string) => {
+      const today = now.slice(0, 10);
 
-    await onSettingsChange({
-      ...settings,
-      overtimeUnavailableDates: [
-        ...new Set([
-          ...settings.overtimeUnavailableDates.filter(
-            (unavailableDate) => unavailableDate >= today
-          ),
-          date
-        ])
-      ].sort(),
-      updatedAt: toLocalIsoString(new Date())
-    });
-  };
+      await onSettingsChange({
+        ...settings,
+        overtimeUnavailableDates: [
+          ...new Set([
+            ...settings.overtimeUnavailableDates.filter(
+              (unavailableDate) => unavailableDate >= today
+            ),
+            date
+          ])
+        ].sort(),
+        updatedAt: toLocalIsoString(new Date())
+      });
+    },
+    [now, onSettingsChange, settings]
+  );
+  const openSettings = useCallback(() => setActivePage('settings'), []);
 
   return (
     <>
@@ -1511,9 +1806,15 @@ export function MainPage({
         ) : null
       }
     >
+      <Suspense
+        fallback={
+          <section className="main-page__summary" role="status" aria-live="polite">
+            <p className="main-page__muted">Завантаження сторінки...</p>
+          </section>
+        }
+      >
       {activePage === 'history' ? (
         <HistoryPage
-          key={`history-${dataVersion}-${localDataRefreshKey}`}
           settings={settings}
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
@@ -1522,11 +1823,11 @@ export function MainPage({
           activeRangePreset={activeCalendarRangePreset}
           isAllTimePresetEnabled={allTimeRange !== null}
           onRangePresetSelect={selectCalendarRangePreset}
+          dataRevision={dataRevision}
           onDataChange={notifyLocalDataChange}
         />
       ) : activePage === 'analytics' ? (
         <AnalyticsPage
-          key={`analytics-${dataVersion}-${localDataRefreshKey}`}
           settings={settings}
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
@@ -1535,10 +1836,10 @@ export function MainPage({
           activeRangePreset={activeCalendarRangePreset}
           isAllTimePresetEnabled={allTimeRange !== null}
           onRangePresetSelect={selectCalendarRangePreset}
+          dataRevision={dataRevision}
         />
       ) : activePage === 'schedule' ? (
         <SchedulePage
-          key={`schedule-${dataVersion}`}
           settings={settings}
           calendarMonth={sharedCalendarMonth}
           selectedRange={sharedCalendarRange}
@@ -1547,6 +1848,7 @@ export function MainPage({
           activeRangePreset={activeCalendarRangePreset}
           isAllTimePresetEnabled={allTimeRange !== null}
           onRangePresetSelect={selectCalendarRangePreset}
+          dataRevision={dataRevision}
           onDataChange={notifyLocalDataChange}
         />
       ) : activePage === 'settings' ? (
@@ -1556,7 +1858,10 @@ export function MainPage({
           onLocalDataReplace={onLocalDataReplace}
           onLocalDataChange={notifyLocalDataChange}
         />
-      ) : isLoadingShift ? (
+      ) : null}
+      </Suspense>
+      {activePage === 'timer' ? (
+        isLoadingShift ? (
         <section className="main-page__summary main-page__timer-screen">
           <p className="main-page__muted">Завантаження таймера...</p>
           {timerError ? (
@@ -1593,32 +1898,10 @@ export function MainPage({
               </div>
             </div>
 
-            <div className="main-page__metrics main-page__metrics--active" aria-label="Поточний стан зміни">
-              <article className="main-page__metric main-page__metric--money">
-                <span>Зароблено зараз</span>
-                <strong>{formatMoney(currentEarning, settings.incognitoEnabled)}</strong>
-              </article>
-              <article className="main-page__metric">
-                <span>Прихід-вихід</span>
-                <strong>{formatTime(activeShift.startTime)} - зараз</strong>
-              </article>
-              <article className="main-page__metric">
-                <span>Відробив</span>
-                <strong>{formatDurationMinutes(getDurationMinutes(activeShift.startTime, now))}</strong>
-              </article>
-              <article className="main-page__metric">
-                <span>Ставка</span>
-                <strong>{formatHourlyRate(activeShift.baseHourlyRateSnapshot, settings.incognitoEnabled)}</strong>
-              </article>
-              <article className="main-page__metric">
-                <span>Рівень</span>
-                <strong>
-                  {activeShift.gradeSnapshot
-                    ? `G${activeShift.gradeSnapshot.currentGrade} → G${activeShift.gradeSnapshot.desiredGrade}`
-                    : 'Без snapshot'}
-                </strong>
-              </article>
-            </div>
+            <TimerLiveMetrics
+              shift={activeShift}
+              incognitoEnabled={settings.incognitoEnabled}
+            />
 
             {timerError ? (
               <p className="main-page__error" role="alert">
@@ -1635,7 +1918,7 @@ export function MainPage({
             onShiftTypeChange={setPreferredShiftType}
             onStrategyChange={changeOvertimeStrategy}
             onDateUnavailable={markOvertimeDateUnavailable}
-            onOpenSettings={() => setActivePage('settings')}
+            onOpenSettings={openSettings}
           />
 
           <section
@@ -1734,7 +2017,7 @@ export function MainPage({
                         value={ticketNormDraft}
                         placeholder="50"
                         onChange={(event) => {
-                          setTicketNormDraft(normalizeTicketNormDraft(event.target.value));
+                        setTicketNormDraft(normalizeWorkTicketNormDraft(event.target.value));
                           setTicketError(null);
                         }}
                       />
@@ -1747,89 +2030,14 @@ export function MainPage({
                   {activeWorkTicket && activeTicketTargets ? (
                     <div className="main-page__ticket-current">
                       {editingTicketId === activeWorkTicket.id ? (
-                        <div className="main-page__ticket-edit-form">
-                          <div className="main-page__ticket-edit-header">
-                            <strong>Редагування тікета</strong>
-                            <small>Час у форматі HH:mm</small>
-                          </div>
-                          <div className="main-page__ticket-edit-fields">
-                            <label>
-                              <span>Норма, шт</span>
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                autoComplete="off"
-                                maxLength={3}
-                                pattern="[0-9]*"
-                                value={ticketEditDraft.normPerEightHours}
-                                onChange={(event) => {
-                                  changeTicketEditDraft(
-                                    'normPerEightHours',
-                                    normalizeTicketNormDraft(event.target.value)
-                                  );
-                                }}
-                              />
-                            </label>
-                            <label>
-                              <span>Взято</span>
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                autoComplete="off"
-                                maxLength={5}
-                                pattern="[0-9]{1,2}:?[0-9]{0,2}"
-                                placeholder="06:30"
-                                value={ticketEditDraft.startedAt}
-                                onBlur={() => completeTicketTimeDraft('startedAt')}
-                                onChange={(event) =>
-                                  changeTicketEditDraft(
-                                    'startedAt',
-                                    formatTimeInputDraft(event.target.value)
-                                  )
-                                }
-                              />
-                            </label>
-                            <label>
-                              <span>Завершено</span>
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                autoComplete="off"
-                                maxLength={5}
-                                pattern="[0-9]{1,2}:?[0-9]{0,2}"
-                                placeholder="Триває"
-                                disabled
-                                value={ticketEditDraft.endedAt}
-                                onBlur={() => completeTicketTimeDraft('endedAt')}
-                                onChange={(event) =>
-                                  changeTicketEditDraft(
-                                    'endedAt',
-                                    formatTimeInputDraft(event.target.value)
-                                  )
-                                }
-                              />
-                            </label>
-                          </div>
-                          <div className="main-page__ticket-edit-actions">
-                            <button
-                              className="main-page__ticket-edit-save"
-                              type="button"
-                              disabled={pendingTicketId !== null}
-                              onClick={() => void saveTicketEdit(activeWorkTicket.id)}
-                            >
-                              <Check size={15} aria-hidden="true" />
-                              <span>Зберегти</span>
-                            </button>
-                            <button
-                              type="button"
-                              disabled={pendingTicketId !== null}
-                              onClick={cancelTicketEdit}
-                            >
-                              <X size={15} aria-hidden="true" />
-                              <span>Скасувати</span>
-                            </button>
-                          </div>
-                        </div>
+                        <TicketEditForm
+                          isActive
+                          isPending={pendingTicketId !== null}
+                          ticket={activeWorkTicket}
+                          onCancel={cancelTicketEdit}
+                          onChange={() => setTicketError(null)}
+                          onSave={saveTicketEdit}
+                        />
                       ) : null}
                       <div className="main-page__ticket-plan">
                         <div className="main-page__ticket-plan-header">
@@ -1892,121 +2100,14 @@ export function MainPage({
                             aria-label={`Підсумок тікета ${formatTime(ticket.startedAt)}`}
                           >
                             {isEditingTicket ? (
-                              <>
-                                <div className="main-page__ticket-edit-form">
-                                  <div className="main-page__ticket-edit-header">
-                                    <strong>Редагування тікета</strong>
-                                    <small>Час у форматі HH:mm</small>
-                                  </div>
-                                  <div className="main-page__ticket-edit-fields">
-                                    <label>
-                                      <span>Норма, шт</span>
-                                      <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        autoComplete="off"
-                                        maxLength={3}
-                                        pattern="[0-9]*"
-                                        value={ticketEditDraft.normPerEightHours}
-                                        onChange={(event) => {
-                                          changeTicketEditDraft(
-                                            'normPerEightHours',
-                                            normalizeTicketNormDraft(event.target.value)
-                                          );
-                                        }}
-                                      />
-                                    </label>
-                                    <label>
-                                      <span>Взято</span>
-                                      <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        autoComplete="off"
-                                        maxLength={5}
-                                        pattern="[0-9]{1,2}:?[0-9]{0,2}"
-                                        value={ticketEditDraft.startedAt}
-                                        onBlur={() => completeTicketTimeDraft('startedAt')}
-                                        onChange={(event) =>
-                                          changeTicketEditDraft(
-                                            'startedAt',
-                                            formatTimeInputDraft(event.target.value)
-                                          )
-                                        }
-                                      />
-                                    </label>
-                                    <label>
-                                      <span>Завершено</span>
-                                      <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        autoComplete="off"
-                                        maxLength={5}
-                                        pattern="[0-9]{1,2}:?[0-9]{0,2}"
-                                        value={ticketEditDraft.endedAt}
-                                        onBlur={() => completeTicketTimeDraft('endedAt')}
-                                        onChange={(event) =>
-                                          changeTicketEditDraft(
-                                            'endedAt',
-                                            formatTimeInputDraft(event.target.value)
-                                          )
-                                        }
-                                      />
-                                    </label>
-                                    <label>
-                                      <span>Факт, шт</span>
-                                      <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        autoComplete="off"
-                                        pattern="[0-9]*"
-                                        value={ticketEditDraft.actualQuantity}
-                                        placeholder="Не внесено"
-                                        onChange={(event) =>
-                                          changeTicketEditDraft(
-                                            'actualQuantity',
-                                            event.target.value.replace(/\D/g, '')
-                                          )
-                                        }
-                                      />
-                                    </label>
-                                    <label>
-                                      <span>Простій, хв</span>
-                                      <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        autoComplete="off"
-                                        pattern="[0-9]*"
-                                        value={ticketEditDraft.downtimeMinutes}
-                                        onChange={(event) =>
-                                          changeTicketEditDraft(
-                                            'downtimeMinutes',
-                                            event.target.value.replace(/\D/g, '')
-                                          )
-                                        }
-                                      />
-                                    </label>
-                                  </div>
-                                  <div className="main-page__ticket-edit-actions">
-                                    <button
-                                      className="main-page__ticket-edit-save"
-                                      type="button"
-                                      disabled={pendingTicketId !== null}
-                                      onClick={() => void saveTicketEdit(ticket.id)}
-                                    >
-                                      <Check size={15} aria-hidden="true" />
-                                      <span>Зберегти</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={pendingTicketId !== null}
-                                      onClick={cancelTicketEdit}
-                                    >
-                                      <X size={15} aria-hidden="true" />
-                                      <span>Скасувати</span>
-                                    </button>
-                                  </div>
-                                </div>
-                              </>
+                              <TicketEditForm
+                                isActive={false}
+                                isPending={pendingTicketId !== null}
+                                ticket={ticket}
+                                onCancel={cancelTicketEdit}
+                                onChange={() => setTicketError(null)}
+                                onSave={saveTicketEdit}
+                              />
                             ) : (
                               <>
                                 <div className="main-page__ticket-history-header">
@@ -2115,53 +2216,11 @@ export function MainPage({
                   ) : null}
           </section>
 
-          <section className="main-page__shift-note" aria-labelledby="shift-note-title">
-            <div className="main-page__shift-note-heading">
-              <div>
-                <p className="main-page__label">Для цієї зміни</p>
-                <h3 id="shift-note-title">
-                  <StickyNote size={18} aria-hidden="true" />
-                  Нотатка
-                </h3>
-              </div>
-              <span aria-label={`${shiftNoteDraft.length} із ${SHIFT_NOTE_MAX_LENGTH} символів`}>
-                {shiftNoteDraft.length}/{SHIFT_NOTE_MAX_LENGTH}
-              </span>
-            </div>
-            <textarea
-              aria-label="Нотатка до зміни"
-              maxLength={SHIFT_NOTE_MAX_LENGTH}
-              placeholder="Наприклад: номер партії, особливості зміни..."
-              rows={3}
-              value={shiftNoteDraft}
-              onChange={(event) => {
-                setShiftNoteDraft(event.target.value);
-                setShiftNoteStatus('idle');
-                setShiftNoteError(null);
-              }}
-            />
-            <div className="main-page__shift-note-footer">
-              <p>Зберігається локально разом зі зміною.</p>
-              <button
-                type="button"
-                disabled={
-                  shiftNoteStatus === 'saving' || shiftNoteDraft === activeShift.note
-                }
-                onClick={() => void saveShiftNote()}
-              >
-                {shiftNoteStatus === 'saving'
-                  ? 'Збереження...'
-                  : shiftNoteStatus === 'saved'
-                    ? 'Збережено'
-                    : 'Зберегти'}
-              </button>
-            </div>
-            {shiftNoteError ? (
-              <p className="main-page__error" role="alert">
-                {shiftNoteError}
-              </p>
-            ) : null}
-          </section>
+          <ShiftNoteEditor
+            initialNote={activeShift.note}
+            shiftId={activeShift.id}
+            onSave={saveShiftNote}
+          />
 
           {!activeWorkTicket ? (
             <div className="main-page__action-bar">
@@ -2411,7 +2470,7 @@ export function MainPage({
               onShiftTypeChange={setPreferredShiftType}
               onStrategyChange={changeOvertimeStrategy}
               onDateUnavailable={markOvertimeDateUnavailable}
-              onOpenSettings={() => setActivePage('settings')}
+              onOpenSettings={openSettings}
             />
             <div className="main-page__action-bar">
               <p className="main-page__hold-hint">Утримай “Прийшов”, щоб почати зміну</p>
@@ -2438,7 +2497,8 @@ export function MainPage({
             ) : null}
           </section>
         </>
-      )}
+        )
+      ) : null}
       </AppShell>
       <CalendarTutorial
         isOpen={isCalendarTutorialOpen}

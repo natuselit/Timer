@@ -29,14 +29,6 @@ export const resolveTheme = (
 export const normalizeThemePreference = (value: unknown): ThemePreference =>
   isThemePreference(value) ? value : DEFAULT_THEME_PREFERENCE;
 
-export const readCachedThemePreference = (): ThemePreference => {
-  try {
-    return normalizeThemePreference(window.localStorage.getItem(THEME_PREFERENCE_STORAGE_KEY));
-  } catch {
-    return DEFAULT_THEME_PREFERENCE;
-  }
-};
-
 const cacheThemePreference = (preference: ThemePreference): void => {
   try {
     window.localStorage.setItem(THEME_PREFERENCE_STORAGE_KEY, preference);

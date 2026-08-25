@@ -5,6 +5,26 @@ import {
 } from '../../settings';
 import type { ISODateTimeString, Shift, WorkTicket } from './types';
 
+export const WORK_TICKET_NORM_MAX = 999;
+
+export const isValidWorkTicketNorm = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isFinite(value) &&
+  value > 0 &&
+  value <= WORK_TICKET_NORM_MAX;
+
+export const assertWorkTicketNorm = (value: number): void => {
+  if (!isValidWorkTicketNorm(value)) {
+    throw new Error(`Норма має бути більшою за 0 і не більшою за ${WORK_TICKET_NORM_MAX}.`);
+  }
+};
+
+export const normalizeWorkTicketNormDraft = (value: string): string => {
+  const digits = value.replace(/\D/g, '');
+
+  return digits === '' ? '' : String(Math.min(Number(digits), WORK_TICKET_NORM_MAX));
+};
+
 type WorkTicketBounds = {
   shiftStartTime: ISODateTimeString;
   effectiveShiftEndTime: ISODateTimeString;
@@ -199,9 +219,7 @@ export const validateAndSortWorkTickets = (
   sortedTickets.forEach((ticket, index) => {
     const startedAt = toTimestamp(ticket.startedAt, 'взяття тікета');
 
-    if (!Number.isFinite(ticket.normPerEightHours) || ticket.normPerEightHours <= 0) {
-      throw new Error('Норма має бути більшою за 0.');
-    }
+    assertWorkTicketNorm(ticket.normPerEightHours);
 
     assertActualQuantity(ticket.actualQuantity);
     assertManualCompletionPercent(ticket.manualCompletionPercent);

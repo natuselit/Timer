@@ -15,6 +15,7 @@ import {
 import { toLocalIsoString } from '../../date-time';
 import type { ShifterDatabase } from '../database';
 import type { SettingsRecord } from '../types';
+import { toStoredShift } from '../repositories/shiftRepository';
 
 export type DemoDataSet = {
   range: {
@@ -256,7 +257,7 @@ export const replaceLocalDataWithDemo = async (
       await db.enterpriseSchedule.clear();
       await db.appMeta.clear();
       await db.settings.put(settingsRecord);
-      await db.shifts.bulkPut(data.shifts);
+      await db.shifts.bulkPut(data.shifts.map(toStoredShift));
       await db.enterpriseSchedule.bulkPut(data.enterpriseSchedule);
       await db.appMeta.put({
         key: 'demo-data-range',

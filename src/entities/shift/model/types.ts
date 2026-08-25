@@ -1,24 +1,24 @@
-import type { Grade, GradePercentSet } from '../../settings';
+import type {
+  GradeSnapshot,
+  ISODateTimeString,
+  LocalDateString,
+  LocalTimeString,
+  ShiftDetectionMode
+} from '../../../shared/model';
+
+export type {
+  Grade,
+  GradePercentSet,
+  GradeSnapshot,
+  ISODateTimeString,
+  LocalDateString,
+  LocalTimeString,
+  ShiftDetectionMode
+} from '../../../shared/model';
 
 export type ShiftType = 'first' | 'second';
 
 export type CoefficientMode = 'auto' | 'x1' | 'x1.5' | 'x2';
-
-export type ShiftDetectionMode = 'auto' | 'manual';
-
-export type LocalDateString = string;
-
-export type LocalTimeString = string;
-
-export type ISODateTimeString = string;
-
-export type GradeSnapshot = {
-  currentGrade: Grade;
-  desiredGrade: Grade;
-  gradeSalaryBonusPercents: GradePercentSet;
-  gradeNormPercents: GradePercentSet;
-  cumulativeSalaryBonusPercent: number;
-};
 
 export type WorkTicket = {
   id: string;
