@@ -198,12 +198,11 @@ export const parseEnterpriseSchedulePdf = async (
     );
   }
 
-  const [{ getDocument, GlobalWorkerOptions }, workerModule] = await Promise.all([
+  // Preload the worker handler in-page: module workers are unreliable in iOS Safari.
+  const [{ getDocument }] = await Promise.all([
     import('pdfjs-dist/legacy/build/pdf.mjs'),
-    import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')
+    import('pdfjs-dist/legacy/build/pdf.worker.min.mjs')
   ]);
-
-  GlobalWorkerOptions.workerSrc = workerModule.default;
 
   let loadingTask: PDFDocumentLoadingTask | null = null;
   let pdfDocument: PDFDocumentProxy | null = null;
