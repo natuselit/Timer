@@ -3,6 +3,7 @@ import type { AppMetaRecord, SettingsRecord, StoredShift } from './types';
 import type { EnterpriseScheduleItem } from '../../../entities/enterprise-schedule';
 import type { Shift, WorkTicket } from '../../../entities/shift';
 import { DEFAULT_GRADE_SALARY_BONUS_PERCENTS } from '../../../entities/settings';
+import type { DiagnosticLogRecord } from '../diagnostics/types';
 
 type LegacyDowntimeInterval = {
   id: string;
@@ -52,6 +53,7 @@ export class ShifterDatabase extends Dexie {
   shifts!: Table<StoredShift, string>;
   enterpriseSchedule!: Table<EnterpriseScheduleItem, string>;
   appMeta!: Table<AppMetaRecord, string>;
+  diagnosticLogs!: Table<DiagnosticLogRecord, string>;
 
   constructor(name = 'shifter-local-db') {
     super(name);
@@ -216,6 +218,14 @@ export class ShifterDatabase extends Dexie {
             }
           });
       });
+
+    this.version(8).stores({
+      settings: '&id',
+      shifts: '&id,&date,activeKey,updatedAt,createdAt',
+      enterpriseSchedule: '&id,&date,createdAt',
+      appMeta: '&key',
+      diagnosticLogs: '&id,timestamp,kind,screen,code'
+    });
   }
 }
 

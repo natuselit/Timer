@@ -73,6 +73,10 @@ import {
   getPrimaryImportedMonth,
   type CalendarMonth
 } from '../model/importMonths';
+import {
+  recordDiagnosticBreadcrumb,
+  recordDiagnosticError
+} from '../../../shared/lib/diagnostics';
 import './SchedulePage.css';
 
 const enterpriseScheduleRepository = new EnterpriseScheduleRepository(localDb);
@@ -336,7 +340,8 @@ export function SchedulePage({
       setCalendarScheduleItems(nextCalendarScheduleItems);
       setCalendarShifts(nextCalendarShifts);
       setReviewedWarnings(nextReviewedWarnings);
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('schedule.load_failed', 'schedule', error);
       if (requestSequence === loadRequestSequenceRef.current) {
         setError('Не вдалося завантажити графік.');
       }
@@ -508,10 +513,13 @@ export function SchedulePage({
     setIsReadingPdf(true);
     setMessage(null);
     setError(null);
+    recordDiagnosticBreadcrumb('schedule.pdf_read_started', 'schedule');
 
     try {
       setPdfParseResult(await parseEnterpriseSchedulePdf(file));
+      recordDiagnosticBreadcrumb('schedule.pdf_read_completed', 'schedule');
     } catch (readError) {
+      recordDiagnosticError('schedule.pdf_read_failed', 'schedule', readError);
       setError(
         readError instanceof Error
           ? readError.message
@@ -542,6 +550,7 @@ export function SchedulePage({
     setIsImporting(true);
     setMessage(null);
     setError(null);
+    recordDiagnosticBreadcrumb('schedule.import_started', 'schedule');
 
     try {
       const result = await importParsedEnterpriseSchedule(
@@ -593,7 +602,9 @@ export function SchedulePage({
       } else {
         await loadSchedule();
       }
-    } catch {
+      recordDiagnosticBreadcrumb('schedule.import_completed', 'schedule');
+    } catch (error) {
+      recordDiagnosticError('schedule.import_failed', 'schedule', error);
       setError('Не вдалося зберегти графік.');
     } finally {
       setIsImporting(false);
@@ -624,7 +635,8 @@ export function SchedulePage({
       if (discrepancyModal) {
         await refreshDiscrepancyModal(discrepancyModal.month);
       }
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('schedule.sync_failed', 'schedule', error);
       setError('Не вдалося синхронізувати зміну.');
     } finally {
       finishPendingAction(discrepancyId);
@@ -650,7 +662,8 @@ export function SchedulePage({
       if (discrepancyModal) {
         await refreshDiscrepancyModal(discrepancyModal.month);
       }
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('schedule.sync_failed', 'schedule', error);
       setError('Не вдалося пропустити розбіжність.');
     } finally {
       finishPendingAction(discrepancyId);
@@ -677,7 +690,8 @@ export function SchedulePage({
         review
       ]);
       setMessage('Попередження позначено як переглянуте.');
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('schedule.sync_failed', 'schedule', error);
       setError('Не вдалося позначити попередження як переглянуте.');
     } finally {
       finishPendingAction(warning.id);

@@ -74,6 +74,10 @@ import {
   type ShiftSortCriterion,
   type ShiftSortDirection
 } from '../model/sorting';
+import {
+  recordDiagnosticBreadcrumb,
+  recordDiagnosticError
+} from '../../../shared/lib/diagnostics';
 import './HistoryPage.css';
 
 type HistoryPageProps = {
@@ -521,7 +525,8 @@ export function HistoryPage({
 
       setShifts(nextShifts);
       setCalendarShifts(nextCalendarShifts);
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('history.load_failed', 'history', error);
       if (requestSequence === loadRequestSequenceRef.current) {
         setError('Не вдалося завантажити історію.');
       }
@@ -895,6 +900,7 @@ export function HistoryPage({
 
     setIsSaving(true);
     setError(null);
+    recordDiagnosticBreadcrumb('history.save_started', 'history');
 
     try {
       const isEditingActiveShift = editor.mode === 'edit' && editor.shift.endTime === null;
@@ -1015,7 +1021,23 @@ export function HistoryPage({
       } else {
         await loadShifts();
       }
+      recordDiagnosticBreadcrumb('history.save_completed', 'history');
     } catch (saveError) {
+      if (saveError instanceof ShiftConstraintError) {
+        // Очікуване доменне обмеження показується користувачу, але не є несправністю.
+      } else if (
+        !(saveError instanceof Error) ||
+        ![
+          'Вихід має бути пізніше приходу.',
+          'Ставка за місяць не може бути відʼємною.',
+          'Вкажіть час взяття тікета.',
+          'Факт, відсоток і простій мають бути цілими невідʼємними числами.',
+          'Завершений тікет не можна знову зробити активним.',
+          'Для завершення тікета обовʼязково вкажіть фактичну кількість.'
+        ].includes(saveError.message)
+      ) {
+        recordDiagnosticError('history.save_failed', 'history', saveError);
+      }
       setError(getEditorErrorMessage(saveError));
     } finally {
       setIsSaving(false);
@@ -1028,6 +1050,7 @@ export function HistoryPage({
     }
 
     setError(null);
+    recordDiagnosticBreadcrumb('history.delete_started', 'history');
 
     try {
       await localDb.transaction('rw', localDb.shifts, localDb.appMeta, async () => {
@@ -1039,7 +1062,9 @@ export function HistoryPage({
       } else {
         await loadShifts();
       }
-    } catch {
+      recordDiagnosticBreadcrumb('history.delete_completed', 'history');
+    } catch (error) {
+      recordDiagnosticError('history.delete_failed', 'history', error);
       setError('Не вдалося видалити зміну.');
     }
   }, [loadShifts, onDataChange]);

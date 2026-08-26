@@ -6,6 +6,7 @@ import {
   type PropsWithChildren
 } from 'react';
 import { RefreshCw } from 'lucide-react';
+import { flushDiagnosticLogs, recordDiagnosticError } from '../../lib/diagnostics';
 import './PullToRefresh.css';
 
 const REFRESH_THRESHOLD = 64;
@@ -24,7 +25,9 @@ async function refreshPageFromServiceWorker() {
     try {
       const registration = await navigator.serviceWorker.getRegistration();
       await registration?.update();
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('pwa.update_failed', 'app', error);
+      await flushDiagnosticLogs();
       // Reloading still refreshes locally cached content when the device is offline.
     }
   }
@@ -120,7 +123,7 @@ export function PullToRefresh({
 
       void Promise.resolve()
         .then(onRefresh)
-        .catch(() => undefined)
+        .catch((error) => recordDiagnosticError('pwa.update_failed', 'app', error))
         .finally(() => {
           isRefreshingRef.current = false;
           setIsRefreshing(false);

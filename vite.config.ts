@@ -1,4 +1,5 @@
 import { sites } from '@openai/sites-vite-plugin';
+import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA, type ManifestOptions } from 'vite-plugin-pwa';
@@ -9,6 +10,10 @@ type AppManifest = Partial<ManifestOptions> & {
     background_color: string;
   };
 };
+
+const packageVersion = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8')
+) as { version: string };
 
 const createManifest = (basePath: string): AppManifest => ({
   name: 'Облік часу',
@@ -68,6 +73,9 @@ export default defineConfig(async ({ mode }) => {
 
   return {
     base: basePath,
+    define: {
+      __APP_VERSION__: JSON.stringify(packageVersion.version)
+    },
     plugins: [
       react(),
       VitePWA({

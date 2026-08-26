@@ -8,6 +8,7 @@ import {
 } from 'react';
 import {
   CalendarClock,
+  Bug,
   CircleCheck,
   ChevronDown,
   Database,
@@ -59,6 +60,14 @@ import {
   ShiftRepository
 } from '../../../shared/lib/local-db';
 import { downloadBackup } from '../../../shared/lib/backup';
+import {
+  clearDiagnosticLogs,
+  downloadDiagnosticReport,
+  flushDiagnosticLogs,
+  getDiagnosticLogCount,
+  recordDiagnosticBreadcrumb,
+  recordDiagnosticError
+} from '../../../shared/lib/diagnostics';
 import { usePwaInstall, type PwaInstallStatus } from '../../../shared/lib/pwa-install';
 import {
   addMinutesToLocalTime,
@@ -138,6 +147,7 @@ type SettingsSectionId =
   | 'appearance'
   | 'installation'
   | 'privacy'
+  | 'diagnostics'
   | 'data';
 
 type SettingsSectionProps = {
@@ -390,6 +400,8 @@ export function SettingsPage({
     useState<RecalculationCalendarMonth>(getCurrentCalendarMonth);
   const [isClearing, setIsClearing] = useState(false);
   const [isBackupBusy, setIsBackupBusy] = useState(false);
+  const [isDiagnosticBusy, setIsDiagnosticBusy] = useState(false);
+  const [diagnosticLogCount, setDiagnosticLogCount] = useState<number | null>(null);
   const [isInstallBusy, setIsInstallBusy] = useState(false);
   const [isInstallHelpVisible, setIsInstallHelpVisible] = useState(false);
   const [overtimeUnavailableDateDraft, setOvertimeUnavailableDateDraft] = useState('');
@@ -408,6 +420,20 @@ export function SettingsPage({
     );
     syncedValuesRef.current = nextValues;
   }, [settings]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void getDiagnosticLogCount().then((count) => {
+      if (isMounted) {
+        setDiagnosticLogCount(count);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const installApplication = async () => {
     if (pwaInstallStatus !== 'available') {
@@ -428,7 +454,8 @@ export function SettingsPage({
       } else {
         setIsInstallHelpVisible(true);
       }
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('pwa.install_failed', 'settings', error);
       setNotice({
         tone: 'error',
         text: 'Не вдалося відкрити встановлення. Скористайтеся меню браузера.'
@@ -496,7 +523,8 @@ export function SettingsPage({
           setRecalculationPreviewCount(shifts.length);
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        recordDiagnosticError('settings.recalculate_failed', 'settings', error);
         if (!isCancelled) {
           setRecalculationError('Не вдалося підрахувати зміни у вибраному періоді.');
         }
@@ -659,10 +687,14 @@ export function SettingsPage({
       updatedAt: toLocalIsoString(new Date())
     };
 
+    recordDiagnosticBreadcrumb('settings.save_started', 'settings');
+
     try {
       await onSettingsChange(nextSettings);
+      recordDiagnosticBreadcrumb('settings.save_completed', 'settings');
       setNotice({ tone: 'success', text: 'Налаштування збережено.' });
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('settings.save_failed', 'settings', error);
       setNotice({ tone: 'error', text: 'Не вдалося зберегти налаштування.' });
     } finally {
       setIsSaving(false);
@@ -822,7 +854,8 @@ export function SettingsPage({
         tone: 'success',
         text: `Ставки й рівні перераховано за ${formatMoney(monthlySalary, false)}/міс. Перераховано змін: ${updatedCount}. Період: ${formatDate(recalculationPeriod.start)} — ${formatDate(recalculationPeriod.end)}.`
       });
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('settings.recalculate_failed', 'settings', error);
       setRecalculationError('Не вдалося перерахувати ставки у вибраному періоді.');
     } finally {
       setIsApplyingRate(false);
@@ -839,7 +872,8 @@ export function SettingsPage({
         incognitoEnabled: !settings.incognitoEnabled,
         updatedAt: toLocalIsoString(new Date())
       });
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('settings.incognito_failed', 'settings', error);
       setNotice({ tone: 'error', text: 'Не вдалося змінити режим інкогніто.' });
     } finally {
       setIsSaving(false);
@@ -858,7 +892,8 @@ export function SettingsPage({
         themePreference,
         updatedAt: toLocalIsoString(new Date())
       });
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('settings.theme_failed', 'settings', error);
       setNotice({ tone: 'error', text: 'Не вдалося змінити тему.' });
     } finally {
       setIsSaving(false);
@@ -868,12 +903,15 @@ export function SettingsPage({
   const exportBackup = async () => {
     setIsBackupBusy(true);
     setNotice(null);
+    recordDiagnosticBreadcrumb('backup.export_started', 'settings');
 
     try {
       const exportedAt = toLocalIsoString(new Date());
       await downloadBackup(localDb, exportedAt);
+      recordDiagnosticBreadcrumb('backup.export_completed', 'settings');
       setNotice({ tone: 'success', text: 'JSON backup створено.' });
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('backup.export_failed', 'settings', error);
       setNotice({ tone: 'error', text: 'Не вдалося створити JSON backup.' });
     } finally {
       setIsBackupBusy(false);
@@ -894,6 +932,7 @@ export function SettingsPage({
 
     setIsBackupBusy(true);
     setNotice(null);
+    recordDiagnosticBreadcrumb('backup.import_started', 'settings');
 
     try {
       const source = await file.text();
@@ -936,7 +975,9 @@ export function SettingsPage({
           text: `Backup імпортовано. Змін: ${backup.shifts.length}, записів графіка: ${backup.enterpriseSchedule.length}.`
         });
       }
+      recordDiagnosticBreadcrumb('backup.import_completed', 'settings');
     } catch (error) {
+      recordDiagnosticError('backup.import_failed', 'settings', error);
       setNotice({ tone: 'error', text: getImportErrorMessage(error) });
     } finally {
       setIsBackupBusy(false);
@@ -950,6 +991,7 @@ export function SettingsPage({
 
     setIsClearing(true);
     setNotice(null);
+    recordDiagnosticBreadcrumb('data.clear_shifts_started', 'settings');
 
     try {
       await localDb.transaction('rw', localDb.shifts, localDb.appMeta, async () => {
@@ -960,8 +1002,10 @@ export function SettingsPage({
           .delete();
       });
       onLocalDataChange?.();
+      recordDiagnosticBreadcrumb('data.clear_shifts_completed', 'settings');
       setNotice({ tone: 'success', text: 'Зміни очищено.' });
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('data.clear_shifts_failed', 'settings', error);
       setNotice({ tone: 'error', text: 'Не вдалося очистити зміни.' });
     } finally {
       setIsClearing(false);
@@ -979,6 +1023,7 @@ export function SettingsPage({
 
     setIsClearing(true);
     setNotice(null);
+    recordDiagnosticBreadcrumb('data.clear_all_started', 'settings');
 
     try {
       const resetSettings: Settings = {
@@ -986,29 +1031,69 @@ export function SettingsPage({
         updatedAt: toLocalIsoString(new Date())
       };
 
+      await flushDiagnosticLogs();
       await localDb.transaction(
         'rw',
         localDb.shifts,
         localDb.enterpriseSchedule,
         localDb.appMeta,
         localDb.settings,
+        localDb.diagnosticLogs,
         async () => {
           await localDb.shifts.clear();
           await localDb.enterpriseSchedule.clear();
           await localDb.appMeta.clear();
           await localDb.settings.clear();
+          await localDb.diagnosticLogs.clear();
         }
       );
       await onSettingsChange(resetSettings);
+      await clearDiagnosticLogs();
+      setDiagnosticLogCount(0);
       setValues(toFormValues(resetSettings));
       setOvertimeUnavailableDateDraft('');
       setErrors({});
       onLocalDataChange?.();
       setNotice({ tone: 'success', text: 'Локальні дані очищено.' });
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('data.clear_all_failed', 'settings', error);
       setNotice({ tone: 'error', text: 'Не вдалося очистити всі дані.' });
     } finally {
       setIsClearing(false);
+    }
+  };
+
+  const exportDiagnosticReport = async () => {
+    setIsDiagnosticBusy(true);
+    setNotice(null);
+
+    try {
+      const report = await downloadDiagnosticReport(toLocalIsoString(new Date()));
+      setDiagnosticLogCount(report.events.length);
+      setNotice({ tone: 'success', text: 'Діагностичний звіт створено.' });
+    } catch {
+      setNotice({ tone: 'error', text: 'Не вдалося створити діагностичний звіт.' });
+    } finally {
+      setIsDiagnosticBusy(false);
+    }
+  };
+
+  const clearDiagnostics = async () => {
+    if (!window.confirm('Очистити локальний журнал діагностики?')) {
+      return;
+    }
+
+    setIsDiagnosticBusy(true);
+    setNotice(null);
+
+    try {
+      await clearDiagnosticLogs();
+      setDiagnosticLogCount(0);
+      setNotice({ tone: 'success', text: 'Журнал діагностики очищено.' });
+    } catch {
+      setNotice({ tone: 'error', text: 'Не вдалося очистити журнал діагностики.' });
+    } finally {
+      setIsDiagnosticBusy(false);
     }
   };
 
@@ -1593,6 +1678,50 @@ export function SettingsPage({
           </span>
           <span className="settings-page__switch" aria-hidden="true" />
         </button>
+      </SettingsSection>
+
+      <SettingsSection
+        id="diagnostics"
+        title="Діагностика"
+        description="Локальний журнал несправностей"
+        summary={
+          diagnosticLogCount === null
+            ? 'Лише локально'
+            : `Записів: ${diagnosticLogCount}`
+        }
+        icon={Bug}
+      >
+        <div className="settings-page__migration-note">
+          <strong>Приватний технічний звіт</strong>
+          <p>
+            Журнал зберігається лише на цьому пристрої до ручного очищення. Він не
+            містить ПІБ, фінансів, нотаток, даних змін або тексту PDF і не входить
+            до JSON backup.
+          </p>
+        </div>
+        <div className="settings-page__actions">
+          <button
+            type="button"
+            aria-label="Зберегти діагностичний звіт"
+            title="Зберегти діагностичний звіт"
+            disabled={isDiagnosticBusy}
+            onClick={() => void exportDiagnosticReport()}
+          >
+            <Download size={18} aria-hidden="true" />
+            Зберегти звіт
+          </button>
+          <button
+            type="button"
+            className="settings-page__danger"
+            aria-label="Очистити журнал діагностики"
+            title="Очистити журнал діагностики"
+            disabled={isDiagnosticBusy || diagnosticLogCount === 0}
+            onClick={() => void clearDiagnostics()}
+          >
+            <Eraser size={18} aria-hidden="true" />
+            Очистити журнал
+          </button>
+        </div>
       </SettingsSection>
 
       <SettingsSection

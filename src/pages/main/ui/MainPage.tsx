@@ -99,6 +99,10 @@ import {
   type MonthlyOvertimePlan,
   type OvertimeScenario
 } from '../../../shared/lib/shifts/overtimePlanner';
+import {
+  recordDiagnosticBreadcrumb,
+  recordDiagnosticError
+} from '../../../shared/lib/diagnostics';
 import './MainPage.css';
 
 const HistoryPage = lazy(() =>
@@ -672,7 +676,8 @@ const OvertimePlannerCard = memo(function OvertimePlannerCard({
     try {
       await onStrategyChange(strategy);
       setIsOptionsOpen(false);
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('settings.save_failed', 'timer', error);
       setStrategyError('Не вдалося змінити стратегію.');
     } finally {
       setIsSavingStrategy(false);
@@ -689,7 +694,8 @@ const OvertimePlannerCard = memo(function OvertimePlannerCard({
 
     try {
       await onDateUnavailable(plan.recommendation.date);
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('settings.save_failed', 'timer', error);
       setAvailabilityError('Не вдалося виключити цю дату.');
     } finally {
       setIsSkippingDate(false);
@@ -1032,6 +1038,7 @@ export function MainPage({
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    recordDiagnosticBreadcrumb('navigation.changed', activePage);
   }, [activePage]);
 
   useEffect(() => {
@@ -1091,7 +1098,8 @@ export function MainPage({
           setActiveShift(shift);
           setOvertimeMonthShifts(monthShifts);
         }
-      } catch {
+      } catch (error) {
+        recordDiagnosticError('timer.load_failed', 'timer', error);
         if (isMounted) {
           setTimerError('Не вдалося прочитати активну зміну.');
         }
@@ -1366,7 +1374,8 @@ export function MainPage({
         incognitoEnabled: !settings.incognitoEnabled,
         updatedAt: toLocalIsoString(new Date())
       });
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('timer.incognito_failed', 'timer', error);
       setTimerError('Не вдалося змінити режим інкогніто.');
     } finally {
       setIsTogglingIncognito(false);
@@ -1382,6 +1391,7 @@ export function MainPage({
       settings.monthlySalary,
       startedDate
     );
+    recordDiagnosticBreadcrumb('timer.shift_start_started', 'timer');
 
     try {
       const createdShift = await createShift(shiftRepository, {
@@ -1402,7 +1412,11 @@ export function MainPage({
       setPreferredShiftType(null);
       setTicketNormDraft('');
       setTicketError(null);
+      recordDiagnosticBreadcrumb('timer.shift_start_completed', 'timer');
     } catch (error) {
+      if (!(error instanceof ShiftConstraintError)) {
+        recordDiagnosticError('timer.shift_start_failed', 'timer', error);
+      }
       setTimerError(getTimerErrorMessage(error));
     }
   };
@@ -1423,6 +1437,7 @@ export function MainPage({
       ...activeShift,
       endTime: finishedAt
     });
+    recordDiagnosticBreadcrumb('timer.shift_finish_started', 'timer');
 
     try {
       const copyPromise = copyTextToClipboard(clipboardText);
@@ -1449,7 +1464,11 @@ export function MainPage({
             : `Зміну завершено, але текст не скопійовано: ${clipboardText}`
         });
       }
+      recordDiagnosticBreadcrumb('timer.shift_finish_completed', 'timer');
     } catch (error) {
+      if (!(error instanceof ShiftConstraintError)) {
+        recordDiagnosticError('timer.shift_finish_failed', 'timer', error);
+      }
       setTimerError(getTimerErrorMessage(error));
     }
   };
@@ -1459,13 +1478,18 @@ export function MainPage({
       throw new Error('Активну зміну не знайдено.');
     }
 
-    const updatedShift = await updateActiveShiftNote(shiftRepository, {
-      shiftId: activeShift.id,
-      note,
-      updatedAt: toLocalIsoString(new Date())
-    });
+    try {
+      const updatedShift = await updateActiveShiftNote(shiftRepository, {
+        shiftId: activeShift.id,
+        note,
+        updatedAt: toLocalIsoString(new Date())
+      });
 
-    setActiveShift(updatedShift);
+      setActiveShift(updatedShift);
+    } catch (error) {
+      recordDiagnosticError('timer.note_save_failed', 'timer', error);
+      throw error;
+    }
   }, [activeShift]);
 
   const parseTicketNormDraft = (value: string): number | null => {
@@ -1494,6 +1518,7 @@ export function MainPage({
 
     setIsAddingTicket(true);
     setTicketError(null);
+    recordDiagnosticBreadcrumb('ticket.create_started', 'timer');
 
     try {
       const updatedShift = await addWorkTicketToActiveShift(shiftRepository, {
@@ -1505,7 +1530,9 @@ export function MainPage({
       setNow(startedAt);
       setActiveShift(updatedShift);
       setTicketNormDraft('');
+      recordDiagnosticBreadcrumb('ticket.create_completed', 'timer');
     } catch (error) {
+      recordDiagnosticError('ticket.create_failed', 'timer', error);
       setTicketError(getTicketErrorMessage(error));
     } finally {
       setIsAddingTicket(false);
@@ -1589,6 +1616,7 @@ export function MainPage({
       setIsDowntimeModalOpen(false);
       window.setTimeout(() => ticketMenuButtonRef.current?.focus(), 0);
     } catch (error) {
+      recordDiagnosticError('ticket.downtime_failed', 'timer', error);
       setDowntimeModalError(getTicketErrorMessage(error));
     } finally {
       setPendingTicketId(null);
@@ -1628,6 +1656,7 @@ export function MainPage({
       setTicketActualDraft('');
       setIsCompletionModalOpen(false);
     } catch (error) {
+      recordDiagnosticError('ticket.complete_failed', 'timer', error);
       setCompletionModalError(getTicketErrorMessage(error));
     } finally {
       setIsCompletingTicket(false);
@@ -1702,6 +1731,7 @@ export function MainPage({
       setActiveShift(updatedShift);
       setEditingTicketId(null);
     } catch (error) {
+      recordDiagnosticError('ticket.update_failed', 'timer', error);
       setTicketError(getTicketErrorMessage(error));
     } finally {
       setPendingTicketId(null);
@@ -1735,7 +1765,8 @@ export function MainPage({
         setEditingTicketId(null);
       }
 
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('ticket.delete_failed', 'timer', error);
       setTicketError('Не вдалося видалити тікет.');
     } finally {
       setPendingTicketId(null);

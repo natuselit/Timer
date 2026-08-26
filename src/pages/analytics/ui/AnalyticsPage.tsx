@@ -49,6 +49,7 @@ import {
   type CalendarDateRange,
   type CalendarRangePreset
 } from '../../../shared/ui/month-calendar';
+import { recordDiagnosticError } from '../../../shared/lib/diagnostics';
 import './AnalyticsPage.css';
 
 type AnalyticsPageProps = {
@@ -297,7 +298,8 @@ export function AnalyticsPage({
 
       setShifts(nextShifts);
       setCalendarShifts(nextCalendarShifts);
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('analytics.load_failed', 'analytics', error);
       if (requestSequence === loadRequestSequenceRef.current) {
         setError('Не вдалося завантажити аналітику.');
       }
@@ -328,7 +330,8 @@ export function AnalyticsPage({
           setPreviousShifts(nextPreviousShifts);
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        recordDiagnosticError('analytics.load_failed', 'analytics', error);
         if (isCurrentRequest) {
           setComparisonError('Не вдалося завантажити порівняння.');
         }
