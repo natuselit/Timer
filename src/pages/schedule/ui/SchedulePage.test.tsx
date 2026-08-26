@@ -274,6 +274,7 @@ describe('SchedulePage', () => {
     await user.upload(input!, file);
 
     expect(await screen.findByText(parsedPdfResult.fileName)).toBeTruthy();
+    expect(input!.value).toBe('');
     expect(screen.getByText('Валідні: 1').getAttribute('data-status')).toBe('success');
     expect(screen.getByText('Порожні: 3').getAttribute('data-status')).toBe('warning');
     expect(screen.getByText('Помилки: 0').getAttribute('data-status')).toBe('neutral');

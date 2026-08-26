@@ -27,9 +27,13 @@ const copyWithLegacyApi = (text: string): boolean => {
   input.value = text;
   input.setAttribute('readonly', '');
   input.style.position = 'fixed';
+  input.style.inset = '0 auto auto -9999px';
+  input.style.fontSize = '16px';
   input.style.opacity = '0';
   document.body.appendChild(input);
+  input.focus({ preventScroll: true });
   input.select();
+  input.setSelectionRange(0, input.value.length);
 
   try {
     return document.execCommand('copy');
@@ -62,5 +66,9 @@ export const copyTextToClipboard = async (
     }
   }
 
-  return (dependencies.legacyCopy ?? copyWithLegacyApi)(text);
+  try {
+    return (dependencies.legacyCopy ?? copyWithLegacyApi)(text);
+  } catch {
+    return false;
+  }
 };

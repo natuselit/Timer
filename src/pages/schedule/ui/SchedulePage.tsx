@@ -498,15 +498,6 @@ export function SchedulePage({
     }
   };
 
-  const openImportPicker = () => {
-    if (!importInputRef.current || isReadingPdf || isImporting) {
-      return;
-    }
-
-    importInputRef.current.value = '';
-    importInputRef.current.click();
-  };
-
   const readSchedulePdf = async (file: File | undefined) => {
     if (!file) {
       return;
@@ -846,21 +837,23 @@ export function SchedulePage({
           </div>
         </details>
 
-        <input
-          ref={importInputRef}
-          className="schedule-page__file-input"
-          type="file"
-          accept="application/pdf,.pdf"
-          disabled={isReadingPdf || isImporting}
-          onChange={(event) => void readSchedulePdf(event.target.files?.[0])}
-        />
-
-        <button
+        <label
           className="schedule-page__file-button"
-          type="button"
-          disabled={isReadingPdf || isImporting}
-          onClick={openImportPicker}
+          data-disabled={isReadingPdf || isImporting}
         >
+          <input
+            ref={importInputRef}
+            className="schedule-page__file-input"
+            type="file"
+            accept="application/pdf,.pdf"
+            aria-label={selectedFileName ? 'Обрати інший PDF' : 'Обрати PDF'}
+            disabled={isReadingPdf || isImporting}
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = '';
+              void readSchedulePdf(file);
+            }}
+          />
           {isReadingPdf ? (
             <LoaderCircle className="schedule-page__spinner" aria-hidden="true" size={20} />
           ) : (
@@ -873,7 +866,7 @@ export function SchedulePage({
                 ? 'Обрати інший PDF'
                 : 'Обрати PDF'}
           </span>
-        </button>
+        </label>
 
         {selectedFileName ? (
           <div className="schedule-page__selected-file" aria-live="polite">

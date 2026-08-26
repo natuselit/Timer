@@ -94,6 +94,52 @@ afterEach(async () => {
 });
 
 describe('MainPage active shift', () => {
+  it('copies the completed shift from the pointer release before local saving', async () => {
+    await localDb.shifts.put(toStoredShift({ ...activeShift, workTickets: [] }));
+    const updateShiftSpy = vi.spyOn(ShiftRepository.prototype, 'updateShift');
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn(async () => {
+      expect(updateShiftSpy).not.toHaveBeenCalled();
+    });
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText }
+    });
+
+    try {
+      render(
+        <MainPage
+          settings={settings}
+          dataVersion={0}
+          onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+          onLocalDataReplace={vi.fn()}
+        />
+      );
+
+      const leaveButton = await screen.findByRole('button', {
+        name: 'Пішов. Утримуйте 1.5 с'
+      });
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(0);
+
+      fireEvent.pointerDown(leaveButton);
+      expect(writeText).not.toHaveBeenCalled();
+      nowSpy.mockReturnValue(1_500);
+      fireEvent.pointerUp(leaveButton);
+      nowSpy.mockRestore();
+
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^Кухарчук А 6:15-/));
+      });
+      expect(await screen.findByText(/^Скопійовано: Кухарчук А 6:15-/)).toBeTruthy();
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, 'clipboard');
+      }
+    }
+  });
+
   it('saves a local note for the active shift', async () => {
     const user = userEvent.setup();
     const getActiveShiftSpy = vi.spyOn(ShiftRepository.prototype, 'getActiveShift');
@@ -788,7 +834,12 @@ describe('MainPage inactive state', () => {
     const arriveButton = screen.getByRole('button', {
       name: 'Прийшов. Утримуйте 1.5 с'
     });
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(0);
     fireEvent.pointerDown(arriveButton);
+    expect(await localDb.shifts.count()).toBe(0);
+    nowSpy.mockReturnValue(1_500);
+    fireEvent.pointerUp(arriveButton);
+    nowSpy.mockRestore();
 
     await waitFor(
       async () => {

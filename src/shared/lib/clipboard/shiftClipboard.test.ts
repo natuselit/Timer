@@ -59,4 +59,12 @@ describe('copyTextToClipboard', () => {
     await expect(copyTextToClipboard('текст', { writeText, legacyCopy })).resolves.toBe(true);
     expect(legacyCopy).toHaveBeenCalledWith('текст');
   });
+
+  it('reports a failed legacy copy without throwing', async () => {
+    const legacyCopy = vi.fn(() => {
+      throw new Error('copy is blocked');
+    });
+
+    await expect(copyTextToClipboard('текст', { legacyCopy })).resolves.toBe(false);
+  });
 });

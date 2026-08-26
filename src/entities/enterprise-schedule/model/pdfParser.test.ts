@@ -1,8 +1,11 @@
+// @vitest-environment jsdom
+
 import { describe, expect, it } from 'vitest';
 import {
   EnterpriseSchedulePdfError,
   extractEnterpriseScheduleSource,
   parseEnterpriseSchedulePdf,
+  readPdfFileBytes,
   reconstructPdfTextLines
 } from './pdfParser';
 import { parseEnterpriseScheduleText } from './parser';
@@ -99,6 +102,15 @@ describe('enterprise schedule PDF parsing', () => {
         code: 'invalid-file-type',
         message: 'Оберіть файл у форматі PDF.'
       })
+    );
+  });
+
+  it('falls back to FileReader when Blob.arrayBuffer is unavailable on iOS', async () => {
+    const file = new File(['%PDF'], 'schedule.pdf', { type: 'application/pdf' });
+    Object.defineProperty(file, 'arrayBuffer', { value: undefined });
+
+    await expect(readPdfFileBytes(file)).resolves.toEqual(
+      new Uint8Array([37, 80, 68, 70])
     );
   });
 });

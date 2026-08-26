@@ -48,11 +48,11 @@
 
 .schedule-page__file-input {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  opacity: 0;
 }
 
 .schedule-page__import-guide {
@@ -145,6 +145,7 @@
 }
 
 .schedule-page__file-button {
+  position: relative;
   display: inline-flex;
   min-height: 50px;
   align-items: center;
@@ -157,11 +158,16 @@
   cursor: pointer;
   font: inherit;
   font-weight: 800;
+  overflow: hidden;
 }
 
-.schedule-page__file-button:disabled {
+.schedule-page__file-button[data-disabled='true'] {
   cursor: wait;
   opacity: 0.65;
+}
+
+.schedule-page__file-button[data-disabled='true'] .schedule-page__file-input {
+  cursor: wait;
 }
 
 .schedule-page__selected-file {

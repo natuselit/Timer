@@ -133,6 +133,44 @@ export const extractEnterpriseScheduleSource = (lines: string[]): string => {
 const isPdfFile = (file: File): boolean =>
   file.type === PDF_MIME_TYPE || /\.pdf$/i.test(file.name);
 
+const readFileWithFileReader = (file: File): Promise<ArrayBuffer> =>
+  new Promise((resolve, reject) => {
+    if (typeof FileReader === 'undefined') {
+      reject(new Error('FileReader is not available.'));
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.addEventListener('load', () => {
+      if (reader.result instanceof ArrayBuffer) {
+        resolve(reader.result);
+        return;
+      }
+
+      reject(new Error('PDF file could not be read as binary data.'));
+    });
+    reader.addEventListener('error', () => {
+      reject(reader.error ?? new Error('PDF file reading failed.'));
+    });
+    reader.addEventListener('abort', () => {
+      reject(new Error('PDF file reading was aborted.'));
+    });
+    reader.readAsArrayBuffer(file);
+  });
+
+export const readPdfFileBytes = async (file: File): Promise<Uint8Array> => {
+  if (typeof file.arrayBuffer === 'function') {
+    try {
+      return new Uint8Array(await file.arrayBuffer());
+    } catch {
+      // FileReader remains the most compatible path for older iOS web views.
+    }
+  }
+
+  return new Uint8Array(await readFileWithFileReader(file));
+};
+
 const getPdfError = (error: unknown): EnterpriseSchedulePdfError => {
   const errorName = error instanceof Error ? error.name : '';
 
@@ -161,8 +199,8 @@ export const parseEnterpriseSchedulePdf = async (
   }
 
   const [{ getDocument, GlobalWorkerOptions }, workerModule] = await Promise.all([
-    import('pdfjs-dist'),
-    import('pdfjs-dist/build/pdf.worker.min.mjs?url')
+    import('pdfjs-dist/legacy/build/pdf.mjs'),
+    import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url')
   ]);
 
   GlobalWorkerOptions.workerSrc = workerModule.default;
@@ -171,7 +209,7 @@ export const parseEnterpriseSchedulePdf = async (
   let pdfDocument: PDFDocumentProxy | null = null;
 
   try {
-    const data = new Uint8Array(await file.arrayBuffer());
+    const data = await readPdfFileBytes(file);
     loadingTask = getDocument({ data });
     pdfDocument = await loadingTask.promise;
     const lines: string[] = [];
