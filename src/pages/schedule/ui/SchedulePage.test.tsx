@@ -23,8 +23,7 @@ const { parseEnterpriseSchedulePdfMock, syncShiftWithEnterpriseScheduleMock } = 
   syncShiftWithEnterpriseScheduleMock: vi.fn()
 }));
 
-vi.mock('../../../entities/enterprise-schedule', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../entities/enterprise-schedule')>()),
+vi.mock('../../../entities/enterprise-schedule/model/pdfParser', () => ({
   parseEnterpriseSchedulePdf: parseEnterpriseSchedulePdfMock
 }));
 

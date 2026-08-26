@@ -2,6 +2,8 @@ import {
   parseEnterpriseScheduleText,
   type EnterpriseScheduleParseResult
 } from './parser';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import 'pdfjs-dist/legacy/build/pdf.worker.min.mjs';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
 
 const PDF_MIME_TYPE = 'application/pdf';
@@ -197,12 +199,6 @@ export const parseEnterpriseSchedulePdf = async (
       'Оберіть файл у форматі PDF.'
     );
   }
-
-  // Preload the worker handler in-page: module workers are unreliable in iOS Safari.
-  const [{ getDocument }] = await Promise.all([
-    import('pdfjs-dist/legacy/build/pdf.mjs'),
-    import('pdfjs-dist/legacy/build/pdf.worker.min.mjs')
-  ]);
 
   let loadingTask: PDFDocumentLoadingTask | null = null;
   let pdfDocument: PDFDocumentProxy | null = null;

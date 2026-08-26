@@ -11,15 +11,15 @@ import {
   Upload,
   X
 } from 'lucide-react';
-import {
-  calculateEnterpriseScheduleComparison,
-  parseEnterpriseSchedulePdf
-} from '../../../entities/enterprise-schedule';
+import { calculateEnterpriseScheduleComparison } from '../../../entities/enterprise-schedule';
 import type {
   EnterpriseScheduleDiscrepancy,
-  EnterpriseScheduleItem,
-  EnterpriseSchedulePdfParseResult
+  EnterpriseScheduleItem
 } from '../../../entities/enterprise-schedule';
+import {
+  parseEnterpriseSchedulePdf,
+  type EnterpriseSchedulePdfParseResult
+} from '../../../entities/enterprise-schedule/model/pdfParser';
 import {
   calculateHourlyRateFromMonthlySalary,
   calculateMonthlySalaryFromHourlyRate,
