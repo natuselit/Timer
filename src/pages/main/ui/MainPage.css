@@ -14,6 +14,17 @@
   justify-content: space-between;
 }
 
+.main-page__header-copy {
+  min-width: 0;
+}
+
+.main-page__eyebrow-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+
 .main-page__eyebrow,
 .main-page__label,
 .main-page__muted,
@@ -24,12 +35,20 @@
 }
 
 .main-page__eyebrow {
-  margin-bottom: 4px;
   color: var(--color-primary);
   font-size: 0.72rem;
   font-weight: 900;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.main-page__version {
+  color: var(--color-text-secondary);
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0.42;
+  white-space: nowrap;
 }
 
 .main-page__header h1,

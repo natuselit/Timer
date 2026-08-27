@@ -1836,12 +1836,19 @@ export function MainPage({
   return (
     <>
       <AppShell
-      navigationSlot={<BottomNavigation activeItem={activePage} onSelect={setActivePage} />}
-      headerSlot={
-        activePage === 'timer' ? (
-          <header className={activeShift ? 'main-page__header main-page__header--active' : 'main-page__header'}>
-            <div>
-              <p className="main-page__eyebrow">{pageEyebrowById[activePage]}</p>
+        navigationSlot={<BottomNavigation activeItem={activePage} onSelect={setActivePage} />}
+        headerSlot={
+          <header
+            aria-label="Шапка застосунку"
+            className={
+              activeShift ? 'main-page__header main-page__header--active' : 'main-page__header'
+            }
+          >
+            <div className="main-page__header-copy">
+              <div className="main-page__eyebrow-row">
+                <p className="main-page__eyebrow">{pageEyebrowById[activePage]}</p>
+                <span className="main-page__version">Версія {__APP_VERSION__}</span>
+              </div>
               <h1>Вітаю, {getGreetingName(settings)}</h1>
             </div>
             <button
@@ -1855,9 +1862,8 @@ export function MainPage({
               {settings.incognitoEnabled ? <EyeOff size={22} /> : <Eye size={22} />}
             </button>
           </header>
-        ) : null
-      }
-    >
+        }
+      >
       <Suspense
         fallback={
           <section className="main-page__summary" role="status" aria-live="polite">

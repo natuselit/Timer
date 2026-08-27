@@ -204,6 +204,38 @@ describe('MainPage active shift', () => {
     ).toBe('false');
   });
 
+  it('keeps the application header with its version on every main screen', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <MainPage
+        settings={settings}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    const pages = [
+      { navigationName: 'Таймер', headerName: 'Таймер' },
+      { navigationName: 'Історія', headerName: 'Історія' },
+      { navigationName: 'Аналітика', headerName: 'Аналітика' },
+      { navigationName: 'Графік', headerName: 'Графік' },
+      { navigationName: 'Налашт.', headerName: 'Налаштування' }
+    ];
+
+    for (const { navigationName, headerName } of pages) {
+      await user.click(await screen.findByRole('button', { name: navigationName }));
+
+      await waitFor(() => {
+        const header = screen.getByRole('banner', { name: 'Шапка застосунку' });
+        expect(within(header).getByText(headerName)).toBeTruthy();
+        expect(within(header).getByRole('heading', { name: 'Вітаю, Артем' })).toBeTruthy();
+        expect(within(header).getByText(`Версія ${__APP_VERSION__}`)).toBeTruthy();
+      });
+    }
+  });
+
   it('restores the active page after a page reload', async () => {
     const user = userEvent.setup();
     const props = {
