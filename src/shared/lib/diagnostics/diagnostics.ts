@@ -1,6 +1,6 @@
 import { localDb } from '../local-db/database';
 import { DiagnosticLogRepository } from '../local-db/repositories/diagnosticLogRepository';
-import { normalizeDiagnosticError, sanitizeDiagnosticText } from './sanitize';
+import { normalizeDiagnosticError } from './normalize';
 import {
   DIAGNOSTIC_EVENT_CODES,
   DIAGNOSTIC_SCREENS,
@@ -30,13 +30,11 @@ const normalizeStoredError = (value: unknown): DiagnosticErrorDetails | undefine
   }
 
   return {
-    name: error.name.replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 120) || 'Error',
-    message: sanitizeDiagnosticText(error.message, 1_000),
-    ...(typeof error.stack === 'string'
-      ? { stack: sanitizeDiagnosticText(error.stack, 8_000) }
-      : {}),
+    name: error.name,
+    message: error.message,
+    ...(typeof error.stack === 'string' ? { stack: error.stack } : {}),
     ...(typeof error.componentStack === 'string'
-      ? { componentStack: sanitizeDiagnosticText(error.componentStack, 4_000) }
+      ? { componentStack: error.componentStack }
       : {})
   };
 };

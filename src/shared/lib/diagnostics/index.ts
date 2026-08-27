@@ -1,5 +1,5 @@
 export * from './diagnostics';
 export * from './DiagnosticErrorBoundary';
+export * from './normalize';
 export * from './report';
-export * from './sanitize';
 export type * from './types';

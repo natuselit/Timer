@@ -144,6 +144,8 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('heading', { name: 'Діагностика' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Зберегти діагностичний звіт' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Очистити журнал діагностики' })).toBeTruthy();
+    expect(screen.getByText(/повний текст і stack помилок без приховування/)).toBeTruthy();
+    expect(screen.getByText(/перевірте звіт перед передаванням/)).toBeTruthy();
     expect(screen.queryByLabelText(/Нагадувати про backup/)).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Допомога' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Про застосунок' })).toBeNull();

@@ -16,7 +16,6 @@ import {
   createDiagnosticReport,
   serializeDiagnosticReport
 } from './report';
-import { sanitizeDiagnosticText } from './sanitize';
 
 beforeEach(async () => {
   vi.stubGlobal(
@@ -36,38 +35,55 @@ afterEach(async () => {
   await clearDiagnosticLogs();
 });
 
-describe('diagnostic privacy', () => {
-  it('redacts user fragments, contacts, dates, identifiers, URLs and long numbers', () => {
-    const source =
-      'Помилка для «Артем Кухарчук», artem@example.com, 2026-08-25, ' +
-      '550e8400-e29b-41d4-a716-446655440000, зарплата 50800, https://example.com/a?q=secret';
-    const sanitized = sanitizeDiagnosticText(source, 1_000);
+describe('diagnostic error fidelity', () => {
+  it('keeps complete error fields without redaction or length limits', async () => {
+    const privateFragment =
+      'Артем Кухарчук, artem@example.com, 2026-08-25, ' +
+      '550e8400-e29b-41d4-a716-446655440000, зарплата 50800, ' +
+      'https://example.com/a?q=secret';
+    const message = `${privateFragment}\n${'довгий-фрагмент-'.repeat(700)}`;
+    const stack = `Custom Error / 42: ${message}\n    at save (${privateFragment}:123:45)`;
+    const componentStack = `\n    at SensitiveComponent (${privateFragment})`;
+    const error = new Error(message);
+    error.name = 'Custom Error / 42';
+    error.stack = stack;
 
-    expect(sanitized).not.toContain('Артем Кухарчук');
-    expect(sanitized).not.toContain('artem@example.com');
-    expect(sanitized).not.toContain('2026-08-25');
-    expect(sanitized).not.toContain('550e8400-e29b-41d4-a716-446655440000');
-    expect(sanitized).not.toContain('50800');
-    expect(sanitized).not.toContain('q=secret');
-  });
-
-  it('exports only sanitized errors and fixed event context', async () => {
     recordDiagnosticBreadcrumb('navigation.changed', 'settings');
     recordDiagnosticError(
       'backup.import_failed',
       'settings',
-      new Error('Файл «Артем Кухарчук» за 2026-08-25 має ID 550e8400-e29b-41d4-a716-446655440000')
+      error,
+      componentStack
     );
 
     const report = await createDiagnosticReport('2026-08-26T12:30:00.000Z');
     const source = serializeDiagnosticReport(report);
+    const errorRecord = report.events.find((record) => record.kind === 'error');
 
     expect(report.schemaVersion).toBe(1);
     expect(report.app.databaseVersion).toBe(8);
     expect(report.events).toHaveLength(2);
-    expect(source).not.toContain('Артем Кухарчук');
-    expect(source).not.toContain('2026-08-25');
-    expect(source).not.toContain('550e8400-e29b-41d4-a716-446655440000');
+    expect(errorRecord?.error).toEqual({
+      name: 'Custom Error / 42',
+      message,
+      stack,
+      componentStack
+    });
+    expect(source).toContain('Артем Кухарчук');
+    expect(source).toContain('q=secret');
+    expect(errorRecord?.error?.message.length).toBeGreaterThan(10_000);
+  });
+
+  it('keeps a complete string used as a non-Error rejection reason', async () => {
+    const rejection = `rejected:https://example.com/?token=secret:${'x'.repeat(12_000)}`;
+
+    recordDiagnosticError('app.unhandled_rejection', 'app', rejection);
+    await flushDiagnosticLogs();
+
+    expect((await getDiagnosticLogs())[0]?.error).toEqual({
+      name: 'NonErrorRejection',
+      message: rejection
+    });
   });
 });
 
