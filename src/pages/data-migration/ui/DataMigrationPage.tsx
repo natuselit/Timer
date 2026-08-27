@@ -9,6 +9,10 @@ import {
   replaceShiftsFromLegacyBackup,
   restoreBackup
 } from '../../../shared/lib/local-db';
+import {
+  recordDiagnosticBreadcrumb,
+  recordDiagnosticError
+} from '../../../shared/lib/diagnostics';
 import './DataMigrationPage.css';
 
 type DataMigrationPageProps = {
@@ -52,6 +56,7 @@ export function DataMigrationPage({
 
     setIsBusy(true);
     setError(null);
+    recordDiagnosticBreadcrumb('migration.import_started', 'migration');
 
     try {
       const source = await file.text();
@@ -92,7 +97,9 @@ export function DataMigrationPage({
           scheduleCount: backup.enterpriseSchedule.length
         });
       }
+      recordDiagnosticBreadcrumb('migration.import_completed', 'migration');
     } catch (importError) {
+      recordDiagnosticError('migration.import_failed', 'migration', importError);
       setError(getImportErrorMessage(importError));
     } finally {
       setIsBusy(false);
@@ -113,7 +120,8 @@ export function DataMigrationPage({
 
     try {
       await onSkip();
-    } catch {
+    } catch (skipError) {
+      recordDiagnosticError('migration.status_write_failed', 'migration', skipError);
       setError('Не вдалося зберегти вибір. Спробуйте ще раз.');
       setIsBusy(false);
     }
@@ -129,7 +137,8 @@ export function DataMigrationPage({
 
     try {
       await onComplete(result.settings);
-    } catch {
+    } catch (finishError) {
+      recordDiagnosticError('migration.status_write_failed', 'migration', finishError);
       setError('Дані відновлено, але не вдалося завершити перехід. Спробуйте ще раз.');
       setIsBusy(false);
     }

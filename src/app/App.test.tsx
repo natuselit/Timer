@@ -8,6 +8,11 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../entities/settings';
 import { SettingsRepository } from '../shared/lib/local-db';
+import {
+  clearDiagnosticLogs,
+  flushDiagnosticLogs,
+  getDiagnosticLogs
+} from '../shared/lib/diagnostics';
 import { App } from './App';
 
 beforeEach(() => {
@@ -22,11 +27,12 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   document.documentElement.removeAttribute('data-app-loading');
+  await clearDiagnosticLogs();
 });
 
 describe('App launch state', () => {
@@ -41,7 +47,15 @@ describe('App launch state', () => {
     expect(screen.getByRole('status', { name: 'Завантаження' })).toBeTruthy();
     const alert = await screen.findByRole('alert');
 
-    expect(alert.textContent).toBe('Не вдалося прочитати локальні налаштування.');
+    expect(screen.getByRole('heading', { name: 'Не вдалося запустити застосунок' })).toBeTruthy();
+    expect(screen.getByText('Не вдалося прочитати локальні налаштування.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Зберегти звіт' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Перезапустити' })).toBeTruthy();
+    expect(alert).toBeTruthy();
+    await flushDiagnosticLogs();
+    expect((await getDiagnosticLogs()).map((record) => record.code)).toContain(
+      'app.settings_load_failed'
+    );
     expect(document.documentElement.hasAttribute('data-app-loading')).toBe(false);
   });
 

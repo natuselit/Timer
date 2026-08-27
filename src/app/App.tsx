@@ -16,6 +16,11 @@ import {
 import { toLocalIsoString } from '../shared/lib/date-time';
 import { synchronizeTheme } from '../shared/lib/theme';
 import { AppSplash } from './AppSplash';
+import {
+  downloadDiagnosticReport,
+  recordDiagnosticBreadcrumb,
+  recordDiagnosticError
+} from '../shared/lib/diagnostics';
 
 const OnboardingPage = lazy(() =>
   import('../pages/onboarding').then((module) => ({ default: module.OnboardingPage }))
@@ -36,9 +41,12 @@ export function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [migrationStatus, setMigrationStatus] = useState<AppMigrationStatus | null>(null);
   const [loadError, setLoadError] = useState(false);
+  const [isReportBusy, setIsReportBusy] = useState(false);
+  const [reportError, setReportError] = useState(false);
   const [dataRefreshKey, setDataRefreshKey] = useState(0);
   const [isLegacyPromptOpen, setIsLegacyPromptOpen] = useState(false);
   const hasRegisteredLegacyLaunch = useRef(false);
+  const hasLoggedReady = useRef(false);
   const isSitesHost =
     typeof window !== 'undefined' && isChatGptSitesHost(window.location.hostname);
   const isLegacyHost =
@@ -60,7 +68,8 @@ export function App() {
           setMigrationStatus(storedMigrationStatus);
         }
       })
-      .catch(() => {
+      .catch((error) => {
+        recordDiagnosticError('app.settings_load_failed', 'app', error);
         if (isMounted) {
           setLoadError(true);
         }
@@ -70,6 +79,13 @@ export function App() {
       isMounted = false;
     };
   }, [isSitesHost]);
+
+  useEffect(() => {
+    if (settings && migrationStatus && !hasLoggedReady.current) {
+      hasLoggedReady.current = true;
+      recordDiagnosticBreadcrumb('app.ready', 'app');
+    }
+  }, [migrationStatus, settings]);
 
   useLayoutEffect(() => {
     if (!settings) {
@@ -114,8 +130,16 @@ export function App() {
       updatedAt: new Date().toISOString()
     };
 
-    await settingsRepository.saveSettings(nextSettings);
-    setSettings(nextSettings);
+    recordDiagnosticBreadcrumb('settings.save_started', 'onboarding');
+
+    try {
+      await settingsRepository.saveSettings(nextSettings);
+      setSettings(nextSettings);
+      recordDiagnosticBreadcrumb('settings.save_completed', 'onboarding');
+    } catch (error) {
+      recordDiagnosticError('settings.save_failed', 'onboarding', error);
+      throw error;
+    }
   };
 
   const updateSettings = async (nextSettings: Settings) => {
@@ -131,7 +155,8 @@ export function App() {
   const completeSitesMigration = async (restoredSettings: Settings) => {
     try {
       await sitesMigrationRepository.markCompleted(toLocalIsoString(new Date()));
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('migration.status_write_failed', 'migration', error);
       // The restored data is still valid; onboarding state prevents a repeated migration.
     }
 
@@ -142,7 +167,8 @@ export function App() {
   const skipSitesMigration = async () => {
     try {
       await sitesMigrationRepository.markSkipped(toLocalIsoString(new Date()));
-    } catch {
+    } catch (error) {
+      recordDiagnosticError('migration.status_write_failed', 'migration', error);
       // Keep the choice for the current session even if appMeta is unavailable.
     }
 
@@ -152,7 +178,29 @@ export function App() {
   if (loadError) {
     return (
       <main className="app-status" role="alert">
-        Не вдалося прочитати локальні налаштування.
+        <div className="app-status__content">
+          <h1>Не вдалося запустити застосунок</h1>
+          <p>Не вдалося прочитати локальні налаштування.</p>
+          <div className="app-status__actions">
+            <button
+              type="button"
+              disabled={isReportBusy}
+              onClick={() => {
+                setIsReportBusy(true);
+                setReportError(false);
+                void downloadDiagnosticReport()
+                  .catch(() => setReportError(true))
+                  .finally(() => setIsReportBusy(false));
+              }}
+            >
+              {isReportBusy ? 'Створення…' : 'Зберегти звіт'}
+            </button>
+            <button type="button" onClick={() => window.location.reload()}>
+              Перезапустити
+            </button>
+          </div>
+          {reportError ? <p>Не вдалося створити звіт.</p> : null}
+        </div>
       </main>
     );
   }

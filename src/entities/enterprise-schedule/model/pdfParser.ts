@@ -19,13 +19,30 @@ export type EnterpriseSchedulePdfErrorCode =
   | 'missing-text-layer'
   | 'schedule-not-found';
 
+export type EnterpriseSchedulePdfStage =
+  | 'file-validation'
+  | 'file-read'
+  | 'document-open'
+  | 'text-extraction'
+  | 'schedule-recognition';
+
+type EnterpriseSchedulePdfErrorOptions = ErrorOptions & {
+  stage: EnterpriseSchedulePdfStage;
+};
+
 export class EnterpriseSchedulePdfError extends Error {
   readonly code: EnterpriseSchedulePdfErrorCode;
+  readonly stage: EnterpriseSchedulePdfStage;
 
-  constructor(code: EnterpriseSchedulePdfErrorCode, message: string, options?: ErrorOptions) {
+  constructor(
+    code: EnterpriseSchedulePdfErrorCode,
+    message: string,
+    options: EnterpriseSchedulePdfErrorOptions
+  ) {
     super(message, options);
     this.name = 'EnterpriseSchedulePdfError';
     this.code = code;
+    this.stage = options.stage;
   }
 }
 
@@ -173,20 +190,24 @@ export const readPdfFileBytes = async (file: File): Promise<Uint8Array> => {
   return new Uint8Array(await readFileWithFileReader(file));
 };
 
-const getPdfError = (error: unknown): EnterpriseSchedulePdfError => {
+const getPdfError = (
+  error: unknown,
+  stage: EnterpriseSchedulePdfStage
+): EnterpriseSchedulePdfError => {
   const errorName = error instanceof Error ? error.name : '';
 
   if (errorName === 'PasswordException') {
     return new EnterpriseSchedulePdfError(
       'password-protected',
-      'PDF захищений паролем. Оберіть незахищений файл табеля.'
+      'PDF захищений паролем. Оберіть незахищений файл табеля.',
+      { stage }
     );
   }
 
   return new EnterpriseSchedulePdfError(
     'invalid-pdf',
     'Не вдалося прочитати PDF. Перевірте, чи файл не пошкоджений.',
-    { cause: error }
+    { cause: error, stage }
   );
 };
 
@@ -196,17 +217,21 @@ export const parseEnterpriseSchedulePdf = async (
   if (!isPdfFile(file)) {
     throw new EnterpriseSchedulePdfError(
       'invalid-file-type',
-      'Оберіть файл у форматі PDF.'
+      'Оберіть файл у форматі PDF.',
+      { stage: 'file-validation' }
     );
   }
 
   let loadingTask: PDFDocumentLoadingTask | null = null;
   let pdfDocument: PDFDocumentProxy | null = null;
+  let stage: EnterpriseSchedulePdfStage = 'file-read';
 
   try {
     const data = await readPdfFileBytes(file);
+    stage = 'document-open';
     loadingTask = getDocument({ data });
     pdfDocument = await loadingTask.promise;
+    stage = 'text-extraction';
     const lines: string[] = [];
 
     for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
@@ -223,16 +248,19 @@ export const parseEnterpriseSchedulePdf = async (
     if (lines.length === 0) {
       throw new EnterpriseSchedulePdfError(
         'missing-text-layer',
-        'PDF не містить текстового шару. Скановані файли без тексту не підтримуються.'
+        'PDF не містить текстового шару. Скановані файли без тексту не підтримуються.',
+        { stage }
       );
     }
 
+    stage = 'schedule-recognition';
     const scheduleSource = extractEnterpriseScheduleSource(lines);
 
     if (!scheduleSource) {
       throw new EnterpriseSchedulePdfError(
         'schedule-not-found',
-        'У PDF не знайдено рядків табеля In time, Out time і Total.'
+        'У PDF не знайдено рядків табеля In time, Out time і Total.',
+        { stage }
       );
     }
 
@@ -246,7 +274,7 @@ export const parseEnterpriseSchedulePdf = async (
       throw error;
     }
 
-    throw getPdfError(error);
+    throw getPdfError(error, stage);
   } finally {
     await pdfDocument?.cleanup();
     await loadingTask?.destroy();

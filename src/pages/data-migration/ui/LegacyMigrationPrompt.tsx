@@ -4,6 +4,10 @@ import { SITES_APP_URL } from '../../../shared/config/sitesMigration';
 import { downloadBackup } from '../../../shared/lib/backup';
 import { localDb } from '../../../shared/lib/local-db';
 import { toLocalIsoString } from '../../../shared/lib/date-time';
+import {
+  recordDiagnosticBreadcrumb,
+  recordDiagnosticError
+} from '../../../shared/lib/diagnostics';
 import './LegacyMigrationPrompt.css';
 
 type LegacyMigrationPromptProps = {
@@ -38,11 +42,14 @@ export function LegacyMigrationPrompt({ onDismiss }: LegacyMigrationPromptProps)
   const exportBackup = async () => {
     setIsExporting(true);
     setError(null);
+    recordDiagnosticBreadcrumb('backup.export_started', 'migration');
 
     try {
       await downloadBackup(localDb, toLocalIsoString(new Date()));
+      recordDiagnosticBreadcrumb('backup.export_completed', 'migration');
       setBackupCreated(true);
-    } catch {
+    } catch (exportError) {
+      recordDiagnosticError('backup.export_failed', 'migration', exportError);
       setError('Не вдалося створити JSON backup. Спробуйте ще раз.');
     } finally {
       setIsExporting(false);

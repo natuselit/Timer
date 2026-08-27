@@ -11,6 +11,12 @@ import {
   localDb
 } from '../../../shared/lib/local-db';
 import { PwaInstallProvider } from '../../../shared/lib/pwa-install';
+import {
+  clearDiagnosticLogs,
+  flushDiagnosticLogs,
+  getDiagnosticLogs,
+  recordDiagnosticBreadcrumb
+} from '../../../shared/lib/diagnostics';
 import { SettingsPage } from './SettingsPage';
 
 const settings: Settings = {
@@ -63,8 +69,10 @@ afterEach(async () => {
   vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   await localDb.appMeta.clear();
   await localDb.shifts.clear();
+  await clearDiagnosticLogs();
 });
 
 describe('SettingsPage', () => {
@@ -133,9 +141,65 @@ describe('SettingsPage', () => {
     ).toBe('https://natuselit.github.io/Timer/');
     expect(screen.getByRole('button', { name: 'Експорт даних' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Імпорт даних' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Діагностика' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Зберегти діагностичний звіт' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Очистити журнал діагностики' })).toBeTruthy();
+    expect(screen.getByText(/повний текст і stack помилок без приховування/)).toBeTruthy();
+    expect(screen.getByText(/перевірте звіт перед передаванням/)).toBeTruthy();
     expect(screen.queryByLabelText(/Нагадувати про backup/)).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Допомога' })).toBeNull();
     expect(screen.queryByRole('heading', { name: 'Про застосунок' })).toBeNull();
+  });
+
+  it('shows the local diagnostic count and clears it only after confirmation', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    recordDiagnosticBreadcrumb('app.launch', 'app');
+    await flushDiagnosticLogs();
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByText('Записів: 1')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: 'Очистити журнал діагностики' }));
+
+    expect(await screen.findByText('Журнал діагностики очищено.')).toBeTruthy();
+    expect(await getDiagnosticLogs()).toEqual([]);
+    expect(screen.getByText('Записів: 0')).toBeTruthy();
+  });
+
+  it('creates a local diagnostic JSON from the settings action', async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn(() => 'blob:diagnostic-report');
+    const revokeObjectURL = vi.fn();
+    const NativeURL = URL;
+    class DiagnosticTestURL extends NativeURL {}
+    DiagnosticTestURL.createObjectURL = createObjectURL;
+    DiagnosticTestURL.revokeObjectURL = revokeObjectURL;
+    vi.stubGlobal('URL', DiagnosticTestURL);
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    recordDiagnosticBreadcrumb('app.launch', 'app');
+    await flushDiagnosticLogs();
+
+    render(
+      <SettingsPage
+        settings={settings}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Зберегти діагностичний звіт' }));
+
+    expect(await screen.findByText('Діагностичний звіт створено.')).toBeTruthy();
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:diagnostic-report');
   });
 
   it('shows browser installation instructions when the native prompt is unavailable', async () => {
@@ -421,6 +485,8 @@ describe('SettingsPage', () => {
       value: 'true',
       updatedAt: '2026-08-04T10:00:00.000Z'
     });
+    recordDiagnosticBreadcrumb('app.launch', 'app');
+    await flushDiagnosticLogs();
 
     render(
       <SettingsPage
@@ -434,6 +500,7 @@ describe('SettingsPage', () => {
 
     await waitFor(async () => {
       expect(await localDb.appMeta.get(CALENDAR_TUTORIAL_SEEN_KEY)).toBeUndefined();
+      expect(await getDiagnosticLogs()).toEqual([]);
     });
   });
 });

@@ -100,7 +100,8 @@ describe('enterprise schedule PDF parsing', () => {
     await expect(parseEnterpriseSchedulePdf(file)).rejects.toEqual(
       expect.objectContaining<Partial<EnterpriseSchedulePdfError>>({
         code: 'invalid-file-type',
-        message: 'Оберіть файл у форматі PDF.'
+        message: 'Оберіть файл у форматі PDF.',
+        stage: 'file-validation'
       })
     );
   });
@@ -111,6 +112,20 @@ describe('enterprise schedule PDF parsing', () => {
 
     await expect(readPdfFileBytes(file)).resolves.toEqual(
       new Uint8Array([37, 80, 68, 70])
+    );
+  });
+
+  it('marks a PDF engine rejection as a document-open failure', async () => {
+    const file = new File(['%PDF-not-valid'], 'schedule.pdf', {
+      type: 'application/pdf'
+    });
+
+    await expect(parseEnterpriseSchedulePdf(file)).rejects.toEqual(
+      expect.objectContaining<Partial<EnterpriseSchedulePdfError>>({
+        code: 'invalid-pdf',
+        stage: 'document-open',
+        cause: expect.any(Error)
+      })
     );
   });
 });
