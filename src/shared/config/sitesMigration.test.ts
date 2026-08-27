@@ -5,6 +5,7 @@ import {
   LEGACY_MIGRATION_PROMPT_LAUNCH_INTERVAL,
   LEGACY_GITHUB_PAGES_URL,
   registerLegacyMigrationPromptLaunch,
+  shouldRedirectNewLegacyUser,
   SITES_APP_URL
 } from './sitesMigration';
 
@@ -24,6 +25,13 @@ describe('Sites migration config', () => {
     expect(isLegacyGitHubPagesHost('natuselit.github.io')).toBe(true);
     expect(isLegacyGitHubPagesHost('timer.natuselit.chatgpt.site')).toBe(false);
     expect(isLegacyGitHubPagesHost('localhost')).toBe(false);
+  });
+
+  it('redirects only new GitHub Pages users to Sites', () => {
+    expect(shouldRedirectNewLegacyUser('natuselit.github.io', false)).toBe(true);
+    expect(shouldRedirectNewLegacyUser('natuselit.github.io', true)).toBe(false);
+    expect(shouldRedirectNewLegacyUser('timer.natuselit.chatgpt.site', false)).toBe(false);
+    expect(shouldRedirectNewLegacyUser('localhost', false)).toBe(false);
   });
 
   it('keeps the public Sites URL explicit', () => {

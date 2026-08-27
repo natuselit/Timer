@@ -35,5 +35,10 @@ export const registerLegacyMigrationPromptLaunch = (
 export const isLegacyGitHubPagesHost = (hostname: string): boolean =>
   hostname === 'natuselit.github.io';
 
+export const shouldRedirectNewLegacyUser = (
+  hostname: string,
+  onboardingCompleted: boolean
+): boolean => isLegacyGitHubPagesHost(hostname) && !onboardingCompleted;
+
 export const isChatGptSitesHost = (hostname: string): boolean =>
   hostname === 'chatgpt.site' || hostname.endsWith('.chatgpt.site');

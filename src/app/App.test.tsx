@@ -64,19 +64,19 @@ describe('App launch state', () => {
     const renderApp = () => render(<StrictMode><App /></StrictMode>);
     vi.spyOn(SettingsRepository.prototype, 'getSettings').mockResolvedValue({
       ...DEFAULT_SETTINGS,
-      onboardingCompleted: false
+      onboardingCompleted: true
     });
 
     const firstRender = renderApp();
     await screen.findByRole('heading', {
-      name: 'Відмічайте початок і кінець зміни'
+      name: 'Вітаю, працівнику'
     });
     expect(screen.queryByRole('dialog', { name: 'Доступна нова версія' })).toBeNull();
 
     firstRender.unmount();
     const secondRender = renderApp();
     await screen.findByRole('heading', {
-      name: 'Відмічайте початок і кінець зміни'
+      name: 'Вітаю, працівнику'
     });
     expect(screen.queryByRole('dialog', { name: 'Доступна нова версія' })).toBeNull();
 
@@ -90,7 +90,7 @@ describe('App launch state', () => {
     thirdRender.unmount();
     renderApp();
     await screen.findByRole('heading', {
-      name: 'Відмічайте початок і кінець зміни'
+      name: 'Вітаю, працівнику'
     });
     expect(screen.queryByRole('dialog', { name: 'Доступна нова версія' })).toBeNull();
   });

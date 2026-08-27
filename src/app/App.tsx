@@ -11,7 +11,9 @@ import {
 import {
   isChatGptSitesHost,
   isLegacyGitHubPagesHost,
-  registerLegacyMigrationPromptLaunch
+  registerLegacyMigrationPromptLaunch,
+  shouldRedirectNewLegacyUser,
+  SITES_APP_URL
 } from '../shared/config/sitesMigration';
 import { toLocalIsoString } from '../shared/lib/date-time';
 import { synchronizeTheme } from '../shared/lib/theme';
@@ -52,6 +54,13 @@ export function App() {
   const isLegacyHost =
     typeof window !== 'undefined' &&
     isLegacyGitHubPagesHost(window.location.hostname);
+  const shouldRedirectToSites =
+    typeof window !== 'undefined' &&
+    settings !== null &&
+    shouldRedirectNewLegacyUser(
+      window.location.hostname,
+      settings.onboardingCompleted
+    );
 
   useEffect(() => {
     let isMounted = true;
@@ -117,6 +126,12 @@ export function App() {
     hasRegisteredLegacyLaunch.current = true;
     setIsLegacyPromptOpen(registerLegacyMigrationPromptLaunch(window.localStorage));
   }, [isLegacyHost, migrationStatus, settings]);
+
+  useEffect(() => {
+    if (shouldRedirectToSites) {
+      window.location.replace(SITES_APP_URL);
+    }
+  }, [shouldRedirectToSites]);
 
   const completeOnboarding = async (values: OnboardingValues) => {
     if (!settings) {
@@ -206,6 +221,10 @@ export function App() {
   }
 
   if (!settings || !migrationStatus) {
+    return <AppSplash />;
+  }
+
+  if (shouldRedirectToSites) {
     return <AppSplash />;
   }
 
