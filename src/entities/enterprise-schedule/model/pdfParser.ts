@@ -4,7 +4,12 @@ import {
 } from './parser';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import 'pdfjs-dist/legacy/build/pdf.worker.min.mjs';
-import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
+import type {
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy
+} from 'pdfjs-dist';
+import type { TextContent } from 'pdfjs-dist/types/src/display/api';
 
 const PDF_MIME_TYPE = 'application/pdf';
 const LINE_Y_TOLERANCE = 2;
@@ -190,6 +195,36 @@ export const readPdfFileBytes = async (file: File): Promise<Uint8Array> => {
   return new Uint8Array(await readFileWithFileReader(file));
 };
 
+export const readPdfPageTextContent = async (
+  page: Pick<PDFPageProxy, 'streamTextContent'>
+): Promise<TextContent> => {
+  const stream = page.streamTextContent() as ReadableStream<TextContent>;
+  const reader = stream.getReader();
+  const textContent: TextContent = {
+    items: [],
+    styles: Object.create(null) as TextContent['styles'],
+    lang: null
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+
+      if (done) {
+        break;
+      }
+
+      textContent.lang ??= value.lang;
+      Object.assign(textContent.styles, value.styles);
+      textContent.items.push(...value.items);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  return textContent;
+};
+
 const getPdfError = (
   error: unknown,
   stage: EnterpriseSchedulePdfStage
@@ -236,7 +271,7 @@ export const parseEnterpriseSchedulePdf = async (
 
     for (let pageNumber = 1; pageNumber <= pdfDocument.numPages; pageNumber += 1) {
       const page = await pdfDocument.getPage(pageNumber);
-      const textContent = await page.getTextContent();
+      const textContent = await readPdfPageTextContent(page);
       const pageItems = textContent.items
         .filter((item) => 'str' in item && 'transform' in item)
         .map((item) => ({ str: item.str, transform: item.transform }));

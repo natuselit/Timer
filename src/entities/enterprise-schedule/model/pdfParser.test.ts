@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it } from 'vitest';
+import type { PDFPageProxy } from 'pdfjs-dist';
+import type { TextContent } from 'pdfjs-dist/types/src/display/api';
 import {
   EnterpriseSchedulePdfError,
   extractEnterpriseScheduleSource,
   parseEnterpriseSchedulePdf,
   readPdfFileBytes,
+  readPdfPageTextContent,
   reconstructPdfTextLines
 } from './pdfParser';
 import { parseEnterpriseScheduleText } from './parser';
@@ -113,6 +116,40 @@ describe('enterprise schedule PDF parsing', () => {
     await expect(readPdfFileBytes(file)).resolves.toEqual(
       new Uint8Array([37, 80, 68, 70])
     );
+  });
+
+  it('reads text chunks when the stream has no async iterator on iOS', async () => {
+    const stream = new ReadableStream<TextContent>({
+      start(controller) {
+        controller.enqueue({
+          items: [
+            {
+              str: '01.07.2026 In time 06:01',
+              dir: 'ltr',
+              transform: [1, 0, 0, 1, 0, 0],
+              width: 100,
+              height: 10,
+              fontName: 'font-1',
+              hasEOL: true
+            }
+          ],
+          styles: {},
+          lang: 'uk'
+        });
+        controller.close();
+      }
+    });
+
+    Object.defineProperty(stream, Symbol.asyncIterator, { value: undefined });
+
+    const textContent = await readPdfPageTextContent({
+      streamTextContent: () => stream
+    } as Pick<PDFPageProxy, 'streamTextContent'>);
+
+    expect(textContent.lang).toBe('uk');
+    expect(textContent.items).toEqual([
+      expect.objectContaining({ str: '01.07.2026 In time 06:01' })
+    ]);
   });
 
   it('marks a PDF engine rejection as a document-open failure', async () => {
