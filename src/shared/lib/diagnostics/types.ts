@@ -24,6 +24,8 @@ export const DIAGNOSTIC_EVENT_CODES = [
   'timer.shift_start_completed',
   'timer.shift_start_failed',
   'timer.shift_finish_started',
+  'timer.shift_clipboard_completed',
+  'timer.shift_clipboard_failed',
   'timer.shift_finish_completed',
   'timer.shift_finish_failed',
   'timer.incognito_failed',

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import 'fake-indexeddb/auto';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Settings } from '../../../entities/settings';
@@ -87,6 +87,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.useRealTimers();
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -94,17 +95,27 @@ afterEach(async () => {
 });
 
 describe('MainPage active shift', () => {
-  it('copies the completed shift from the pointer release before local saving', async () => {
+  it('prepares iPhone clipboard access on touch and completes the shift at the hold threshold', async () => {
     await localDb.shifts.put(toStoredShift({ ...activeShift, workTickets: [] }));
     const updateShiftSpy = vi.spyOn(ShiftRepository.prototype, 'updateShift');
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
-    const writeText = vi.fn(async () => {
-      expect(updateShiftSpy).not.toHaveBeenCalled();
+    let clipboardData: Promise<string | Blob> | null = null;
+    class TestClipboardItem {
+      constructor(items: Record<string, string | Blob | PromiseLike<string | Blob>>) {
+        clipboardData = Promise.resolve(items['text/plain']);
+      }
+    }
+    const write = vi.fn(async () => {
+      const value = await clipboardData!;
+      expect(updateShiftSpy).toHaveBeenCalledTimes(1);
+      expect(value).toBeInstanceOf(Blob);
+      expect(await (value as Blob).text()).toMatch(/^Кухарчук А 6:15-/);
     });
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
-      value: { writeText }
+      value: { write, writeText: vi.fn() }
     });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
 
     try {
       render(
@@ -119,19 +130,31 @@ describe('MainPage active shift', () => {
       const leaveButton = await screen.findByRole('button', {
         name: 'Пішов. Утримуйте 1.5 с'
       });
-      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(0);
+      let runHoldConfirmation: (() => Promise<void>) | null = null;
+      const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementationOnce((handler) => {
+        runHoldConfirmation = handler as () => Promise<void>;
+        return 1 as unknown as ReturnType<typeof window.setTimeout>;
+      });
 
       fireEvent.pointerDown(leaveButton);
-      expect(writeText).not.toHaveBeenCalled();
-      nowSpy.mockReturnValue(1_500);
-      fireEvent.pointerUp(leaveButton);
-      nowSpy.mockRestore();
+      setTimeoutSpy.mockRestore();
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(updateShiftSpy).not.toHaveBeenCalled();
+      expect(screen.queryByText('Відпустіть')).toBeNull();
+
+      await act(async () => {
+        await runHoldConfirmation!();
+      });
 
       await waitFor(() => {
-        expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/^Кухарчук А 6:15-/));
+        expect(updateShiftSpy).toHaveBeenCalledTimes(1);
       });
       expect(await screen.findByText(/^Скопійовано: Кухарчук А 6:15-/)).toBeTruthy();
+
+      fireEvent.pointerUp(leaveButton);
+      expect(updateShiftSpy).toHaveBeenCalledTimes(1);
     } finally {
+      vi.useRealTimers();
       if (clipboardDescriptor) {
         Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
       } else {
@@ -832,6 +855,37 @@ describe('MainPage active shift', () => {
 });
 
 describe('MainPage inactive state', () => {
+  it('does not start a shift when the hold is released before 1.5 seconds', async () => {
+    await localDb.shifts.clear();
+
+    render(
+      <MainPage
+        settings={settings}
+        dataVersion={0}
+        onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+        onLocalDataReplace={vi.fn()}
+      />
+    );
+
+    const arriveButton = await screen.findByRole('button', {
+      name: 'Прийшов. Утримуйте 1.5 с'
+    });
+    let runHoldConfirmation: (() => Promise<void>) | null = null;
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementationOnce((handler) => {
+      runHoldConfirmation = handler as () => Promise<void>;
+      return 1 as unknown as ReturnType<typeof window.setTimeout>;
+    });
+
+    fireEvent.pointerDown(arriveButton);
+    setTimeoutSpy.mockRestore();
+    fireEvent.pointerUp(arriveButton);
+    await act(async () => {
+      await runHoldConfirmation!();
+    });
+
+    expect(await localDb.shifts.count()).toBe(0);
+  });
+
   it('selects the second shift before arrival and hides the selector after start', async () => {
     const user = userEvent.setup();
     await localDb.shifts.clear();
@@ -866,12 +920,17 @@ describe('MainPage inactive state', () => {
     const arriveButton = screen.getByRole('button', {
       name: 'Прийшов. Утримуйте 1.5 с'
     });
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(0);
+    let runHoldConfirmation: (() => Promise<void>) | null = null;
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementationOnce((handler) => {
+      runHoldConfirmation = handler as () => Promise<void>;
+      return 1 as unknown as ReturnType<typeof window.setTimeout>;
+    });
     fireEvent.pointerDown(arriveButton);
+    setTimeoutSpy.mockRestore();
     expect(await localDb.shifts.count()).toBe(0);
-    nowSpy.mockReturnValue(1_500);
-    fireEvent.pointerUp(arriveButton);
-    nowSpy.mockRestore();
+    await act(async () => {
+      await runHoldConfirmation!();
+    });
 
     await waitFor(
       async () => {

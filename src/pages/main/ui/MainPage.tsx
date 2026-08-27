@@ -86,7 +86,9 @@ import {
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import {
   copyTextToClipboard,
-  formatShiftClipboardText
+  formatShiftClipboardText,
+  prepareTextClipboardWrite,
+  type PreparedTextClipboardWrite
 } from '../../../shared/lib/clipboard/shiftClipboard';
 import {
   ACTIVE_NAVIGATION_SESSION_KEY,
@@ -129,6 +131,8 @@ type HoldButtonProps = {
   label: string;
   disabled?: boolean;
   tone?: 'default' | 'danger';
+  onHoldStart?: () => void;
+  onHoldCancel?: () => void;
   onConfirm: () => Promise<void>;
 };
 
@@ -264,58 +268,91 @@ function TimerLiveMetrics({
   );
 }
 
-function HoldButton({ label, disabled = false, tone = 'default', onConfirm }: HoldButtonProps) {
+function HoldButton({
+  label,
+  disabled = false,
+  tone = 'default',
+  onHoldStart,
+  onHoldCancel,
+  onConfirm
+}: HoldButtonProps) {
   const [isHolding, setIsHolding] = useState(false);
-  const [isHoldReady, setIsHoldReady] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const timeoutRef = useRef<number | null>(null);
-  const holdStartedAtRef = useRef<number | null>(null);
+  const isHoldActiveRef = useRef(false);
+  const isSubmittingRef = useRef(false);
+  const disabledRef = useRef(disabled);
+  const onHoldStartRef = useRef(onHoldStart);
+  const onHoldCancelRef = useRef(onHoldCancel);
+  const onConfirmRef = useRef(onConfirm);
 
-  const clearHold = () => {
+  disabledRef.current = disabled;
+  onHoldStartRef.current = onHoldStart;
+  onHoldCancelRef.current = onHoldCancel;
+  onConfirmRef.current = onConfirm;
+
+  const clearHoldTimer = () => {
     if (timeoutRef.current !== null) {
       window.clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
-
-    holdStartedAtRef.current = null;
-    setIsHolding(false);
-    setIsHoldReady(false);
   };
 
-  useEffect(() => clearHold, []);
+  const cancelHold = () => {
+    if (!isHoldActiveRef.current) {
+      return;
+    }
+
+    clearHoldTimer();
+    isHoldActiveRef.current = false;
+    setIsHolding(false);
+    onHoldCancelRef.current?.();
+  };
+
+  useEffect(
+    () => () => {
+      clearHoldTimer();
+
+      if (isHoldActiveRef.current) {
+        isHoldActiveRef.current = false;
+        onHoldCancelRef.current?.();
+      }
+    },
+    []
+  );
 
   const startHold = () => {
-    if (disabled || isSubmitting || timeoutRef.current !== null) {
+    if (disabledRef.current || isSubmittingRef.current || isHoldActiveRef.current) {
       return;
     }
 
-    holdStartedAtRef.current = Date.now();
+    isHoldActiveRef.current = true;
     setIsHolding(true);
-    setIsHoldReady(false);
-    timeoutRef.current = window.setTimeout(() => {
+    onHoldStartRef.current?.();
+    timeoutRef.current = window.setTimeout(async () => {
       timeoutRef.current = null;
-      setIsHoldReady(true);
+
+      if (!isHoldActiveRef.current) {
+        return;
+      }
+
+      if (disabledRef.current) {
+        cancelHold();
+        return;
+      }
+
+      isHoldActiveRef.current = false;
+      isSubmittingRef.current = true;
+      setIsHolding(false);
+      setIsSubmitting(true);
+
+      try {
+        await onConfirmRef.current();
+      } finally {
+        isSubmittingRef.current = false;
+        setIsSubmitting(false);
+      }
     }, SHIFT_HOLD_DELAY_MS);
-  };
-
-  const finishHold = async () => {
-    const holdStartedAt = holdStartedAtRef.current;
-    const heldLongEnough =
-      holdStartedAt !== null && Date.now() - holdStartedAt >= SHIFT_HOLD_DELAY_MS;
-
-    clearHold();
-
-    if (!heldLongEnough || disabled || isSubmitting) {
-      return;
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      await onConfirm();
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   return (
@@ -326,9 +363,9 @@ function HoldButton({ label, disabled = false, tone = 'default', onConfirm }: Ho
       disabled={disabled || isSubmitting}
       aria-label={`${label}. Утримуйте ${SHIFT_HOLD_DELAY_MS / 1000} с`}
       onPointerDown={startHold}
-      onPointerUp={() => void finishHold()}
-      onPointerCancel={clearHold}
-      onPointerLeave={clearHold}
+      onPointerUp={cancelHold}
+      onPointerCancel={cancelHold}
+      onPointerLeave={cancelHold}
       onContextMenu={(event) => event.preventDefault()}
     >
       <span
@@ -338,9 +375,7 @@ function HoldButton({ label, disabled = false, tone = 'default', onConfirm }: Ho
           transform: isHolding ? 'scaleX(1)' : 'scaleX(0)'
         }}
       />
-      <span className="main-page__hold-label">
-        {isSubmitting ? 'Збереження...' : isHoldReady ? 'Відпустіть' : label}
-      </span>
+      <span className="main-page__hold-label">{isSubmitting ? 'Збереження...' : label}</span>
     </button>
   );
 }
@@ -1014,6 +1049,7 @@ export function MainPage({
   const downtimeInputRef = useRef<HTMLInputElement | null>(null);
   const completeTicketButtonRef = useRef<HTMLButtonElement | null>(null);
   const actualQuantityInputRef = useRef<HTMLInputElement | null>(null);
+  const preparedLeaveClipboardRef = useRef<PreparedTextClipboardWrite | null>(null);
   const externalDataVersionRef = useRef(dataVersion);
   const currentMonthKey = now.slice(0, 7);
 
@@ -1421,12 +1457,27 @@ export function MainPage({
     }
   };
 
+  const prepareLeaveClipboard = () => {
+    preparedLeaveClipboardRef.current?.cancel();
+    preparedLeaveClipboardRef.current = prepareTextClipboardWrite();
+  };
+
+  const cancelPreparedLeaveClipboard = () => {
+    preparedLeaveClipboardRef.current?.cancel();
+    preparedLeaveClipboardRef.current = null;
+  };
+
   const leave = async () => {
+    const preparedClipboardWrite = preparedLeaveClipboardRef.current;
+    preparedLeaveClipboardRef.current = null;
+
     if (!activeShift) {
+      preparedClipboardWrite?.cancel();
       return;
     }
 
     if (activeWorkTicket) {
+      preparedClipboardWrite?.cancel();
       setTimerError('Спершу завершіть активний тікет і внесіть фактичну кількість.');
       return;
     }
@@ -1440,12 +1491,17 @@ export function MainPage({
     recordDiagnosticBreadcrumb('timer.shift_finish_started', 'timer');
 
     try {
-      const copyPromise = copyTextToClipboard(clipboardText);
       const updatePromise = updateShift(shiftRepository, {
         ...activeShift,
         endTime: finishedAt,
         updatedAt: finishedAt
       });
+      const copyPromise = preparedClipboardWrite
+        ? updatePromise.then(async () => {
+            const didPreparedCopy = await preparedClipboardWrite.complete(clipboardText);
+            return didPreparedCopy || copyTextToClipboard(clipboardText);
+          })
+        : copyTextToClipboard(clipboardText);
       const [didCopy, completedShift] = await Promise.all([copyPromise, updatePromise]);
 
       setNow(finishedAt);
@@ -1457,6 +1513,10 @@ export function MainPage({
       setTicketError(null);
 
       if (completedShift.endTime !== null) {
+        recordDiagnosticBreadcrumb(
+          didCopy ? 'timer.shift_clipboard_completed' : 'timer.shift_clipboard_failed',
+          'timer'
+        );
         setClipboardNotice({
           tone: didCopy ? 'success' : 'warning',
           message: didCopy
@@ -1466,6 +1526,7 @@ export function MainPage({
       }
       recordDiagnosticBreadcrumb('timer.shift_finish_completed', 'timer');
     } catch (error) {
+      preparedClipboardWrite?.cancel();
       if (!(error instanceof ShiftConstraintError)) {
         recordDiagnosticError('timer.shift_finish_failed', 'timer', error);
       }
@@ -2285,6 +2346,8 @@ export function MainPage({
               <HoldButton
                 label="Пішов"
                 onConfirm={leave}
+                onHoldStart={prepareLeaveClipboard}
+                onHoldCancel={cancelPreparedLeaveClipboard}
                 tone="danger"
               />
             </div>

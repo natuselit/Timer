@@ -47,6 +47,78 @@ type ClipboardDependencies = {
   legacyCopy?: (text: string) => boolean;
 };
 
+type PreparedClipboardDependencies = {
+  write?: (items: ClipboardItem[]) => Promise<void>;
+  createClipboardItem?: (
+    items: Record<string, string | Blob | PromiseLike<string | Blob>>
+  ) => ClipboardItem;
+};
+
+export type PreparedTextClipboardWrite = {
+  complete: (text: string) => Promise<boolean>;
+  cancel: () => void;
+};
+
+export const prepareTextClipboardWrite = (
+  dependencies: PreparedClipboardDependencies = {}
+): PreparedTextClipboardWrite | null => {
+  const write =
+    dependencies.write ??
+    (typeof navigator !== 'undefined' && navigator.clipboard?.write
+      ? navigator.clipboard.write.bind(navigator.clipboard)
+      : undefined);
+  const createClipboardItem =
+    dependencies.createClipboardItem ??
+    (typeof ClipboardItem !== 'undefined'
+      ? (items: Record<string, string | Blob | PromiseLike<string | Blob>>) =>
+          new ClipboardItem(items)
+      : undefined);
+
+  if (!write || !createClipboardItem) {
+    return null;
+  }
+
+  let resolveText!: (value: Blob) => void;
+  let rejectText!: (reason: unknown) => void;
+  let isSettled = false;
+  const textPromise = new Promise<Blob>((resolve, reject) => {
+    resolveText = resolve;
+    rejectText = reject;
+  });
+
+  // Скасоване коротке утримання не повинно створювати unhandled rejection.
+  void textPromise.catch(() => undefined);
+
+  let writePromise: Promise<boolean>;
+
+  try {
+    const clipboardItem = createClipboardItem({ 'text/plain': textPromise });
+    writePromise = Promise.resolve(write([clipboardItem])).then(
+      () => true,
+      () => false
+    );
+  } catch {
+    return null;
+  }
+
+  return {
+    complete: (text: string) => {
+      if (!isSettled) {
+        isSettled = true;
+        resolveText(new Blob([text], { type: 'text/plain' }));
+      }
+
+      return writePromise;
+    },
+    cancel: () => {
+      if (!isSettled) {
+        isSettled = true;
+        rejectText(new DOMException('Clipboard write cancelled.', 'AbortError'));
+      }
+    }
+  };
+};
+
 export const copyTextToClipboard = async (
   text: string,
   dependencies: ClipboardDependencies = {}

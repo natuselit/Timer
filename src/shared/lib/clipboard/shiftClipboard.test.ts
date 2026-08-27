@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Shift } from '../../../entities/shift';
-import { copyTextToClipboard, formatShiftClipboardText } from './shiftClipboard';
+import {
+  copyTextToClipboard,
+  formatShiftClipboardText,
+  prepareTextClipboardWrite
+} from './shiftClipboard';
 
 const shift: Shift & { endTime: string } = {
   id: 'shift-1',
@@ -66,5 +70,47 @@ describe('copyTextToClipboard', () => {
     });
 
     await expect(copyTextToClipboard('текст', { legacyCopy })).resolves.toBe(false);
+  });
+});
+
+describe('prepareTextClipboardWrite', () => {
+  it('starts the ClipboardItem write immediately and supplies text later', async () => {
+    let clipboardData: Promise<string | Blob> | null = null;
+    const createClipboardItem = vi.fn(
+      (items: Record<string, string | Blob | PromiseLike<string | Blob>>) => {
+        clipboardData = Promise.resolve(items['text/plain']);
+        return {} as ClipboardItem;
+      }
+    );
+    const write = vi.fn(async () => {
+      const value = await clipboardData!;
+      expect(value).toBeInstanceOf(Blob);
+      expect(await (value as Blob).text()).toBe('Кухарчук А 6:30-14:30');
+    });
+
+    const preparedWrite = prepareTextClipboardWrite({ write, createClipboardItem });
+
+    expect(preparedWrite).not.toBeNull();
+    expect(write).toHaveBeenCalledTimes(1);
+
+    await expect(preparedWrite!.complete('Кухарчук А 6:30-14:30')).resolves.toBe(true);
+  });
+
+  it('cancels a prepared write without changing the clipboard', async () => {
+    let clipboardData: Promise<string | Blob> | null = null;
+    const createClipboardItem = (
+      items: Record<string, string | Blob | PromiseLike<string | Blob>>
+    ) => {
+      clipboardData = Promise.resolve(items['text/plain']);
+      return {} as ClipboardItem;
+    };
+    const write = vi.fn(async () => {
+      await clipboardData!;
+    });
+
+    const preparedWrite = prepareTextClipboardWrite({ write, createClipboardItem });
+    preparedWrite!.cancel();
+
+    await expect(preparedWrite!.complete('не копіювати')).resolves.toBe(false);
   });
 });
