@@ -163,6 +163,153 @@ describe('MainPage active shift', () => {
     }
   });
 
+  it('retries iPhone copying synchronously on the natural pointer release', async () => {
+    await localDb.shifts.put(toStoredShift({ ...activeShift, workTickets: [] }));
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    const write = vi.fn().mockRejectedValue(new DOMException('Blocked', 'NotAllowedError'));
+    const writeText = vi.fn().mockRejectedValue(new DOMException('Blocked', 'NotAllowedError'));
+    let isReleaseGesture = false;
+    const execCommand = vi.fn(() => isReleaseGesture);
+    class TestClipboardItem {
+      constructor(
+        _items: Record<string, string | Blob | PromiseLike<string | Blob>>
+      ) {}
+    }
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { write, writeText }
+    });
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand
+    });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+
+    try {
+      render(
+        <MainPage
+          settings={settings}
+          dataVersion={0}
+          onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+          onLocalDataReplace={vi.fn()}
+        />
+      );
+
+      const leaveButton = await screen.findByRole('button', {
+        name: 'Пішов. Утримуйте 1.5 с'
+      });
+      let runHoldConfirmation: (() => Promise<void>) | null = null;
+      const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementationOnce((handler) => {
+        runHoldConfirmation = handler as () => Promise<void>;
+        return 1 as unknown as ReturnType<typeof window.setTimeout>;
+      });
+
+      fireEvent.pointerDown(leaveButton);
+      setTimeoutSpy.mockRestore();
+      await act(async () => {
+        await runHoldConfirmation!();
+      });
+
+      expect((await localDb.shifts.get(activeShift.id))?.endTime).not.toBeNull();
+      expect(
+        await screen.findByRole('button', { name: 'Прийшов. Утримуйте 1.5 с' })
+      ).toBeTruthy();
+      expect(await screen.findByRole('button', { name: 'Скопіювати ще раз' })).toBeTruthy();
+
+      isReleaseGesture = true;
+      fireEvent.pointerUp(document);
+      isReleaseGesture = false;
+
+      expect(await screen.findByText(/^Скопійовано: Кухарчук А 6:15-/)).toBeTruthy();
+      expect(execCommand).toHaveBeenLastCalledWith('copy');
+      expect(writeText).toHaveBeenCalledTimes(1);
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, 'clipboard');
+      }
+
+      if (execCommandDescriptor) {
+        Object.defineProperty(document, 'execCommand', execCommandDescriptor);
+      } else {
+        Reflect.deleteProperty(document, 'execCommand');
+      }
+    }
+  });
+
+  it('offers a direct copy button when both automatic iPhone attempts fail', async () => {
+    const user = userEvent.setup();
+    await localDb.shifts.put(toStoredShift({ ...activeShift, workTickets: [] }));
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, 'execCommand');
+    const write = vi.fn().mockRejectedValue(new DOMException('Blocked', 'NotAllowedError'));
+    const writeText = vi.fn().mockRejectedValue(new DOMException('Blocked', 'NotAllowedError'));
+    let allowLegacyCopy = false;
+    const execCommand = vi.fn(() => allowLegacyCopy);
+    class TestClipboardItem {
+      constructor(
+        _items: Record<string, string | Blob | PromiseLike<string | Blob>>
+      ) {}
+    }
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { write, writeText }
+    });
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommand
+    });
+    vi.stubGlobal('ClipboardItem', TestClipboardItem);
+
+    try {
+      render(
+        <MainPage
+          settings={settings}
+          dataVersion={0}
+          onSettingsChange={vi.fn().mockResolvedValue(undefined)}
+          onLocalDataReplace={vi.fn()}
+        />
+      );
+
+      const leaveButton = await screen.findByRole('button', {
+        name: 'Пішов. Утримуйте 1.5 с'
+      });
+      let runHoldConfirmation: (() => Promise<void>) | null = null;
+      const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementationOnce((handler) => {
+        runHoldConfirmation = handler as () => Promise<void>;
+        return 1 as unknown as ReturnType<typeof window.setTimeout>;
+      });
+
+      fireEvent.pointerDown(leaveButton);
+      setTimeoutSpy.mockRestore();
+      await act(async () => {
+        await runHoldConfirmation!();
+      });
+      fireEvent.pointerUp(document);
+
+      const retryButton = await screen.findByRole('button', { name: 'Скопіювати ще раз' });
+      allowLegacyCopy = true;
+      await user.click(retryButton);
+
+      expect(await screen.findByText(/^Скопійовано: Кухарчук А 6:15-/)).toBeTruthy();
+      expect(execCommand).toHaveBeenLastCalledWith('copy');
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      } else {
+        Reflect.deleteProperty(navigator, 'clipboard');
+      }
+
+      if (execCommandDescriptor) {
+        Object.defineProperty(document, 'execCommand', execCommandDescriptor);
+      } else {
+        Reflect.deleteProperty(document, 'execCommand');
+      }
+    }
+  });
+
   it('saves a local note for the active shift', async () => {
     const user = userEvent.setup();
     const getActiveShiftSpy = vi.spyOn(ShiftRepository.prototype, 'getActiveShift');

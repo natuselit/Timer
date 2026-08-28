@@ -1921,6 +1921,8 @@
 }
 
 .main-page__notice {
+  display: grid;
+  gap: 10px;
   margin: 0;
   padding: 12px;
   border: 1px solid var(--color-success-border);
@@ -1930,6 +1932,26 @@
   font-size: 0.85rem;
   font-weight: 700;
   overflow-wrap: anywhere;
+}
+
+.main-page__notice p {
+  margin: 0;
+}
+
+.main-page__notice button {
+  min-height: 42px;
+  justify-self: start;
+  padding: 8px 12px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.main-page__notice button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .main-page__notice[data-tone='warning'] {

@@ -86,6 +86,7 @@ import {
 import { formatHourlyRate, formatMoney } from '../../../shared/lib/format';
 import {
   copyTextToClipboard,
+  copyTextToClipboardFromUserGesture,
   formatShiftClipboardText,
   prepareTextClipboardWrite,
   type PreparedTextClipboardWrite
@@ -1029,7 +1030,9 @@ export function MainPage({
   const [clipboardNotice, setClipboardNotice] = useState<{
     tone: 'success' | 'warning';
     message: string;
+    text: string;
   } | null>(null);
+  const [isRetryingClipboard, setIsRetryingClipboard] = useState(false);
   const [isTogglingIncognito, setIsTogglingIncognito] = useState(false);
   const [dataRevision, setDataRevision] = useState(0);
   const [sharedCalendarMonth, setSharedCalendarMonth] = useState<CalendarMonth>(getCurrentMonth);
@@ -1050,8 +1053,16 @@ export function MainPage({
   const completeTicketButtonRef = useRef<HTMLButtonElement | null>(null);
   const actualQuantityInputRef = useRef<HTMLInputElement | null>(null);
   const preparedLeaveClipboardRef = useRef<PreparedTextClipboardWrite | null>(null);
+  const releaseClipboardTextRef = useRef<string | null>(null);
+  const releaseClipboardCleanupRef = useRef<(() => void) | null>(null);
   const externalDataVersionRef = useRef(dataVersion);
   const currentMonthKey = now.slice(0, 7);
+
+  const clearReleaseClipboardListener = useCallback(() => {
+    const cleanup = releaseClipboardCleanupRef.current;
+    releaseClipboardCleanupRef.current = null;
+    cleanup?.();
+  }, []);
 
   const notifyLocalDataChange = useCallback(() => {
     setDataRevision((current) => current + 1);
@@ -1065,6 +1076,16 @@ export function MainPage({
     externalDataVersionRef.current = dataVersion;
     setDataRevision((current) => current + 1);
   }, [dataVersion]);
+
+  useEffect(
+    () => () => {
+      preparedLeaveClipboardRef.current?.cancel();
+      preparedLeaveClipboardRef.current = null;
+      releaseClipboardTextRef.current = null;
+      clearReleaseClipboardListener();
+    },
+    [clearReleaseClipboardListener]
+  );
 
   const dismissCalendarTutorial = useCallback(() => {
     calendarTutorialDismissedRef.current = true;
@@ -1457,14 +1478,68 @@ export function MainPage({
     }
   };
 
+  const showClipboardResult = useCallback((clipboardText: string, didCopy: boolean) => {
+    setClipboardNotice((current) => {
+      if (!didCopy && current?.text === clipboardText && current.tone === 'success') {
+        return current;
+      }
+
+      return {
+        tone: didCopy ? 'success' : 'warning',
+        message: didCopy
+          ? `Скопійовано: ${clipboardText}`
+          : `Зміну завершено, але текст не скопійовано: ${clipboardText}`,
+        text: clipboardText
+      };
+    });
+  }, []);
+
   const prepareLeaveClipboard = () => {
     preparedLeaveClipboardRef.current?.cancel();
+    releaseClipboardTextRef.current = null;
+    clearReleaseClipboardListener();
     preparedLeaveClipboardRef.current = prepareTextClipboardWrite();
+
+    const handleRelease = () => {
+      const clipboardText = releaseClipboardTextRef.current;
+      releaseClipboardTextRef.current = null;
+      clearReleaseClipboardListener();
+
+      if (!clipboardText) {
+        return;
+      }
+
+      void copyTextToClipboardFromUserGesture(clipboardText).then((didCopy) => {
+        recordDiagnosticBreadcrumb(
+          didCopy
+            ? 'timer.shift_clipboard_release_completed'
+            : 'timer.shift_clipboard_release_failed',
+          'timer'
+        );
+        showClipboardResult(clipboardText, didCopy);
+      });
+    };
+    const handleReleaseCancel = () => {
+      clearReleaseClipboardListener();
+    };
+
+    document.addEventListener('pointerup', handleRelease, true);
+    document.addEventListener('touchend', handleRelease, true);
+    document.addEventListener('pointercancel', handleReleaseCancel, true);
+    document.addEventListener('touchcancel', handleReleaseCancel, true);
+    releaseClipboardCleanupRef.current = () => {
+      document.removeEventListener('pointerup', handleRelease, true);
+      document.removeEventListener('touchend', handleRelease, true);
+      document.removeEventListener('pointercancel', handleReleaseCancel, true);
+      document.removeEventListener('touchcancel', handleReleaseCancel, true);
+    };
   };
 
   const cancelPreparedLeaveClipboard = () => {
     preparedLeaveClipboardRef.current?.cancel();
     preparedLeaveClipboardRef.current = null;
+    releaseClipboardTextRef.current = null;
+    clearReleaseClipboardListener();
   };
 
   const leave = async () => {
@@ -1488,6 +1563,7 @@ export function MainPage({
       ...activeShift,
       endTime: finishedAt
     });
+    releaseClipboardTextRef.current = clipboardText;
     recordDiagnosticBreadcrumb('timer.shift_finish_started', 'timer');
 
     try {
@@ -1517,12 +1593,7 @@ export function MainPage({
           didCopy ? 'timer.shift_clipboard_completed' : 'timer.shift_clipboard_failed',
           'timer'
         );
-        setClipboardNotice({
-          tone: didCopy ? 'success' : 'warning',
-          message: didCopy
-            ? `Скопійовано: ${clipboardText}`
-            : `Зміну завершено, але текст не скопійовано: ${clipboardText}`
-        });
+        showClipboardResult(clipboardText, didCopy);
       }
       recordDiagnosticBreadcrumb('timer.shift_finish_completed', 'timer');
     } catch (error) {
@@ -1531,6 +1602,29 @@ export function MainPage({
         recordDiagnosticError('timer.shift_finish_failed', 'timer', error);
       }
       setTimerError(getTimerErrorMessage(error));
+    }
+  };
+
+  const retryClipboardCopy = async () => {
+    const clipboardText = clipboardNotice?.text;
+
+    if (!clipboardText || isRetryingClipboard) {
+      return;
+    }
+
+    setIsRetryingClipboard(true);
+
+    try {
+      const didCopy = await copyTextToClipboardFromUserGesture(clipboardText);
+      recordDiagnosticBreadcrumb(
+        didCopy
+          ? 'timer.shift_clipboard_retry_completed'
+          : 'timer.shift_clipboard_retry_failed',
+        'timer'
+      );
+      showClipboardResult(clipboardText, didCopy);
+    } finally {
+      setIsRetryingClipboard(false);
     }
   };
 
@@ -2607,14 +2701,21 @@ export function MainPage({
               </p>
             ) : null}
             {clipboardNotice ? (
-              <p
+              <div
                 className="main-page__notice"
                 data-tone={clipboardNotice.tone}
-                role="status"
-                aria-live="polite"
               >
-                {clipboardNotice.message}
-              </p>
+                <p role="status" aria-live="polite">
+                  {clipboardNotice.message}
+                </p>
+                <button
+                  type="button"
+                  disabled={isRetryingClipboard}
+                  onClick={() => void retryClipboardCopy()}
+                >
+                  {isRetryingClipboard ? 'Копіюю...' : 'Скопіювати ще раз'}
+                </button>
+              </div>
             ) : null}
           </section>
         </>

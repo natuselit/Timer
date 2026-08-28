@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Shift } from '../../../entities/shift';
 import {
   copyTextToClipboard,
+  copyTextToClipboardFromUserGesture,
   formatShiftClipboardText,
   prepareTextClipboardWrite
 } from './shiftClipboard';
@@ -70,6 +71,30 @@ describe('copyTextToClipboard', () => {
     });
 
     await expect(copyTextToClipboard('текст', { legacyCopy })).resolves.toBe(false);
+  });
+});
+
+describe('copyTextToClipboardFromUserGesture', () => {
+  it('uses the synchronous legacy copy while the iOS user gesture is active', async () => {
+    const legacyCopy = vi.fn(() => true);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      copyTextToClipboardFromUserGesture('текст', { legacyCopy, writeText })
+    ).resolves.toBe(true);
+    expect(legacyCopy).toHaveBeenCalledWith('текст');
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it('uses writeText immediately when the legacy API is unavailable', async () => {
+    const legacyCopy = vi.fn(() => false);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      copyTextToClipboardFromUserGesture('текст', { legacyCopy, writeText })
+    ).resolves.toBe(true);
+    expect(legacyCopy).toHaveBeenCalledWith('текст');
+    expect(writeText).toHaveBeenCalledWith('текст');
   });
 });
 

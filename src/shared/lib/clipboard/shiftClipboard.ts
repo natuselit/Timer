@@ -144,3 +144,33 @@ export const copyTextToClipboard = async (
     return false;
   }
 };
+
+export const copyTextToClipboardFromUserGesture = async (
+  text: string,
+  dependencies: ClipboardDependencies = {}
+): Promise<boolean> => {
+  try {
+    if ((dependencies.legacyCopy ?? copyWithLegacyApi)(text)) {
+      return true;
+    }
+  } catch {
+    // Синхронний fallback може бути недоступним, тоді пробуємо сучасний API.
+  }
+
+  const writeText =
+    dependencies.writeText ??
+    (typeof navigator !== 'undefined' && navigator.clipboard
+      ? navigator.clipboard.writeText.bind(navigator.clipboard)
+      : undefined);
+
+  if (!writeText) {
+    return false;
+  }
+
+  try {
+    await writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+};
